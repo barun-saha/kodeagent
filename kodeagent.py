@@ -1,5 +1,6 @@
 """
-A minimalist agentic framework. Implements ReAct and CodeAgent.
+A minimalistic approach to building AI agents.
+Implements ReAct and CodeAgent. Supports multi-agent via SupervisorAgent.
 """
 import ast
 import asyncio
@@ -7,6 +8,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess as sp
 import sys
@@ -182,12 +184,6 @@ The task description is as follows:
 {task_files}
 
 
-## Allowed Imports
-
-You are allowed to import only the following Python modules in the code your write (`*` means you can import any module):
-{authorized_imports}
-
-
 ## Tools
 
 You have access to a wide variety of tools. You are responsible for writing Python code and using
@@ -196,6 +192,16 @@ breaking the task into subtasks and using different tools to complete each subta
 
 You have access to the following tools:
 {tool_names}
+
+
+## Allowed Imports
+
+You can use the aforementioned tools to solve a task. In addition, you are allowed to import (only)
+the following 
+standard Python libraries in the code your write (`*` means you can import any lib):
+{authorized_imports}
+
+(You do NOT need to import the tool names -- they are already available to you).
 
 
 ## Output Format
@@ -308,6 +314,113 @@ Below is the current conversation consisting of interleaving human and assistant
 {history}
 '''
 
+SUPERVISOR_PROMPT = '''
+You are the supervisor of an AI agency having one or more helpful agents. Given a task, as well as
+the capabilities of the agents, you decide which agent(s) and tool(s) of the agent to use to solve
+the task. A given task can be complex -- you may need to split it into smaller parts and invoke
+different agents to solve each part using their respective tools. In other words, your job is to
+efficiently delegate tasks or subtasks to the agents, collect the results, and delegate again until
+a final, satisfactory task completion result is found. You should do it carefully without getting
+stuck in the same loop.
+
+Important: Carefully read the original given task. When delegating tasks to the agents or when you
+need to split into sub-tasks, remember to retain ALL information from the original task.
+Even punctuations matter sometimes! Otherwise, you might get stuck in an infinite loop where you
+ask an agent something but get a different thing in response. The specifications, expectations,
+and responses need to be in sync.
+
+Also, tool usage is efficient, so accept the results obtained by using tools of the agents. Unless,
+the results returned indicate some obvious error, in which case you ask the agent again by rephrasing
+its task along with your feedback.
+
+
+## Task
+
+{task}
+
+(Optional) input file paths/URLs associated with this task are as follows:
+{task_files}
+
+
+## Agents
+
+The following agents are available to you, each identified with a unique integer ID starting from 0:
+{agents}
+
+
+## Task Completion
+
+In case you find that the main task and sub-tasks have been successfully completed, generate
+a final answer for the user by nicely collating the results of all the sub-tasks. Also, set
+`task_complete` to True.
+ 
+ 
+## Current Conversation
+
+Below is the current conversation consisting of interleaving human and assistant messages (initially empty).
+Also, agent's response are depicted as user's response.
+
+{history}
+'''
+
+SUPERVISOR_TASK_CHECK_PROMPT = '''
+Given this task:
+{task}
+
+and this sequence of response by agents tool usage:
+{response}
+
+determine whether or not the task has been successfully completed.
+
+In case the given attempts appear to effectively capture the final result but fall short only
+in some minor way, e.g., not properly formatted, you can give a finishing touch and capture
+the result of the task in the `final_answer` field. In this case, also set `status` to `True`.
+Otherwise, leave `final_answer` empty when there are significant aspects missing or major deviations
+noted from the desired ask result.
+
+Tool usage is generally efficient, so in most cases the results can be accepted unless there is some
+indication of obvious error.
+'''
+
+SALVATION_PROMPT = '''
+You are a helpful AI agency having one or more agents/assistants. You help users by solving their
+tasks. Sometimes, due to unpredictable reasons, you might fail to solve the task entirely or
+partially. Also, sometimes, you might have completed the task but failed to communicate the final
+answer to the user due to some error.
+
+You are here today to address one such scenario.
+
+Given the following task:
+{task}
+
+and optional files associated with the task:
+{task_files}
+
+Here's a log of what you have done and achieved:
+{history}
+
+In the conversation history above, you will find the original task of the user and optionally
+delegated sub-tasks.
+
+Your job is to salvage any useful information/output/action related to user's task from the above
+sequence of activities. Here's how to respond:
+- If you find that the agent/assistant have completed the task satisfactorily (unless there is any
+obvious error message or significant deviation from what the task had asked to achieve), simply
+generate a final response based on what is available.
+- If you notice that one more steps or sub-tasks remain unachieved or failed, begin by apologising.
+Identify the useful information available and prepare a final response. After that, display
+a bulleted list of what aspects of the task could not be achieved or failed or encountered error. 
+- If no portion of the task could be competed, say so and begin by apologising. Then show
+a bulleted list of what went wrong. (Skip this part if the task was successful.)
+
+Aside from minor formatting and presenting to the users in a readable way, avoid adding
+to the results/facts already found, only report them.
+Avoid telling users terms like "logs", "history", and "accepted by you" when responding.
+Also, users need to have all information available to them -- avoid telling them to see
+agent's previous attempts or tool's previous outputs. 
+
+'''
+
 
 def tool(func: Callable) -> Callable:
     """
@@ -384,22 +497,75 @@ def calculator(expression: str) -> Union[float, None]:
 
 
 @tool
-def get_weather(location: str) -> str:
-    """Call to get the weather from a specific location."""
-    text = location.lower()
-    if any([city in text for city in ['sf', 'san francisco']]):
-        return "It's sunny in San Francisco."
-    elif 'paris' in text:
-        return f'The weather in {location} is beautiful!'
-    elif 'london' in text:
-        return 'Expect rain today in London.'
-    else:
-        return f'I am not sure what the weather is in {location}.'
+def web_search(query: str) -> str:
+    """
+    Search the Web for a given query using DuckDuckGo.
+    This tool returns the titles of relevant Web page, their URLs, and a short text snippet.
+    NOTE: The returned URLs should be visited to retrieve the contents the pages.
+
+    Args:
+        query: The query string.
+
+    Returns:
+         The search results.
+    """
+    import time
+    import random
+
+    try:
+        from duckduckgo_search import DDGS
+    except ImportError as e:
+        raise ImportError(
+            '`duckduckgo_search` was not found! Please run `pip install duckduckgo-search`.'
+        ) from e
+
+    # Note: In general, `verify` should be `True`
+    # In some cases, DDGS may fail because of proxy or something else;
+    # can set it to `False` but generally not recommended
+    results = DDGS(verify=True).text(query, max_results=10)
+    # DDGS throws a rate limit error
+    time.sleep(random.uniform(0.2, 1.2))
+    if len(results) == 0:
+        return 'No results found! Try a less restrictive/shorter query.'
+
+    results = [f"[{result['title']}]({result['href']})\n{result['body']}" for result in results]
+    return '## Search Results\n\n' + '\n\n'.join(results)
 
 
 @tool
-def say_hello():
-    return 'Hello!!!'
+def visit_webpage(urls: list[str]) -> str:
+    """
+    Visit a list of webpages at the given URLs and get their content together as a markdown string.
+
+    Args:
+        urls: A list of Web page URLs to visit.
+
+    Returns:
+        The combined content of the pages.
+    """
+    import re
+    import requests
+
+    from markdownify import markdownify
+
+    text = ''
+
+    for url in urls:
+        try:
+            response = requests.get(url, timeout=20, headers={'user-agent': 'my-app/0.0.1'})
+            response.raise_for_status()
+            if response.status_code == 200:
+                md_content = markdownify(response.text).strip()
+                md_content = re.sub(r'\n{3,}', '\n\n', md_content)
+                if len(md_content) > 8192:
+                    text += (
+                            md_content[:8192] +
+                            '\n..._Content truncated to stay below 8192 characters_...\n'
+                    )
+        except Exception as e:
+            text += f'\nAn error occurred while reading this {url}: {e}\n'
+
+    return text
 
 
 class Task(pyd.BaseModel):
@@ -465,6 +631,47 @@ class CodeChatMessage(ChatMessage):
     successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
 
 
+class SupervisorMessage(pyd.BaseModel):
+    """
+    Messages for the supervisor-agent interaction.
+    """
+    agent_id: int = pyd.Field(
+        description='Integer agent ID based on the instructions (starting from 0)'
+    )
+    task: str = pyd.Field(
+        description='Task or sub-task description to be delegated to an agent'
+    )
+    image_files: Optional[list[str]] = pyd.Field(
+        description='Optional list of image file paths/URLs associated with the task'
+    )
+    task_complete: bool = pyd.Field(
+        description=(
+            'Initially False; set to True only when the agent(s) have successfully competed'
+            ' all the sub-tasks'
+        )
+    )
+    final_answer: str = pyd.Field(
+        description=(
+            'The final answer for the user when the main task is done, i.e., `task_complete`'
+            ' is True. Set to empty string otherwise.'
+        )
+    )
+
+
+class DelegatedTaskStatus(pyd.BaseModel):
+    """
+    The status of a task delegated by the supervisor.
+    """
+    status: bool = pyd.Field(description='Either `True` or `False`')
+    reason: str = pyd.Field(
+        description='Brief explanation for the status, e.g., why the task is incomplete'
+    )
+    how_to_fix: str = pyd.Field(description='Briefly describe how to/what would fix the task result')
+    final_answer: str = pyd.Field(
+        description='Final solution of the task, if found. Otherwise, empty string.'
+    )
+
+
 # The different types of updates emitted by an agent
 AGENT_RESPONSE_TYPES = Literal['step', 'final', 'log']
 
@@ -489,15 +696,18 @@ class Agent(ABC):
             self,
             name: str,
             model_name: str,
+            description: Optional[str] = None,
             vision_model_name: Optional[str] = None,
             tools: Optional[list[Callable]] = None,
             litellm_params: Optional[dict] = None,
+            max_iterations: int = 20,
     ):
         """
         Initialize an agent.
 
         Args:
             name: The name of the agent.
+            description: Description of the agent's capabilities or scope. Recommended to have.
             model_name: The name of the LLM to be used.
             vision_model_name: (Optional) vision model to use; None by default.
             tools: A list of tools available to the agent.
@@ -505,11 +715,13 @@ class Agent(ABC):
         """
         self.id = uuid.uuid4()
         self.name: str = name
+        self.description = description
         self.model_name: str = model_name
         self.vision_model_name = vision_model_name or model_name
 
         self.tools = tools
         self.litellm_params: dict = litellm_params or {}
+        self.max_iterations = max_iterations
 
         self.tool_names = set([t.name for t in tools]) if tools else set([])
         self.tool_name_to_func = {
@@ -517,6 +729,7 @@ class Agent(ABC):
         } if tools else {}
 
         self.task: Optional[Task] = None
+        self.image_files: Optional[list[str]] = None
         self.messages: list[ChatMessage] = []
         self.msg_idx_of_new_task: int = 0
 
@@ -546,13 +759,17 @@ class Agent(ABC):
             An update from the agent.
         """
 
-    async def _call_llm(self, messages: list[dict], response_format: Type[ChatMessage]) -> str:
+    async def _call_llm(
+            self,
+            messages: list[dict],
+            response_format: Optional[Type[ChatMessage | SupervisorMessage | DelegatedTaskStatus]] = None
+    ) -> str:
         """
         Invoke the LLM to generate a response based on a given list of messages.
 
         Args:
             messages: A list of messages (and optional images) to be sent to the LLM.
-            response_format: The type of message to respond with: `ChatMessage` or its subclass.
+            response_format: The type of message to respond with.
 
         Returns:
             The LLM response as string.
@@ -560,8 +777,9 @@ class Agent(ABC):
         params = {
             'model': self.model_name,
             'messages': messages,
-            'response_format': response_format
         }
+        if response_format:
+            params['response_format'] = response_format
         params.update(self.litellm_params)
         response = litellm.completion(**params)
 
@@ -576,10 +794,19 @@ class Agent(ABC):
             image_files: An optional list of image file paths or URLs.
         """
         self.task = Task(task=description, image_files=image_files)
+        self.image_files = image_files
         # Since `messages` stores every message generated while interacting with the agent,
         # we need to know which all messages correspond to the current task
         # (so that the ones pertaining to the previous tasks can be ignored)
         self.msg_idx_of_new_task = len(self.messages)
+
+    def _run_init(self, task: str, image_files: Optional[list[str]] = None):
+        """
+        Initialize the running of a task by an agent.
+        """
+        self.add_to_history(ChatMessage(role='user', content=task))
+        self._create_task(description=task, image_files=image_files)
+        self.final_answer_found = False  # Reset from any previous task
 
     def response(
             self,
@@ -612,7 +839,7 @@ class Agent(ABC):
             message: The message. Must be a valid `ChatMessage` instance.
         """
         assert isinstance(message, ChatMessage), (
-            f'add_to_history() expects a ChatMessage; got {type(message)}'
+            f'add_to_history() expects a `ChatMessage`; got `{type(message)}`'
         )
         self.messages.append(message)
 
@@ -642,7 +869,21 @@ class Agent(ABC):
             description += f'Tool name: {t.name}'
             # description += f'\n  * Schema: {t.args_schema.model_json_schema()}'
             description += f'\nTool description: {t.description}'
-            description += '\n\n---\n'
+            description += '\n---\n'
+
+        return description
+
+    @property
+    def purpose(self) -> str:
+        """
+        Describe the name, purpose of, and tools available to an agent.
+
+        Returns:
+             A text description of the agent.
+        """
+        description = f'Name: {self.name}\nDescription: {self.description or "N/A"}'
+        description += f'\nTools available to this agent (`{self.name}`):'
+        description += f'\n{self.get_tools_description()}'
 
         return description
 
@@ -671,6 +912,7 @@ class ReActAgent(Agent):
             name: str,
             model_name: str,
             tools: list,
+            description: Optional[str] = None,
             vision_model_name: Optional[str] = None,
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
@@ -680,6 +922,7 @@ class ReActAgent(Agent):
 
         Args:
             name: The name of the agent.
+            description: Description of the agent's capabilities or scope. Recommended to have.
             model_name: The name of the LLM to be used (use names from LiteLLM).
             tools: The tools available to the agent.
             litellm_params: Optional parameters for LiteLLM.
@@ -690,17 +933,13 @@ class ReActAgent(Agent):
             model_name=model_name,
             tools=tools,
             vision_model_name=vision_model_name,
-            litellm_params=litellm_params
+            litellm_params=litellm_params,
+            description=description,
+            max_iterations=max_iterations,
         )
 
-        self.max_iterations: int = max_iterations
         self.final_answer_found: bool = False
         logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
-
-    def _run_init(self, task: str, image_files: Optional[list[str]] = None):
-        self.add_to_history(ChatMessage(role='user', content=task))
-        self._create_task(description=task, image_files=image_files)
-        self.final_answer_found = False  # Reset from any previous task
 
     async def run(
             self,
@@ -860,7 +1099,7 @@ class ReActAgent(Agent):
                         rtype='step',
                         value=result,
                         channel='_act',
-                        metadata={'tool': tool_name, 'args': tool_args, 'is_error': True}
+                        metadata={'is_error': True}
                     )
 
             except Exception as ex:
@@ -907,7 +1146,7 @@ class CodeRunner:
             self,
             env: CODE_ENV_NAMES,
             allowed_imports: list[str],
-            requirements_file: Optional[str] = None
+            pip_packages: Optional[str] = None
     ):
         """
         Create an environment to run Python code.
@@ -915,13 +1154,14 @@ class CodeRunner:
         Args:
             env: The code execution environment. Must be a string from `CODE_ENV_NAMES`.
             allowed_imports: A list of Python modules that are allowed to be imported.
-            requirements_file: Optional `requirements.txt` file to be used by `pip`.
+            pip_packages: Optional Python libs to be installed by `pip` [E2B].
         """
         self.allowed_imports: set[str] = set(allowed_imports)
         self.env: CODE_ENV_NAMES = env
-        self.requirements_file = requirements_file
+        self.pip_packages: list[str] = re.split('[,;]', pip_packages) if pip_packages else []
         self.default_timeout = 15
         self.local_modules_to_copy = ['kutils.py']
+        self.pip_packages_str = ' '.join(self.pip_packages)
 
     def check_imports(self, code) -> set[Union[str]]:
         """
@@ -972,7 +1212,6 @@ class CodeRunner:
 
         disallowed_imports: set = self.check_imports(source_code)
         if len(disallowed_imports) > 0:
-            print(f'{disallowed_imports=}')
             return (
                 '',
                 f'The following imports are disallowed: {disallowed_imports}'
@@ -1018,7 +1257,8 @@ class CodeRunner:
             if running_sandboxes:
                 sbx = e2b.Sandbox.connect(running_sandboxes[0].sandbox_id)
             else:
-                sbx = e2b.Sandbox(timeout=20)
+                sbx = e2b.Sandbox(timeout=30)
+                sbx.commands.run(f'pip install {self.pip_packages_str}')
 
             # Copy the local dependency modules
             for a_file in self.local_modules_to_copy:
@@ -1050,13 +1290,14 @@ class CodeAgent(ReActAgent):
             self,
             name: str,
             model_name: str,
-            tools: Optional[list[Callable]],
             run_env: CODE_ENV_NAMES,
+            tools: Optional[list[Callable]] = None,
+            description: Optional[str] = None,
             vision_model_name: Optional[str] = None,
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
             allowed_imports: Optional[list[str]] = None,
-            requirements_file: Optional[str] = None,
+            pip_packages: Optional[str] = None,
             copy_from_env: bool = False,
     ):
         """
@@ -1064,6 +1305,7 @@ class CodeAgent(ReActAgent):
 
         Args:
             name: The name of the agent.
+            description: Description of the agent's capabilities or scope. Recommended to have.
             model_name: The name of the LLM to be used (use names from LiteLLM).
             tools: The tools available to the agent.
             run_env: The code execution environment. `host` means code will be run on the system
@@ -1072,7 +1314,7 @@ class CodeAgent(ReActAgent):
             litellm_params: Optional parameters for LiteLLM.
             max_iterations: The maximum number of steps that the agent should try to solve a task.
             allowed_imports: A list of Python modules that the agent is allowed to import.
-            requirements_file: Optional `requirements.txt` file to be used with `pip` [Unused].
+            pip_packages: Optional Python libs to be installed with `pip` [for E2B].
             copy_from_env: Whether to copy the keys from the local .env file.
         """
         super().__init__(
@@ -1082,6 +1324,7 @@ class CodeAgent(ReActAgent):
             vision_model_name=vision_model_name,
             litellm_params=litellm_params,
             max_iterations=max_iterations,
+            description=description,
         )
 
         # Combine the source code of all tools into one place
@@ -1091,14 +1334,18 @@ class CodeAgent(ReActAgent):
         for t in self.tools:
             self.tools_source_code += inspect.getsource(t).strip('@tool') + '\n'
 
-        self.requirements_file = requirements_file
+        self.pip_packages = pip_packages
 
         if not allowed_imports:
             allowed_imports = []
 
         # The following imports are allowed by default
-        self.allowed_imports = allowed_imports + ['datetime', 'typing', 'kutils']
-        self.code_runner = CodeRunner(env=run_env, allowed_imports=self.allowed_imports)
+        self.allowed_imports = allowed_imports + ['datetime', 'typing']
+        self.code_runner = CodeRunner(
+            env=run_env,
+            allowed_imports=self.allowed_imports + ['kutils'],
+            pip_packages=pip_packages
+        )
         self.copy_from_env = copy_from_env
 
     def format_messages_for_prompt(self, start_idx: int = 0) -> str:
@@ -1142,7 +1389,7 @@ class CodeAgent(ReActAgent):
             task_files='\n'.join(self.task.image_files) if self.task.image_files else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
             tool_names=self.get_tools_description(),
-            authorized_imports=','.join(self.allowed_imports)
+            authorized_imports=','.join(self.allowed_imports),
         )
         msg = await self._record_thought(message, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
@@ -1215,6 +1462,177 @@ class CodeAgent(ReActAgent):
                 )
 
 
+class SupervisorAgent(Agent):
+    """
+    A supervising agency, consisting of multiple agents, which can solve tasks via delegations.
+    """
+    def __init__(self, model_name: str, agents: list[Agent], name: str, max_iterations: int = 20):
+        """
+        Create a supervisor who delegates tasks to a list of agents.
+
+        Args:
+            model_name: The name of the LLM to be used.
+            agents: A list of agents available to the supervisor.
+            name: The name of the supervisor agent.
+            max_iterations: The max no. of iterations/attempted delegations made by the supervisor.
+        """
+        super().__init__(name=name, model_name=model_name, max_iterations=max_iterations)
+        self.agents = agents
+
+    async def run(
+            self,
+            task: str,
+            image_files: Optional[list[str]] = None,
+    ) -> AsyncIterator[AgentResponse]:
+        """
+        Solve a task using the supervisor agent/agency.
+
+        Args:
+            task: A description of the task.
+            image_files: An optional list of image file paths or URLs.
+
+        Yields:
+            An update from the agency.
+        """
+        self._run_init(task, image_files)
+
+        agents_desc = ''
+        for idx, agent in enumerate(self.agents):
+            agents_desc += f'Agent# {idx}\n{agent.purpose}\n'
+
+        for _ in range(self.max_iterations):
+            prompt = SUPERVISOR_PROMPT.format(
+                task=task,
+                task_files=image_files,
+                agents=agents_desc,
+                history=self.get_history(),
+            ).strip()
+            update = await self._call_llm(
+                ku.make_user_message(text_content=prompt), SupervisorMessage
+            )
+            task_delegation_msg: SupervisorMessage = SupervisorMessage.model_validate_json(update)
+
+            if task_delegation_msg.task_complete:
+                yield AgentResponse(
+                    type='final',
+                    channel='supervisor',
+                    value=task_delegation_msg.final_answer,
+                    metadata=None
+                )
+                self.add_to_history(
+                    message=ChatMessage(
+                        role='assistant',
+                        content=task_delegation_msg.final_answer
+                    )
+                )
+                return
+            else:
+                self.add_to_history(
+                    message=ChatMessage(
+                        role='assistant',
+                        content=(
+                            f'Delegating to Agent# {task_delegation_msg.agent_id} //'
+                            f' Sub-task: {task_delegation_msg.task} //'
+                            f' Files: {task_delegation_msg.image_files}'
+                        )
+                    )
+                )
+
+            updates: list[str] = []
+            tools_evidence: list[tuple[str, dict]] = []
+
+            async for update in self.agents[task_delegation_msg.agent_id].run(  # type: AgentResponse
+                    task=task_delegation_msg.task,
+                    image_files=task_delegation_msg.image_files
+            ):
+                yield update
+
+                if update['type'] == 'final':
+                    yield AgentResponse(
+                        type='step',
+                        channel='supervisor',
+                        value=update['value'],
+                        metadata=None
+                    )
+                    updates = [update['value']]
+                elif update['type'] == 'step':
+                    updates.append(update['value'])
+                    metadata = update['metadata']
+                    if metadata:
+                        tools_evidence.append(
+                            (metadata.get('tool', None), metadata.get('args', None))
+                        )
+
+            updates = [
+                f'Agent\'s attempt {idx}: {v.content if isinstance(v, ChatMessage) else v}'
+                for idx, v in enumerate(updates, start=1)
+            ]
+            evidence = '\n'.join(updates)
+            tools_evidence: list[tuple[str, dict]] = [(t, a) for (t, a) in tools_evidence if t]
+            evidence += '\n\nTool usage evidence by the agent:\n'
+            evidence += '\n'.join([f'Tool: {t} // args: {a}' for (t, a) in tools_evidence])
+            status = await self._check_if_task_done(task_delegation_msg.task, evidence)
+            if status.status:
+                self.add_to_history(
+                    message=ChatMessage(
+                        role='user',
+                        content=(
+                            f'I can accept the result: `{status.final_answer}`'
+                            '\nYou can proceed to the next subtask, if any.'
+                        )
+                    )
+                )
+            else:
+                feedback = (
+                    f'\nThe result does not look good: {status.final_answer}'
+                    f'## Why the task result is incomplete:\n{status.reason}'
+                    f'\n## Here\'s what can be done to fix it:\n{status.how_to_fix}'
+                )
+                self.add_to_history(
+                    message=ChatMessage(role='user', content='\n'.join(updates) + feedback)
+                )
+        # END of supervisor loop
+        # The supervisor has exhausted all attempts, but a final answer was not found/returned
+        async for update in self._salvage_response():
+            yield update
+
+    async def _check_if_task_done(self, task: str, evidence: str) -> DelegatedTaskStatus:
+        """
+        Check if a task delegated to an agent has reached completion.
+
+        Args:
+            task: Delegated task description.
+            evidence: Evidence (the steps performed so far).
+
+        Return:
+             The delegated task status.
+        """
+        prompt = SUPERVISOR_TASK_CHECK_PROMPT.format(task=task, response=evidence)
+        response = await self._call_llm(
+            ku.make_user_message(prompt, None), DelegatedTaskStatus
+        )
+
+        return DelegatedTaskStatus.model_validate_json(response)
+
+    async def _salvage_response(self):
+        """
+        The supervisor has failed to return an answer in stipulated number of steps. This is
+        a final result to save face and try salvage what little information could be!
+        """
+        prompt = SALVATION_PROMPT.format(
+            task=self.task,
+            task_files=self.image_files,
+            history=self.get_history()
+        )
+        response = await self._call_llm(ku.make_user_message(prompt, None))
+        yield AgentResponse(
+            type='final',
+            channel='supervisor',
+            value=response,
+            metadata={'salvage': True}
+        )
+
+
 def llm_vision_support(model_names: list[str]) -> list[bool]:
     """
     Utility function to check whether images can be used with given LLMs.
@@ -1232,55 +1650,86 @@ def llm_vision_support(model_names: list[str]) -> list[bool]:
     return status
 
 
+def print_response(response: AgentResponse):
+    """
+    A utility function to print agent's response in a terminal with colors.
+
+    Args:
+        response: A response obtained from an agent.
+    """
+    if response['type'] == 'final':
+        msg = (
+            response['value'].content
+            if isinstance(response['value'], ChatMessage) else response['value']
+        )
+        rich.print(f'[blue][bold]Agent[/bold]: {msg}[/blue]\n')
+    elif response['type'] == 'log':
+        rich.print(f'[white]{response}[/white]')
+    else:
+        rich.print(f'{response}')
+
+
 async def main():
     """
     Demonstrate the use of ReActAgent and CodeAgent.
     """
     litellm_params = {'temperature': 0}
     model_name = 'gemini/gemini-2.0-flash-lite'
-    # model_name = 'azure/gpt-4o-mini'
+    # model_name = 'azure/gpt-4o'
 
-    agent = ReActAgent(
-        name='Agent ReAct',
+    agent1 = ReActAgent(
+        name='Maths agent',
         model_name=model_name,
-        tools=[get_weather, say_hello, calculator],
+        tools=[calculator],
         max_iterations=3,
         litellm_params=litellm_params
     )
-    # agent = CodeAgent(
-    #     name='Agent Code',
-    #     model_name=model_name,
-    #     tools=[get_weather, say_hello, calculator],
-    #     run_env='host',
-    #     max_iterations=3,
-    #     litellm_params=litellm_params,
-    #     allowed_imports=['os', 're'],
-    # )
-
-    for task, img_urls in [
-        ('How is the weather of the capital of France?', None),
+    agent2 = CodeAgent(
+        name='Web agent',
+        model_name=model_name,
+        tools=[web_search, visit_webpage],
+        run_env='e2b',
+        max_iterations=5,
+        litellm_params=litellm_params,
+        allowed_imports=['os', 're', 'time', 'random', 'requests', 'duckduckgo_search', 'markdownify'],
+        pip_packages='duckduckgo_search~=8.0.1;markdownify~=1.1.0',
+    )
+    the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
         ('What is the date today? Express it in words.', None),
         (
             'Which image has a purple background?',
             [
-                'https://cdn.prod.website-files.com/61a05ff14c09ecacc06eec05/66e8522cbe3d357b8434826a_ai-agents.jpg',
                 'https://www.slideteam.net/media/catalog/product/cache/1280x720/p/r/process_of_natural_language_processing_training_ppt_slide01.jpg',
+                'https://cdn.prod.website-files.com/61a05ff14c09ecacc06eec05/66e8522cbe3d357b8434826a_ai-agents.jpg',
             ]
+        ),
+        (
+            'What is four plus seven? Also, what are the festivals in Paris?'
+            ' How they differ from Kolkata?',
+            None
         )
-        # 'Write a blog post on AI agents. Based on the content, generate a cover image.',
-    ]:
-        rich.print(f'[blue][bold]User[/bold]: {task}[/blue]')
+    ]
 
-        async for response in agent.run(task, image_files=img_urls):
-            if response['type'] == 'final':
-                msg = (
-                    response['value'].content
-                    if isinstance(response['value'], ChatMessage) else response['value']
-                )
-                rich.print(f'[green][bold]Agent[/bold]: {msg}[/green]\n')
-            else:
-                print(response)
+    print('CodeAgent demo\n')
+    for task, img_urls in the_tasks[:-1]:
+        rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
+        async for response in agent2.run(task, image_files=img_urls):
+            print_response(response)
+
+    print('\n\nMulti-agent with supervisor demo\n')
+
+    agency = SupervisorAgent(
+        name='Supervisor',
+        model_name=model_name,
+        agents=[agent1, agent2],
+        max_iterations=3
+    )
+    task = the_tasks[-1]
+    rich.print(f'[yellow][bold]User[/bold]: {task[0]}[/yellow]')
+
+    async for response in agency.run(*task):
+        print_response(response)
 
 
 if __name__ == '__main__':
