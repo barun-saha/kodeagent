@@ -1567,7 +1567,10 @@ class CodeRunner:
 
                 # Copy the local dependency modules
                 for a_file in self.local_modules_to_copy:
-                    shutil.copy2(a_file, tempfile.gettempdir())
+                    shutil.copy2(
+                        os.path.join(os.path.dirname(__file__), a_file),
+                        tempfile.gettempdir()
+                    )
 
                 result = sp.run(
                     [sys.executable, code_file.name],
@@ -1600,7 +1603,11 @@ class CodeRunner:
 
             # Copy the local dependency modules
             for a_file in self.local_modules_to_copy:
-                with open(a_file, 'r', encoding='utf-8') as py_file:
+                with open(
+                        os.path.join(os.path.dirname(__file__), a_file),
+                        'r',
+                        encoding='utf-8'
+                ) as py_file:
                     sbx.files.write(f'/home/user/{a_file}', py_file.read())
                     logger.info('Copied file %s...', a_file)
 
@@ -2081,7 +2088,7 @@ async def main():
         agents=[agent1, agent2],
         max_iterations=5
     )
-    task = the_tasks[-3]
+    task = the_tasks[-2]
     rich.print(f'[yellow][bold]User[/bold]: {task[0]}[/yellow]')
 
     async for response in agency.run(*task):
