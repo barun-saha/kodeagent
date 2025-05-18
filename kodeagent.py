@@ -1480,7 +1480,8 @@ class CodeRunner:
             self,
             env: CODE_ENV_NAMES,
             allowed_imports: list[str],
-            pip_packages: Optional[str] = None
+            pip_packages: Optional[str] = None,
+            timeout: int = 30,
     ):
         """
         Create an environment to run Python code.
@@ -1489,11 +1490,12 @@ class CodeRunner:
             env: The code execution environment. Must be a string from `CODE_ENV_NAMES`.
             allowed_imports: A list of Python modules that are allowed to be imported.
             pip_packages: Optional Python libs to be installed by `pip` [E2B].
+            timeout: Code execution timeout (default 30s).
         """
         self.allowed_imports: set[str] = set(allowed_imports)
         self.env: CODE_ENV_NAMES = env
         self.pip_packages: list[str] = re.split('[,;]', pip_packages) if pip_packages else []
-        self.default_timeout = 20
+        self.default_timeout = timeout
         self.local_modules_to_copy = ['kutils.py']
         self.pip_packages_str = ' '.join(self.pip_packages)
 
@@ -1598,7 +1600,7 @@ class CodeRunner:
             if running_sandboxes:
                 sbx = e2b.Sandbox.connect(running_sandboxes[0].sandbox_id)
             else:
-                sbx = e2b.Sandbox(timeout=30)
+                sbx = e2b.Sandbox(timeout=self.default_timeout + 15)
                 sbx.commands.run(f'pip install {self.pip_packages_str}')
 
             # Copy the local dependency modules
@@ -1612,7 +1614,7 @@ class CodeRunner:
                     logger.info('Copied file %s...', a_file)
 
             logger.info('E2B sandbox info: %s', sbx.get_info())
-            execution = sbx.run_code(code=source_code, timeout=self.default_timeout * 1.5)
+            execution = sbx.run_code(code=source_code, timeout=self.default_timeout)
             std_out: str = '\n'.join(execution.logs.stdout)
             std_err: str = '\n'.join(execution.logs.stderr)
             ret_code: int = -1 if execution.error else 0
@@ -1644,6 +1646,7 @@ class CodeAgent(ReActAgent):
             allowed_imports: Optional[list[str]] = None,
             pip_packages: Optional[str] = None,
             copy_from_env: bool = False,
+            timeout: int = 30,
     ):
         """
         Instantiate a CodeAgent.
@@ -1661,6 +1664,7 @@ class CodeAgent(ReActAgent):
             allowed_imports: A list of Python modules that the agent is allowed to import.
             pip_packages: Optional Python libs to be installed with `pip` [for E2B].
             copy_from_env: Whether to copy the keys from the local .env file.
+            timeout: Code execution timeout (default 30s).
         """
         super().__init__(
             name=name,
@@ -1689,7 +1693,8 @@ class CodeAgent(ReActAgent):
         self.code_runner = CodeRunner(
             env=run_env,
             allowed_imports=self.allowed_imports + ['kutils'],
-            pip_packages=pip_packages
+            pip_packages=pip_packages,
+            timeout=timeout
         )
         self.copy_from_env = copy_from_env
 
