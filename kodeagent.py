@@ -50,12 +50,17 @@ logging.basicConfig(
 logger = logging.getLogger('KodeAgent')
 
 # litellm._turn_on_debug()
+litellm.success_callback = ['langfuse']
+litellm.failure_callback = ['langfuse']
 
 
 REACT_PROMPT = '''
 You are an expert assistant, helpful and polite, who can solve any task using tool calls. 
 Given a task, you think about how to solve it, suggest a tool to use to solve the current step,
 observe the outcome of the current action, and then think again.
+You practise self-questioning, self-reasoning, self-reflection, and self-healing
+to overcome any obstacles and reach your goal.
+
 
 ## Task
 
@@ -68,12 +73,11 @@ The task description is as follows:
 
 ## Tools
 
-You have access to a set of tools. You can use one or more of these tools in any sequence
-you deem appropriate to complete the task at hand. This may require breaking the task into subtasks
-and using different tools to complete each subtask.
-
 The following tools are available to you:
 {tool_names}
+
+You can use one or more of these tools in any sequence you deem appropriate to complete the task at hand.
+This may require breaking the task into subtasks and using different tools to complete each subtask.
 
 
 ## Output Format
@@ -84,7 +88,7 @@ Thought: The current language of the user is: (user's language). I need to use a
 Action: tool name (one of aforementioned tool names) if using a tool.
 Args: the input arguments to the tool, in a JSON format representing the kwargs (e.g. {{"input": "hello world", "num_beams": 5}})
 
-Please ALWAYS start with a Thought.
+ALWAYS start with a Thought.
 
 NEVER surround your response with markdown code markers.
 You may use code markers within your response if you need to.
@@ -110,6 +114,8 @@ Successful: False
 
 The `Successful` flag is set to `False` in the second case since the task was failed to be solved.
 This flag should be always False until you reach the final step and decide that the task is complete.
+Note: if an action fails, the error message will be captured in `Observation`.
+Frame your next `Thought` in a way so that it can mitigate the previous error and take correct action.
 
 
 ## Example Conversations
@@ -154,6 +160,16 @@ Answer: Unfortunately, I lack the ability to solve this task at this moment. May
 Successful: False
 
 
+## Plan
+
+Here's a general plan that someone who may or may not have your tools might try to solve this task.
+You can refer to it but adapt as necessary, e.g., add/edit/combine/skip steps:
+{plan}
+
+Based on the current state of the Thought-Code-Observation, you will identify what steps from
+the plan have already been achieved and what needs to be done next, thus frame your `Thought`.
+
+
 ## Additional Instructions:
 - Call a tool only when needed, e.g., do not call the search agent if you do not need to search information.
 - Do not use non-existent tools. Only use a tool listed earlier. 
@@ -162,22 +178,30 @@ Successful: False
 - Do your best! Don't give up! You're in charge of solving the task, not providing directions to solve it.
 
 
-## Current Conversation
+## Current Interaction
 
-Below is the current conversation consisting of interleaving human and assistant messages (initially empty).
-
+Below is the history of the interaction so far, showing the interleaving "Thought," "Action," and "Observation" steps. (Initially empty.)
 {history}
 '''
 
 CODE_AGENT_PROMPT = '''
-You are an expert assistant, helpful and polite, who can solve any task using code blobs. 
-Given a task, you think about how to solve it, use tools (i.e., user-defined Python functions)
+You are an expert assistant, helpful and polite, who can solve any complex task using code blobs. 
+Given a task, you think about how to solve it, use tools (user-defined Python functions) and code
 to solve the steps, observe the outcomes, and then think again until a final answer is found.
+
+You are immensely capable!
+You practise critical thinking and self-questioning to understand nuances of the task, plan, and steps.
+You use self-reasoning to identify how to proceed next optimally.
+You self-reflect on your previous steps and outcomes, and identify if something went wrong.
+You are self-healing, capable of recovering from failures and overcoming any obstacles and reach your goal.
+
+Solving the task is an iterative process -- you propose a step and get feedback on how it went.
+It is OK if you make a mistake infrequently, but you MUST identify the mistake, diagnose, and correct it ASAP.
 
 
 ## Task
 
-The task description is as follows:
+Here's a description of the task you need to solve:
 {task}
 
 (Optional) input file paths/URLs associated with this task are as follows:
@@ -186,45 +210,44 @@ The task description is as follows:
 
 ## Tools
 
-You have access to a wide variety of tools. You are responsible for writing Python code and using
-the tools in any sequence you deem appropriate to complete the task at hand. This may require
-breaking the task into subtasks and using different tools to complete each subtask.
-
-You have access to the following tools:
+The following *specialized* tools are available to you, enhancing your capabilities:
 {tool_names}
+
+You are responsible for writing Python code and using the available tools in any sequence
+you deem appropriate to complete the task at hand. This may require breaking the task into subtasks
+and using different tools to complete each subtask.
 
 
 ## Allowed Imports
 
-You can use the aforementioned tools to solve a task. In addition, you are allowed to import (only)
-the following 
-standard Python libraries in the code your write (`*` means you can import any lib):
+In addition to using the aforementioned tools, you are allowed to import (only) the following
+standard Python libraries in the code your write (`*` means you can import any lib) to solve the task:
 {authorized_imports}
 
-(You do NOT need to import the tool names -- they are already available to you).
+(Do NOT import the provided tool names -- they are already available to you).
 
-
+  
 ## Output Format
 
 Please answer in the same language as the question and use the following format:
 
 Thought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.
 Code: ```py
-Python code that uses one or more aforementioned tool
-print(useful information)
+# Write your Python code here...
+print(useful_information)
 ```
 
-The `Code` presents simple Python code to solve the step. Your code can use `print()` to save
-any important information. These print outputs from code execution will then become available
-as `Observation` as input for the next step. The code should be enclosed within triple backticks.
+The `Code` block presents simple Python code to solve the step. Your code can use `print()` to save
+any important information, e.g., result of a computation or output of a function call. These print
+outputs from code execution will then become available as `Observation` as input for the next step.
+Also, the code should be enclosed within triple backticks.  
 
-Please ALWAYS start with a Thought.
+ALWAYS start with a `Thought`.
 If this format is used, you will be responded back in the following format:
 
 Observation: tool use response
 
-
-You should keep repeating the above format (Thought-Code-Observation cycle) till you have enough
+Keep repeating the above format (Thought-Code-Observation cycle) till you have enough
 information to answer the question without using any more tools.
 At that point, you MUST respond in one of the following two formats:
 
@@ -236,20 +259,38 @@ Thought: I cannot answer the question with the provided tools.
 Answer: [your answer here (In the same language as the user's question)]
 Successful: False
 
-
 The `Successful` flag is set to `False` in the second case since the task was failed to be solved.
 This flag should be always False until you reach the final step and decide that the task is complete.
 
+You meticulously analyze the `Observation` from each tool use.
+Based on the `Observation`, you determine if the previous step was successful and what
+the implications are for the next step.
+If the `Observation` indicates an error or an unexpected result, you immediately formulate a plan
+to diagnose and rectify the issue in the subsequent `Thought` and `Code`.
 
-## Example Conversations
 
-Below, a few sample conversations using notional tools are provided for your reference.
-Please study the patterns carefully.
+## Task Plan
+
+Here's a general plan to solve the task.
+Align your `Thought` with the steps from the plan and follow this trajectory closely.
+The plan may not be fool-proof. You MUST adapt when necessary: you can add/edit/combine/skip steps as needed.
+E.g., code/tool use can achieve multiple steps from the reference/logical plan in a single step.
+{plan}
+
+Based on the current state of the Thought-Code-Observation, you will identify what steps from
+the plan have already been achieved and what needs to be done next, thus frame your `Thought`.
+
+
+## Task Solving Examples
+
+The following examples illustrate the iterative Thought-Code-Observation process used
+to tackle complex tasks using notional tools (notice how a `Thought` explicitly reflects
+on the previous `Observation`):
 
 ---
-[Sample task: Generate an image of the oldest person in this document.]
+[Task: Generate an image of the oldest person in this document.]
 
-Thought: I will begin by identifying the oldest person mentioned in the document. I will use the `document_qa` tool for this purpose.
+Thought: I will begin by identifying the oldest person mentioned in the document. I will use the `document_qa` tool for this purpose. I only need to print the answer, not the entire document.
 Code: ```py
 answer = document_qa(document=document, question='Who is the oldest person mentioned?')
 print(answer)
@@ -258,63 +299,228 @@ Observation: The oldest person in the document is John Doe, a 55 year old lumber
 
 Thought: Based on document search, I have identified John Doe, aged 55, as the oldest person. He lives in Newfoundland, Canada. Now, I'll use the `image_generator` tool to generate his portrait.  
 Code: ```py
-image_path = image_generator(prompt="A portrait of John Doe, a 55-year-old man living in Canada.")
+image_path = image_generator(prompt='A portrait of John Doe, a 55-year-old man living in Canada.')
 print(f'The output image file is: {{image_path}}')
 ```
 Observation: The output image file is: image.png
 
 Thought: Based on the given document, I have identified John Doe (55) as the oldest person. I have also generated his portrait and saved it in the `image.png` file.
-Answer: image.png
+Answer: The output image file is: image.png
 Successful: True
 
 ---
-[Sample task: Which city has the highest population: Guangzhou or Shanghai?]
+[Task: Which city has the highest population: Guangzhou or Shanghai?]
 
-Thought: I need to get the populations for both cities and compare them: I will use the tool `search` to get the population of both cities.
+Thought: I need to get the populations for both cities and compare them: I will use the tool `search` to get the population of both cities. Since search results are important for this task, I'll print them.
 Code: ```py
 for city in ['Guangzhou', 'Shanghai']:
     print(f'Population {{city}}:', search(f'{{city}} population')
 ```
 Observation: Population Guangzhou: ['Guangzhou has a population of 15 million inhabitants as of 2021.']
-Population Shanghai: '26 million (2019)'
+Population Shanghai: 26 million (2019)
 
-Thought: Based on the search results, I know that Shanghai has the highest population.
-Answer: Shanghai has the highest population.
+Thought: Based on the search results from the previous step, I know that Shanghai has the highest population.
+Answer: Based on the search results, Shanghai has the highest population.
 Successful: True
 
 ---
-[Sample task: Generate a video of the moon.]
+[Task: Generate a video of the moon.]
 
 Thought: The user has asked to generate a video of the moon. Unfortunately, I do not have any tool that can generate a video. So, I can't solve this task.
 Answer: Unfortunately, I lack the ability to solve this task at this moment. May I help you with something else?
 Successful: False
 
+---
+[Task: Plot the first two cols from http://example.com/data.csv]
 
-## Additional Instructions:
+Thought: I need to plot a graph based on the contents of the file, but I do not need to print the contents. So, I can achieve this in a single code block. First, I'll download the file and save locally using the tool `download_file`. Then, use the `get_cols` tool to get the first two columns. Finally, I'll plot them using the `line_plot` tool.
+Code: ```py
+file_path = download_file(url='http://example.com/data.csv')
+data = get_cols(file_path)
+img_path = line_plot(data, cols=[1, 2])
+print(f'The output image file is: {{img_path}}')
+```
+Observation: The output image file is: figure.png
+Successful: True
+
+---
+[Task: Translate the content of 'article.txt' into Bengali]
+
+Thought: The user wants a translation of 'article.txt'. I will first read the content of the file using the `read_file_text` tool. Since no specific tool for translation is available, I'll print the contents so that it becomes available to the LLM.
+Code: ```py
+text = read_file_text(file_path='article.txt')
+print(text)
+```
+Observation: Hello, how are you?
+
+Thought: In the previous step, have already read the `article.txt` file and printed its contents: `Hello, how are you?`. I can translate the text into Bengali myself, without using any tool, and I'll provide the final answer.
+Answer: The contents translated into Bengali: হ্যালো, কেমন আছো?
+Successful: True
+
+---
+[Task: Word count in 'article.txt']
+
+Thought: To count the words in `article.txt`, I will first read the contents of the file using the `read_file_text` tool and store in a variable. Then I'll use Python code to directly split the string into a list of words, and then find the length of the list. Since the content of the file are not required, I will not print them. Only print the word count.
+Code: ```py
+text = read_file_text(file_path='article.txt')
+count = len(text.split())
+print(f'The file has {{count}} words')
+```
+Observation: The file has 567 words
+Successful: True
+
+
+## Anti-Patterns to AVOID to Improve Your `Code` & Accuracy
+
+The following examples illustrate common mistakes to AVOID when writing `Code`.
+Understanding these anti-patterns is VITAL to reduce time, cost, and improve accuracy.
+- Mistakes and problems in the incorrect `Code` are annotated with `<---`.
+- Correct usage for the same problem is shown immediately below for comparison and learning.
+
+---
+[Task: What is the current count? Double it.]
+
+Thought: I will get the current count using `some_counter` tool and assign the value to a variable x.
+Code: ```py
+x = some_counter()
+print('Current value:', x)
+```
+Observation: Current value: 11
+
+Thought: From the previous step, the current count is 11. I'll double the value.
+Code: ```py
+x = 2 * x    <--- This will cause an ERROR since `x` is undefined within THIS Code block! Only use the names already defined in a given Code block.
+```
+Observation: Error: name 'x' is not defined
+
+**CORRECT CODE BLOCK FOR THE TASK**:
+
+Code: ```py
+x = some_counter()
+print(f'Old value: {{x}}')
+x = 2 * x
+print(f'New value: {{x}}')
+```
+Observation: Old value: 11
+New value: 22
+
+---
+[Task: Plot data from the file at http://example.com/data.csv]
+
+Thought: I need to download the file at first using `download_file`.
+Code: ```py
+file_path = download_file(url='http://example.com/data.csv')
+data = read_csv_file(file_path)
+print(data)    <--- Not an error but PROBLEMATIC since the file can be large and its contents do NOT need to be displayed for this task! Printing the contents here increases cost, time, and chances of error.
+```
+
+**CORRECT CODE BLOCK FOR THE TASK**:
+
+Code: ```py
+file_path = download_file(url='http://example.com/data.csv')
+data = read_csv_file(file_path)
+img_path = line_plot(data, cols=[1, 2])
+print(f'The image path is: {{img_path}}')
+```
+
+---
+[Task: Word count in https://example.com/article.txt]
+
+Thought: I'll start by downloading the file using the `download` tool.
+Code: ```py
+path = download('https://example.com/article.txt')
+print(path)
+```
+Observation: /tmp/somethingXYz
+
+Thought: I'll extract the contents of the file.
+Code: ```py
+with open('/tmp/somethingXYz', 'r') as _:
+    print(_)
+```
+Observation: Content of the file ...(truncated for brevity)
+
+Thought: I'll download the file using the `download` tool.    <--- This is SUBOPTIMAL since it generates the same though, repeating an already accomplished step, and getting STUCK in a loop!
+Code: ```py
+print(download('https://example.com/article.txt'))
+```
+
+## Critical Guidelines
+
 - ALWAYS generate a Thought-Code sequence.
-- In `Code`, only use the variables that you have defined.
 - Don't name any new variable with the same name as a tool.
 - Call a tool only when needed. Only use a tool listed in the Tools section.
+- Always prefer to use an available tool over writing code or asking the LLM.
 - Always use the right arguments for the tools. Do not pass the arguments as a dict.
   E.g., rather than `answer = wiki({{'query': 'search term'}})`, use `answer = wiki(query='search term')`.
-- Avoid having multiple tool calls in the same code when their output format is unpredictable,
-  e.g., a search function. In such scenarios, output the results of tool calls with `print()`
-  and use those results in the code section.
+- Do NOT call the same tool twice with the same argument unless there's an error -- reuse the previous result.
+  E.g., do NOT download the same file again.
 - Write simple Python code. Avoid writing functions on your own unless it's important.
-- Remember to import any required (and allowed) Python module before using them. Also, `Code` is stateless.
-  So, the required imports (variables, and your functions, if any) must be mentioned again when needed. 
-- Do not print any secrets, e.g., API keys, passwords, and tokens.
+- Remember to import any required (and only allowed) Python module BEFORE using them.
+- Every `Code` block is independent and isolated. The imports, variables, and functions from any
+  `Code` block are NOT available in the subsequent `Code` blocks!
+- Do NOT print any secrets, e.g., API keys, passwords, and access tokens.
+- When dealing with files, your `Thought` MUST reason whether to print the contents of the file before writing `Code`.
+  ONLY when your `Thought` cites a valid reason, you will `print()` the file contents in the `Code`.
+  Otherwise, do not print.
 - Do your best! Don't give up! You're in charge of solving the task, not providing directions to solve it.
 
 
-## Current Conversation
+## Current Interaction
 
-Below is the current conversation consisting of interleaving human and assistant messages (initially empty).
-
+Below is the history of the interaction so far, showing the interleaving "Thought," "Code," and "Observation" steps. (Initially empty.)
 {history}
 '''
 
-SUPERVISOR_PROMPT = '''
+AGENT_PLAN_PROMPT = '''
+You are a helpful planning assistant. Given a task, you can create a plan to solve the task.
+A given task can be complex -- you may need to split it into smaller sub-tasks so that
+collectively completing the sub-tasks would enable to achieve the main task.
+
+You're agent type: {agent_type}
+
+
+## Task
+
+{task}
+
+(Optional) input file paths/URLs associated with this task are as follows:
+{task_files}
+
+## Tools
+
+Here are a few tools that you can use to solve the task:
+{tool_names}
+
+Now make a plan to solve the task using one or more tools.
+  - ONLY if you're CodeAgent type, you can also write Python code to solve some problems.
+  - You can also use the LLM to solve something if there is no appropriate tool available.
+  - Do not use the same tool twice to do the same thing.
+Your output should be a numbered list of step-by-step plan. Each step listing only one sub-task
+in plain English, without any code, but can refer to a tool name.
+'''
+
+SUPERVISOR_PLAN_PROMPT = '''
+You are a helpful planning assistant. Given a task, you can create a plan to solve the task.
+A given task can be complex -- you may need to split it into smaller sub-tasks so that
+collectively completing the sub-tasks would enable to achieve the main task.
+
+## Task
+
+{task}
+
+(Optional) input file paths/URLs associated with this task are as follows:
+{task_files}
+
+Your output should be a step-by-step plan. Each step listing only one sub-task.
+Since the tasks will be executed in the real-world, there are possibilities of having
+unexpected errors, e.g., no API key, permission denied, wrong format, and so on. Accordingly, 
+your planning should include some of the relevant failure modes and their potential mitigations.
+
+At the end of your plan, also provide a numbered list of facts that needs to be found out to complete the task.
+'''
+
+SUPERVISOR_TASK_PROMPT = '''
 You are the supervisor of an AI agency having one or more helpful agents. Given a task, as well as
 the capabilities of the agents, you decide which agent(s) and tool(s) of the agent to use to solve
 the task. A given task can be complex -- you may need to split it into smaller parts and invoke
@@ -348,11 +554,29 @@ The following agents are available to you, each identified with a unique integer
 {agents}
 
 
+
+CRITICAL Guidelines on task division:
+(1) Task division across multiple agents MUST be planned carefully and efficiently,
+taking the CONTEXT and need for data sharing into consideration.
+E.g., avoid asking Agent X to read a data file and Agent Y to plot using that data
+since that can lead to failure as Agent Y does not have the relevant data
+available. An option is to pass the data (or file/database contents) to Y along with the sub-task
+description. However, this can lead to an overhead when the contents are long. So, a better option
+is to ask the SAME agent to read data and plot (or process data, in general), provided the agent
+is capable of doing it.
+(2) If an agent fails to solve a task and you have to ask it to repeat again, rephrase the task
+with appropriate context so that the agent can RESUME where it failed. Do NOT ask any agent to do
+the same thing again unless it is absolutely necessary. E.g., if an agent is tasked to identify
+the keywords from 10 papers on AI on ArXiv, and it has failed after identifying the papers, do NOT
+make the agent do that again -- pass it the list of already identified papers from the search results 
+so that it can resume from there. This is important to avoid infinite loops of doing nothing useful.
+
+
 ## Task Completion
 
 In case you find that the main task and sub-tasks have been successfully completed, generate
 a final answer for the user by nicely collating the results of all the sub-tasks. Also, set
-`task_complete` to True.
+`task_complete` to True. This is the ONLY way to stop your iteration or prevent repeating the same things!
  
  
 ## Current Conversation
@@ -361,6 +585,9 @@ Below is the current conversation consisting of interleaving human and assistant
 Also, agent's response are depicted as user's response.
 
 {history}
+
+
+Do your best! Don't give up! You're in charge of solving the task, not providing directions to solve it.
 '''
 
 SUPERVISOR_TASK_CHECK_PROMPT = '''
@@ -415,7 +642,7 @@ a bulleted list of what went wrong. (Skip this part if the task was successful.)
 
 Aside from minor formatting and presenting to the users in a readable way, avoid adding
 to the results/facts already found, only report them.
-Avoid telling users terms like "logs", "history", and "accepted by you" when responding.
+Avoid telling users terms like "logs", "history", "salvaged", and "accepted by you" when responding.
 Also, users need to have all information available to them -- avoid telling them to see
 agent's previous attempts or tool's previous outputs. 
 
@@ -458,7 +685,7 @@ def tool(func: Callable) -> Callable:
 @tool
 def calculator(expression: str) -> Union[float, None]:
     """
-    A simple calculator tool that can evaluate arithmetic expressions.
+    A simple calculator tool that can evaluate basic arithmetic expressions.
     The expression must contain only the following allowed mathematical symbols:
     digits, +, -, *, /, ., (, )
 
@@ -497,14 +724,16 @@ def calculator(expression: str) -> Union[float, None]:
 
 
 @tool
-def web_search(query: str) -> str:
+def web_search(query: str, max_results: int = 10) -> str:
     """
-    Search the Web for a given query using DuckDuckGo.
-    This tool returns the titles of relevant Web page, their URLs, and a short text snippet.
+    Search the Web using DuckDuckGo. The input should be a search query.
+    Useful for when you need to answer questions about current events.
+    Returns (as Markdown text) the top search results with titles, links, and descriptions.
     NOTE: The returned URLs should be visited to retrieve the contents the pages.
 
     Args:
         query: The query string.
+        max_results: Maximum no. of search results (links) to return.
 
     Returns:
          The search results.
@@ -522,7 +751,7 @@ def web_search(query: str) -> str:
     # Note: In general, `verify` should be `True`
     # In some cases, DDGS may fail because of proxy or something else;
     # can set it to `False` but generally not recommended
-    results = DDGS(verify=True).text(query, max_results=10)
+    results = DDGS(verify=False).text(query, max_results=max_results)
     # DDGS throws a rate limit error
     time.sleep(random.uniform(0.2, 1.2))
     if len(results) == 0:
@@ -552,7 +781,7 @@ def visit_webpage(urls: list[str]) -> str:
 
     for url in urls:
         try:
-            response = requests.get(url, timeout=20, headers={'user-agent': 'my-app/0.0.1'})
+            response = requests.get(url, timeout=20, headers={'user-agent': 'kodeagent/0.0.1'})
             response.raise_for_status()
             if response.status_code == 200:
                 md_content = markdownify(response.text).strip()
@@ -566,6 +795,74 @@ def visit_webpage(urls: list[str]) -> str:
             text += f'\nAn error occurred while reading this {url}: {e}\n'
 
     return text
+
+
+@tool
+def file_download(url: str) -> str:
+    """
+    Download a file from the Web and save it locally on the disk.
+
+    Args:
+        url: The URL pointing to the file (must be a correct URL).
+
+    Return:
+        Path to the locally saved file or error messages in case of any exception.
+    """
+    import os
+    import requests
+    import tempfile
+
+    response = requests.get(url, timeout=20, stream=True, headers={'user-agent': 'kodeagent/0.0.1'})
+    response.raise_for_status()
+
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+        for chunk in response.iter_content(chunk_size=8192):
+            tmp_file.write(chunk)
+        tmp_file_path = tmp_file.name
+        if os.name == 'nt':
+            tmp_file_path = tmp_file_path.replace('\\', '/')
+    return tmp_file_path
+
+
+@tool
+def extract_as_markdown(file_path: str) -> str:
+    """
+    Extract the contents from PDF files (.pdf), Word Documents (.docx), and Excel spreadsheets (.xlsx)
+    as Markdown text. No other file type is supported. The text can be used for analysis with LLMs.
+    NOTE: The output returned by this function can be long and may involve various quote marks.
+
+    Args:
+        file_path: Path to a .pdf, .docx, or .xlsx file.
+
+    Returns:
+        The content of the file in Markdown format.
+    """
+    import re
+    import mimetypes
+
+    try:
+        from markitdown import MarkItDown
+    except ImportError as e:
+        raise ImportError(
+            '`markitdown` was not found! Please run `pip install markitdown[pdf,docx,xlsx]`.'
+        ) from e
+
+    md = MarkItDown(enable_plugins=False)
+    try:
+        result = md.convert(file_path.strip()).text_content
+
+        if mimetypes.guess_type(file_path) == 'application/pdf':
+            # Sometimes LLMs complain about these patterns when returning structured output
+            # https://stackoverflow.com/a/66678654/147021
+            cid_pattern = re.compile(r'\(cid:(\d+)\)')
+            matches = set(cid_pattern.findall(result))
+            for cid_num in matches:
+                cid_str = f'(cid:{cid_num})'
+                result = result.replace(cid_str, chr(int(cid_num) + 29))
+
+        return result
+    except Exception as e:
+        return str(e)
 
 
 class Task(pyd.BaseModel):
@@ -631,9 +928,9 @@ class CodeChatMessage(ChatMessage):
     successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
 
 
-class SupervisorMessage(pyd.BaseModel):
+class SupervisorTaskMessage(pyd.BaseModel):
     """
-    Messages for the supervisor-agent interaction.
+    Messages for the supervisor-agent task delegation.
     """
     agent_id: int = pyd.Field(
         description='Integer agent ID based on the instructions (starting from 0)'
@@ -643,6 +940,9 @@ class SupervisorMessage(pyd.BaseModel):
     )
     image_files: Optional[list[str]] = pyd.Field(
         description='Optional list of image file paths/URLs associated with the task'
+    )
+    facts_available: str = pyd.Field(
+        description='A list of objective facts collected/observed so far'
     )
     task_complete: bool = pyd.Field(
         description=(
@@ -762,7 +1062,8 @@ class Agent(ABC):
     async def _call_llm(
             self,
             messages: list[dict],
-            response_format: Optional[Type[ChatMessage | SupervisorMessage | DelegatedTaskStatus]] = None
+            response_format: Optional[Type[ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus]] = None,
+            trace_id = None,
     ) -> str:
         """
         Invoke the LLM to generate a response based on a given list of messages.
@@ -770,6 +1071,7 @@ class Agent(ABC):
         Args:
             messages: A list of messages (and optional images) to be sent to the LLM.
             response_format: The type of message to respond with.
+            trace_id: Langfuse trace ID.
 
         Returns:
             The LLM response as string.
@@ -781,7 +1083,14 @@ class Agent(ABC):
         if response_format:
             params['response_format'] = response_format
         params.update(self.litellm_params)
-        response = litellm.completion(**params)
+        response = litellm.completion(**params, metadata={'trace_id': str(trace_id), })
+        token_usage = {
+            'cost': response._hidden_params['response_cost'],
+            'prompt_tokens': response.usage.get('prompt_tokens'),
+            'completion_tokens': response.usage.get('completion_tokens'),
+            'total_tokens': response.usage.get('total_tokens'),
+        }
+        logger.info(token_usage)
 
         return response.choices[0].message['content']
 
@@ -866,9 +1175,10 @@ class Agent(ABC):
         """
         description = ''
         for t in self.tools:
-            description += f'Tool name: {t.name}'
-            # description += f'\n  * Schema: {t.args_schema.model_json_schema()}'
-            description += f'\nTool description: {t.description}'
+            description += f'- Tool name: {t.name}'
+            # description += f'\n  -
+            # Schema: {t.args_schema.model_json_schema()}'
+            description += f'\n- Tool description: {t.description}'
             description += '\n---\n'
 
         return description
@@ -959,13 +1269,24 @@ class ReActAgent(Agent):
         self._run_init(task, image_files)
 
         yield self.response(rtype='log', value=f'Solving task: `{self.task.task}`', channel='run')
+        plan: str = await self._call_llm(
+            messages=ku.make_user_message(
+                text_content=AGENT_PLAN_PROMPT.format(
+                    agent_type=self.__class__.__name__,
+                    task=self.task.task,
+                    task_files='\n'.join(self.task.image_files) if self.task.image_files else '',
+                    tool_names=self.get_tools_description(),
+                ),
+            ),
+            trace_id=self.task.id,
+        )
         for idx in range(self.max_iterations):
             if self.final_answer_found:
                 break
 
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
             # The thought & observation will get appended to the list of messages
-            async for update in self._think():
+            async for update in self._think(plan):
                 yield update
             async for update in self._act():
                 yield update
@@ -981,12 +1302,15 @@ class ReActAgent(Agent):
                 channel='run'
             )
 
-    async def _think(self) -> AsyncIterator[AgentResponse]:
+    async def _think(self, plan: Optional[str] = None) -> AsyncIterator[AgentResponse]:
         """
         Think about the next step to be taken to solve the given task.
 
         The LLM is prompted with the available tools and the TAO sequence so far. Based on them,
         the LLM will suggest the next action. "Think" of ReAct is also "Observe."
+
+        Args:
+            plan: A tentative plan to solve the task [Optional].
 
         Yields:
             Update from the thing step.
@@ -998,6 +1322,7 @@ class ReActAgent(Agent):
             task_files='\n'.join(self.task.image_files) if self.task.image_files else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
             tool_names=self.get_tools_description(),
+            plan=plan or '<No plan provided; please plan yourself>',
         )
         msg = await self._record_thought(message, ReActChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
@@ -1019,8 +1344,17 @@ class ReActAgent(Agent):
         """
         response = await self._call_llm(
             messages=ku.make_user_message(text_content=message, image_files=self.task.image_files),
-            response_format=response_format_class
+            response_format=response_format_class,
+            trace_id=self.task.id,
         )
+        # Sometimes parsing errors are noticed when the JSON appears to have long text, e.g.,
+        # contents of files
+        for _ in range(3):
+            try:
+                json.loads(response)
+                break
+            except JSONDecodeError:
+                response = json_repair.repair_json(response)
 
         msg: response_format_class = response_format_class.model_validate_json(response)
         msg.role = 'assistant'
@@ -1159,7 +1493,7 @@ class CodeRunner:
         self.allowed_imports: set[str] = set(allowed_imports)
         self.env: CODE_ENV_NAMES = env
         self.pip_packages: list[str] = re.split('[,;]', pip_packages) if pip_packages else []
-        self.default_timeout = 15
+        self.default_timeout = 20
         self.local_modules_to_copy = ['kutils.py']
         self.pip_packages_str = ' '.join(self.pip_packages)
 
@@ -1225,7 +1559,9 @@ class CodeRunner:
                 ' dangerous! Please consider using a different code runner environment.',
                 UserWarning
             )
-            with tempfile.NamedTemporaryFile(mode='w+t', suffix='.py', delete=False) as code_file:
+            with tempfile.NamedTemporaryFile(
+                    mode='w+t', suffix='.py', delete=False, encoding='utf-8'
+            ) as code_file:
                 code_file.write(source_code)
                 code_file.close()  # Close the file before execution
 
@@ -1236,7 +1572,9 @@ class CodeRunner:
                 result = sp.run(
                     [sys.executable, code_file.name],
                     shell=False, capture_output=True, text=True,
-                    timeout=self.default_timeout
+                    timeout=self.default_timeout,
+                    check=False,
+                    encoding='utf-8'
                 )
                 os.remove(code_file.name)
                 return result.stdout, result.stderr, result.returncode
@@ -1267,7 +1605,7 @@ class CodeRunner:
                     logger.info('Copied file %s...', a_file)
 
             logger.info('E2B sandbox info: %s', sbx.get_info())
-            execution = sbx.run_code(code=source_code, timeout=self.default_timeout)
+            execution = sbx.run_code(code=source_code, timeout=self.default_timeout * 1.5)
             std_out: str = '\n'.join(execution.logs.stdout)
             std_err: str = '\n'.join(execution.logs.stderr)
             ret_code: int = -1 if execution.error else 0
@@ -1340,7 +1678,7 @@ class CodeAgent(ReActAgent):
             allowed_imports = []
 
         # The following imports are allowed by default
-        self.allowed_imports = allowed_imports + ['datetime', 'typing']
+        self.allowed_imports = allowed_imports + ['datetime', 'typing', 'mimetypes']
         self.code_runner = CodeRunner(
             env=run_env,
             allowed_imports=self.allowed_imports + ['kutils'],
@@ -1374,12 +1712,15 @@ class CodeAgent(ReActAgent):
 
         return history
 
-    async def _think(self) -> AsyncIterator[AgentResponse]:
+    async def _think(self, plan: Optional[str] = None) -> AsyncIterator[AgentResponse]:
         """
         Think about the next step to be taken to solve the given task.
 
         The LLM is prompted with the available tools and the TCO sequence so far. Based on them,
         the LLM will suggest the next action/code.
+
+        Args:
+            plan: A tentative plan to solve the task [Optional].
 
         Yields:
             Update from the thing step.
@@ -1390,6 +1731,7 @@ class CodeAgent(ReActAgent):
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
             tool_names=self.get_tools_description(),
             authorized_imports=','.join(self.allowed_imports),
+            plan=plan or '<No plan provided; please plan yourself>'
         )
         msg = await self._record_thought(message, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
@@ -1501,49 +1843,46 @@ class SupervisorAgent(Agent):
             agents_desc += f'Agent# {idx}\n{agent.purpose}\n'
 
         for _ in range(self.max_iterations):
-            prompt = SUPERVISOR_PROMPT.format(
+            prompt = SUPERVISOR_TASK_PROMPT.format(
                 task=task,
                 task_files=image_files,
                 agents=agents_desc,
                 history=self.get_history(),
             ).strip()
             update = await self._call_llm(
-                ku.make_user_message(text_content=prompt), SupervisorMessage
+                ku.make_user_message(text_content=prompt),
+                SupervisorTaskMessage,
+                trace_id=self.task.id,
             )
-            task_delegation_msg: SupervisorMessage = SupervisorMessage.model_validate_json(update)
+            task_msg: SupervisorTaskMessage = SupervisorTaskMessage.model_validate_json(update)
 
-            if task_delegation_msg.task_complete:
+            if task_msg.task_complete:
                 yield AgentResponse(
                     type='final',
                     channel='supervisor',
-                    value=task_delegation_msg.final_answer,
+                    value=task_msg.final_answer,
                     metadata=None
                 )
                 self.add_to_history(
-                    message=ChatMessage(
-                        role='assistant',
-                        content=task_delegation_msg.final_answer
-                    )
+                    message=ChatMessage(role='assistant', content=task_msg.final_answer)
                 )
                 return
             else:
-                self.add_to_history(
-                    message=ChatMessage(
-                        role='assistant',
-                        content=(
-                            f'Delegating to Agent# {task_delegation_msg.agent_id} //'
-                            f' Sub-task: {task_delegation_msg.task} //'
-                            f' Files: {task_delegation_msg.image_files}'
-                        )
-                    )
+                content = (
+                    f'Delegating to Agent# {task_msg.agent_id} //'
+                    f' Sub-task: {task_msg.task} //'
+                    f' Files: {task_msg.image_files} //'
+                    f' Facts collected: {task_msg.facts_available}'
                 )
+                yield AgentResponse(type='log', channel='sup:run', value=content, metadata=None)
+                self.add_to_history(message=ChatMessage(role='assistant', content=content))
 
             updates: list[str] = []
             tools_evidence: list[tuple[str, dict]] = []
 
-            async for update in self.agents[task_delegation_msg.agent_id].run(  # type: AgentResponse
-                    task=task_delegation_msg.task,
-                    image_files=task_delegation_msg.image_files
+            async for update in self.agents[task_msg.agent_id].run(  # type: AgentResponse
+                    task=task_msg.task,
+                    image_files=task_msg.image_files
             ):
                 yield update
 
@@ -1571,7 +1910,7 @@ class SupervisorAgent(Agent):
             tools_evidence: list[tuple[str, dict]] = [(t, a) for (t, a) in tools_evidence if t]
             evidence += '\n\nTool usage evidence by the agent:\n'
             evidence += '\n'.join([f'Tool: {t} // args: {a}' for (t, a) in tools_evidence])
-            status = await self._check_if_task_done(task_delegation_msg.task, evidence)
+            status = await self._check_if_task_done(task_msg.task, evidence)
             if status.status:
                 self.add_to_history(
                     message=ChatMessage(
@@ -1609,7 +1948,9 @@ class SupervisorAgent(Agent):
         """
         prompt = SUPERVISOR_TASK_CHECK_PROMPT.format(task=task, response=evidence)
         response = await self._call_llm(
-            ku.make_user_message(prompt, None), DelegatedTaskStatus
+            ku.make_user_message(prompt, None),
+            DelegatedTaskStatus,
+            trace_id=self.task.id,
         )
 
         return DelegatedTaskStatus.model_validate_json(response)
@@ -1624,7 +1965,10 @@ class SupervisorAgent(Agent):
             task_files=self.image_files,
             history=self.get_history()
         )
-        response = await self._call_llm(ku.make_user_message(prompt, None))
+        response = await self._call_llm(
+            ku.make_user_message(prompt, None),
+            trace_id=self.task.id,
+        )
         yield AgentResponse(
             type='final',
             channel='supervisor',
@@ -1652,11 +1996,12 @@ def llm_vision_support(model_names: list[str]) -> list[bool]:
 
 def print_response(response: AgentResponse):
     """
-    A utility function to print agent's response in a terminal with colors.
+    A utility function to print agent's response in a terminal, optionally with colors.
 
     Args:
         response: A response obtained from an agent.
     """
+
     if response['type'] == 'final':
         msg = (
             response['value'].content
@@ -1675,23 +2020,28 @@ async def main():
     """
     litellm_params = {'temperature': 0}
     model_name = 'gemini/gemini-2.0-flash-lite'
-    # model_name = 'azure/gpt-4o'
+    # model_name = 'vertex_ai/gemini-2.0-flash'
+    # model_name = 'azure/gpt-4.1-mini'
+    # model_name = 'azure/gpt-4o-mini'
 
     agent1 = ReActAgent(
         name='Maths agent',
         model_name=model_name,
-        tools=[calculator],
+        tools=[calculator, ],
         max_iterations=3,
         litellm_params=litellm_params
     )
     agent2 = CodeAgent(
         name='Web agent',
         model_name=model_name,
-        tools=[web_search, visit_webpage],
-        run_env='e2b',
+        tools=[web_search, visit_webpage, extract_as_markdown, file_download],
+        run_env='host',
         max_iterations=5,
         litellm_params=litellm_params,
-        allowed_imports=['os', 're', 'time', 'random', 'requests', 'duckduckgo_search', 'markdownify'],
+        allowed_imports=[
+            'os', 're', 'time', 'random', 'requests', 'tempfile',
+            'duckduckgo_search', 'markdownify', 'markitdown',
+        ],
         pip_packages='duckduckgo_search~=8.0.1;markdownify~=1.1.0',
     )
     the_tasks = [
@@ -1708,14 +2058,20 @@ async def main():
             'What is four plus seven? Also, what are the festivals in Paris?'
             ' How they differ from Kolkata?',
             None
-        )
+        ),
+        (
+            'Summarize the notes from here:'
+            ' https://web.stanford.edu/class/cs102/lectureslides/ClassificationSlides.pdf',
+            None
+        ),
     ]
 
     print('CodeAgent demo\n')
-    for task, img_urls in the_tasks[:-1]:
+    for task, img_urls in the_tasks:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in agent2.run(task, image_files=img_urls):
             print_response(response)
+        print('\n\n')
 
     print('\n\nMulti-agent with supervisor demo\n')
 
@@ -1723,9 +2079,9 @@ async def main():
         name='Supervisor',
         model_name=model_name,
         agents=[agent1, agent2],
-        max_iterations=3
+        max_iterations=5
     )
-    task = the_tasks[-1]
+    task = the_tasks[-3]
     rich.print(f'[yellow][bold]User[/bold]: {task[0]}[/yellow]')
 
     async for response in agency.run(*task):
@@ -1733,4 +2089,9 @@ async def main():
 
 
 if __name__ == '__main__':
+    import os
+
+    # For Windows; in case of Unicode error with PDF extraction
+    os.environ['PYTHONUTF8'] = '1'
+
     asyncio.run(main())

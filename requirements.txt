@@ -1,4 +1,4 @@
-litellm~=1.67.0
+litellm~=1.70.0
 pydantic~=2.11.3
 python-dotenv~=1.1.0
 e2b-code-interpreter~=1.2.1
@@ -9,4 +9,7 @@ rich~=14.0.0
 
 # Dependencies for the tools
 duckduckgo_search~=8.0.1
-markdownify~=1.1.0
+markitdown[pdf, docx, xlsx]
+
+# Observability
+langfuse>=2.0.0
