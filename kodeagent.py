@@ -196,7 +196,8 @@ You self-reflect on your previous steps and outcomes, and identify if something 
 You are self-healing, capable of recovering from failures and overcoming any obstacles and reach your goal.
 
 Solving the task is an iterative process -- you propose a step and get feedback on how it went.
-It is OK if you make a mistake infrequently, but you MUST identify the mistake, diagnose, and correct it ASAP.
+It is OK if you make a mistake, but you MUST spot the mistake ASAP, diagnose it, correct it, and
+do not repeat it again.
 
 
 ## Task
@@ -753,7 +754,7 @@ def web_search(query: str, max_results: int = 10) -> str:
     # can set it to `False` but generally not recommended
     results = DDGS(verify=False).text(query, max_results=max_results)
     # DDGS throws a rate limit error
-    time.sleep(random.uniform(0.2, 1.2))
+    time.sleep(random.uniform(1.1, 2.2))
     if len(results) == 0:
         return 'No results found! Try a less restrictive/shorter query.'
 
@@ -762,45 +763,10 @@ def web_search(query: str, max_results: int = 10) -> str:
 
 
 @tool
-def visit_webpage(urls: list[str]) -> str:
-    """
-    Visit a list of webpages at the given URLs and get their content together as a markdown string.
-
-    Args:
-        urls: A list of Web page URLs to visit.
-
-    Returns:
-        The combined content of the pages.
-    """
-    import re
-    import requests
-
-    from markdownify import markdownify
-
-    text = ''
-
-    for url in urls:
-        try:
-            response = requests.get(url, timeout=20, headers={'user-agent': 'kodeagent/0.0.1'})
-            response.raise_for_status()
-            if response.status_code == 200:
-                md_content = markdownify(response.text).strip()
-                md_content = re.sub(r'\n{3,}', '\n\n', md_content)
-                if len(md_content) > 8192:
-                    text += (
-                            md_content[:8192] +
-                            '\n..._Content truncated to stay below 8192 characters_...\n'
-                    )
-        except Exception as e:
-            text += f'\nAn error occurred while reading this {url}: {e}\n'
-
-    return text
-
-
-@tool
 def file_download(url: str) -> str:
     """
     Download a file from the Web and save it locally on the disk.
+    (If the `extract_as_markdown` tool does not work, this can be used an alternative.)
 
     Args:
         url: The URL pointing to the file (must be a correct URL).
@@ -825,14 +791,23 @@ def file_download(url: str) -> str:
 
 
 @tool
-def extract_as_markdown(file_path: str) -> str:
+def extract_as_markdown(
+        url_or_file_path: str,
+        scrub_links: bool = False,
+        max_length: int = None
+) -> str:
     """
-    Extract the contents from PDF files (.pdf), Word Documents (.docx), and Excel spreadsheets (.xlsx)
-    as Markdown text. No other file type is supported. The text can be used for analysis with LLMs.
-    NOTE: The output returned by this function can be long and may involve various quote marks.
+    Extract the contents from HTML files (.html), PDF files (.pdf), Word Documents (.docx),
+    and Excel spreadsheets (.xlsx) as Markdown text. No other file type is supported.
+    The text can be used for analysis with LLMs. Input can be a URL or a local file path.
+    NOTE: The output returned by this function can be long and may involve lots of quote marks.
 
     Args:
-        file_path: Path to a .pdf, .docx, or .xlsx file.
+        url_or_file_path: URL or Path to a .html, .pdf, .docx, or .xlsx file.
+        scrub_links: If `True`, removes all links from the extracted Markdown text. This should be
+         set only when you are confident that the links are not required.
+        max_length: If set, limit the output to the first `max_length` characters. This can be used
+         to truncate the output but doing so can also lead to loss of information.
 
     Returns:
         The content of the file in Markdown format.
@@ -849,20 +824,61 @@ def extract_as_markdown(file_path: str) -> str:
 
     md = MarkItDown(enable_plugins=False)
     try:
-        result = md.convert(file_path.strip()).text_content
+        result = md.convert(url_or_file_path.strip()).text_content
 
-        if mimetypes.guess_type(file_path) == 'application/pdf':
-            # Sometimes LLMs complain about these patterns when returning structured output
-            # https://stackoverflow.com/a/66678654/147021
+        if mimetypes.guess_type(url_or_file_path)[0] == 'application/pdf':
+            # Handling (cid:NNN) occurrences in PDFs
             cid_pattern = re.compile(r'\(cid:(\d+)\)')
             matches = set(cid_pattern.findall(result))
             for cid_num in matches:
                 cid_str = f'(cid:{cid_num})'
                 result = result.replace(cid_str, chr(int(cid_num) + 29))
 
+        if scrub_links:
+            # Remove Markdown links [text](url)
+            result = re.sub(r'\[([^\]]+)\]\((https?:\/\/[^\)]+)\)', r'\1', result)
+
+        if max_length is not None:
+            result = result[:max_length]
+
         return result
     except Exception as e:
         return str(e)
+
+
+@tool
+def get_youtube_transcript(video_id: str) -> str:
+    """
+    Retrieve the transcript/subtitles for a given YouTube video. It also works for automatically
+    generated subtitles, supports translating subtitles. The input should be a valid Youtube
+    video ID. E.g., the URL https://www.youtube.com/watch?v=aBc4E has the video ID `aBc4E`.
+
+    Args:
+        video_id: YouTube video ID from the URL.
+
+    Returns:
+        The transcript/subtitle of the video, if available.
+    """
+    import youtube_transcript_api
+    from youtube_transcript_api import YouTubeTranscriptApi
+
+    transcript_text = ''
+    try:
+        transcript = YouTubeTranscriptApi().fetch(video_id)
+        transcript_text = ' '.join([item.text for item in transcript.snippets])
+    except youtube_transcript_api._errors.TranscriptsDisabled:
+        transcript_text = (
+            '*** ERROR: Could not retrieve a transcript for the video -- subtitles appear to be'
+            ' disabled for this video, so this tool cannot help, unfortunately.'
+        )
+
+    return transcript_text
+
+
+# The different types of senders of messages
+MESSAGE_ROLES = Literal['user', 'assistant', 'system', 'tool']
+# The different types of updates emitted by an agent
+AGENT_RESPONSE_TYPES = Literal['step', 'final', 'log']
 
 
 class Task(pyd.BaseModel):
@@ -870,8 +886,8 @@ class Task(pyd.BaseModel):
     Task to be solved by an agent.
     """
     id: str = pyd.Field(description='Auto-generated task ID', default_factory=uuid.uuid4)
-    task: str = pyd.Field(description='Task description')
-    image_files: Optional[list[str]] = pyd.Field(description='A list of image file paths or URLs')
+    description: str = pyd.Field(description='Task description')
+    files: Optional[list[str]] = pyd.Field(description='A list of file paths or URLs')
     result: Optional[Any] = pyd.Field(description='Task result', default=None)
     is_finished: bool = pyd.Field(
         description='Whether the task has finished running', default=False
@@ -879,10 +895,6 @@ class Task(pyd.BaseModel):
     is_error: bool = pyd.Field(
         description='Whether the task execution resulted in any error', default=False
     )
-
-
-# The different types of senders of messages
-MESSAGE_ROLES = Literal['user', 'assistant', 'system', 'tool']
 
 
 class ChatMessage(pyd.BaseModel):
@@ -966,14 +978,12 @@ class DelegatedTaskStatus(pyd.BaseModel):
     reason: str = pyd.Field(
         description='Brief explanation for the status, e.g., why the task is incomplete'
     )
-    how_to_fix: str = pyd.Field(description='Briefly describe how to/what would fix the task result')
+    how_to_fix: str = pyd.Field(
+        description='Briefly describe how to/what would fix the task result'
+    )
     final_answer: str = pyd.Field(
         description='Final solution of the task, if found. Otherwise, empty string.'
     )
-
-
-# The different types of updates emitted by an agent
-AGENT_RESPONSE_TYPES = Literal['step', 'final', 'log']
 
 
 class AgentResponse(TypedDict):
@@ -1029,9 +1039,9 @@ class Agent(ABC):
         } if tools else {}
 
         self.task: Optional[Task] = None
-        self.image_files: Optional[list[str]] = None
         self.messages: list[ChatMessage] = []
         self.msg_idx_of_new_task: int = 0
+        self.final_answer_found = False
 
     def __str__(self):
         """
@@ -1045,7 +1055,7 @@ class Agent(ABC):
     async def run(
             self,
             task: str,
-            image_files: Optional[list[str]] = None
+            files: Optional[list[str]] = None,
     ) -> AsyncIterator[AgentResponse]:
         """
         Execute a task using the agent. All subclasses must override this method to solve tasks
@@ -1053,7 +1063,7 @@ class Agent(ABC):
 
         Args:
             task: A description of the task.
-            image_files: An optional list of image file paths or URLs.
+            files: An optional list of file paths or URLs.
 
         Yields:
             An update from the agent.
@@ -1062,16 +1072,18 @@ class Agent(ABC):
     async def _call_llm(
             self,
             messages: list[dict],
-            response_format: Optional[Type[ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus]] = None,
-            trace_id = None,
+            response_format: Optional[
+                Type[ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus]
+            ] = None,
+            trace_id: Optional[str]=None,
     ) -> str:
         """
         Invoke the LLM to generate a response based on a given list of messages.
 
         Args:
             messages: A list of messages (and optional images) to be sent to the LLM.
-            response_format: The type of message to respond with.
-            trace_id: Langfuse trace ID.
+            response_format: Optional type of message the LLM should respond with.
+            trace_id: (Optional) Langfuse trace ID.
 
         Returns:
             The LLM response as string.
@@ -1083,7 +1095,8 @@ class Agent(ABC):
         if response_format:
             params['response_format'] = response_format
         params.update(self.litellm_params)
-        response = litellm.completion(**params, metadata={'trace_id': str(trace_id), })
+        response = litellm.completion(**params, metadata={'trace_id': str(trace_id)})
+
         token_usage = {
             'cost': response._hidden_params['response_cost'],
             'prompt_tokens': response.usage.get('prompt_tokens'),
@@ -1091,30 +1104,18 @@ class Agent(ABC):
             'total_tokens': response.usage.get('total_tokens'),
         }
         logger.info(token_usage)
-
         return response.choices[0].message['content']
 
-    def _create_task(self, description: str, image_files: Optional[list[str]] = None):
+    def _run_init(self, description: str, files: Optional[list[str]] = None):
         """
-        Create a new task to be solved by the agent.
-
-        Args:
-            description: The task description.
-            image_files: An optional list of image file paths or URLs.
+        Initialize the running of a task by an agent.
         """
-        self.task = Task(task=description, image_files=image_files)
-        self.image_files = image_files
+        self.add_to_history(ChatMessage(role='user', content=description))
+        self.task = Task(description=description, files=files)
         # Since `messages` stores every message generated while interacting with the agent,
         # we need to know which all messages correspond to the current task
         # (so that the ones pertaining to the previous tasks can be ignored)
         self.msg_idx_of_new_task = len(self.messages)
-
-    def _run_init(self, task: str, image_files: Optional[list[str]] = None):
-        """
-        Initialize the running of a task by an agent.
-        """
-        self.add_to_history(ChatMessage(role='user', content=task))
-        self._create_task(description=task, image_files=image_files)
         self.final_answer_found = False  # Reset from any previous task
 
     def response(
@@ -1254,32 +1255,37 @@ class ReActAgent(Agent):
     async def run(
             self,
             task: str,
-            image_files: Optional[list[str]] = None
+            files: Optional[list[str]] = None
     ) -> AsyncIterator[AgentResponse]:
         """
         Solve a task using ReAct's TAO loop.
 
         Args:
             task: A description of the task.
-            image_files: An optional list of image file paths or URLs.
+            files: An optional list of file paths or URLs.
 
         Yields:
             An update from the agent.
         """
-        self._run_init(task, image_files)
+        self._run_init(task, files)
 
-        yield self.response(rtype='log', value=f'Solving task: `{self.task.task}`', channel='run')
-        plan: str = await self._call_llm(
-            messages=ku.make_user_message(
-                text_content=AGENT_PLAN_PROMPT.format(
-                    agent_type=self.__class__.__name__,
-                    task=self.task.task,
-                    task_files='\n'.join(self.task.image_files) if self.task.image_files else '',
-                    tool_names=self.get_tools_description(),
-                ),
-            ),
-            trace_id=self.task.id,
+        yield self.response(
+            rtype='log',
+            value=f'Solving task: `{self.task.description}`',
+            channel='run'
         )
+        messages = ku.make_user_message(
+            text_content=AGENT_PLAN_PROMPT.format(
+                agent_type=self.__class__.__name__,
+                task=self.task.description,
+                task_files='\n'.join(self.task.files) if self.task.files else '',
+                tool_names=self.get_tools_description(),
+            ),
+            files=self.task.files,
+        )
+        print('>>>', messages)
+        plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
+
         for idx in range(self.max_iterations):
             if self.final_answer_found:
                 break
@@ -1318,8 +1324,8 @@ class ReActAgent(Agent):
         # Note: we're not going to chat with the LLM by sending a sequence of messages
         # Instead, every think step will send a single message containing all historical info
         message = REACT_PROMPT.format(
-            task=self.task.task,
-            task_files='\n'.join(self.task.image_files) if self.task.image_files else '',
+            task=self.task.description,
+            task_files='\n'.join(self.task.files) if self.task.files else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
             tool_names=self.get_tools_description(),
             plan=plan or '<No plan provided; please plan yourself>',
@@ -1343,7 +1349,7 @@ class ReActAgent(Agent):
             A message of the `response_format_class` type.
         """
         response = await self._call_llm(
-            messages=ku.make_user_message(text_content=message, image_files=self.task.image_files),
+            messages=ku.make_user_message(text_content=message, files=self.task.files),
             response_format=response_format_class,
             trace_id=self.task.id,
         )
@@ -1738,8 +1744,8 @@ class CodeAgent(ReActAgent):
             Update from the thing step.
         """
         message = CODE_AGENT_PROMPT.format(
-            task=self.task.task,
-            task_files='\n'.join(self.task.image_files) if self.task.image_files else '',
+            task=self.task.description,
+            task_files='\n'.join(self.task.files) if self.task.files else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
             tool_names=self.get_tools_description(),
             authorized_imports=','.join(self.allowed_imports),
@@ -1836,19 +1842,19 @@ class SupervisorAgent(Agent):
     async def run(
             self,
             task: str,
-            image_files: Optional[list[str]] = None,
+            files: Optional[list[str]] = None,
     ) -> AsyncIterator[AgentResponse]:
         """
         Solve a task using the supervisor agent/agency.
 
         Args:
             task: A description of the task.
-            image_files: An optional list of image file paths or URLs.
+            files: An optional list of file paths or URLs.
 
         Yields:
             An update from the agency.
         """
-        self._run_init(task, image_files)
+        self._run_init(task, files)
 
         agents_desc = ''
         for idx, agent in enumerate(self.agents):
@@ -1857,12 +1863,12 @@ class SupervisorAgent(Agent):
         for _ in range(self.max_iterations):
             prompt = SUPERVISOR_TASK_PROMPT.format(
                 task=task,
-                task_files=image_files,
+                task_files=files,
                 agents=agents_desc,
                 history=self.get_history(),
             ).strip()
             update = await self._call_llm(
-                ku.make_user_message(text_content=prompt),
+                ku.make_user_message(text_content=prompt, files=files),
                 SupervisorTaskMessage,
                 trace_id=self.task.id,
             )
@@ -1879,22 +1885,22 @@ class SupervisorAgent(Agent):
                     message=ChatMessage(role='assistant', content=task_msg.final_answer)
                 )
                 return
-            else:
-                content = (
-                    f'Delegating to Agent# {task_msg.agent_id} //'
-                    f' Sub-task: {task_msg.task} //'
-                    f' Files: {task_msg.image_files} //'
-                    f' Facts collected: {task_msg.facts_available}'
-                )
-                yield AgentResponse(type='log', channel='sup:run', value=content, metadata=None)
-                self.add_to_history(message=ChatMessage(role='assistant', content=content))
+
+            content = (
+                f'Delegating to Agent# {task_msg.agent_id} //'
+                f' Sub-task: {task_msg.task} //'
+                f' Files: {task_msg.image_files} //'
+                f' Facts collected: {task_msg.facts_available}'
+            )
+            yield AgentResponse(type='log', channel='sup:run', value=content, metadata=None)
+            self.add_to_history(message=ChatMessage(role='assistant', content=content))
 
             updates: list[str] = []
             tools_evidence: list[tuple[str, dict]] = []
 
             async for update in self.agents[task_msg.agent_id].run(  # type: AgentResponse
                     task=task_msg.task,
-                    image_files=task_msg.image_files
+                    files=task_msg.image_files
             ):
                 yield update
 
@@ -1960,7 +1966,7 @@ class SupervisorAgent(Agent):
         """
         prompt = SUPERVISOR_TASK_CHECK_PROMPT.format(task=task, response=evidence)
         response = await self._call_llm(
-            ku.make_user_message(prompt, None),
+            ku.make_user_message(prompt),
             DelegatedTaskStatus,
             trace_id=self.task.id,
         )
@@ -1974,13 +1980,10 @@ class SupervisorAgent(Agent):
         """
         prompt = SALVATION_PROMPT.format(
             task=self.task,
-            task_files=self.image_files,
+            task_files=self.task.files,
             history=self.get_history()
         )
-        response = await self._call_llm(
-            ku.make_user_message(prompt, None),
-            trace_id=self.task.id,
-        )
+        response = await self._call_llm(ku.make_user_message(prompt), trace_id=self.task.id)
         yield AgentResponse(
             type='final',
             channel='supervisor',
@@ -2046,13 +2049,13 @@ async def main():
     agent2 = CodeAgent(
         name='Web agent',
         model_name=model_name,
-        tools=[web_search, visit_webpage, extract_as_markdown, file_download],
+        tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
         run_env='host',
         max_iterations=5,
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'duckduckgo_search', 'markdownify', 'markitdown',
+            'duckduckgo_search', 'markdownify', 'markitdown', 'youtube_transcript_api',
         ],
         pip_packages='duckduckgo_search~=8.0.1;markdownify~=1.1.0',
     )
@@ -2072,37 +2075,34 @@ async def main():
             None
         ),
         (
-            'Summarize the notes from here:'
-            ' https://web.stanford.edu/class/cs102/lectureslides/ClassificationSlides.pdf',
-            None
+            'Summarize the notes',
+            ['https://web.stanford.edu/class/cs102/lectureslides/ClassificationSlides.pdf',]
         ),
     ]
 
     print('CodeAgent demo\n')
-    for task, img_urls in the_tasks:
+    for task, img_urls in the_tasks[-2:]:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
-        async for response in agent2.run(task, image_files=img_urls):
+        async for response in agent2.run(task, files=img_urls):
             print_response(response)
         print('\n\n')
 
-    print('\n\nMulti-agent with supervisor demo\n')
-
-    agency = SupervisorAgent(
-        name='Supervisor',
-        model_name=model_name,
-        agents=[agent1, agent2],
-        max_iterations=5
-    )
-    task = the_tasks[-2]
-    rich.print(f'[yellow][bold]User[/bold]: {task[0]}[/yellow]')
-
-    async for response in agency.run(*task):
-        print_response(response)
+    # print('\n\nMulti-agent with supervisor demo\n')
+    #
+    # agency = SupervisorAgent(
+    #     name='Supervisor',
+    #     model_name=model_name,
+    #     agents=[agent1, agent2],
+    #     max_iterations=5
+    # )
+    # task = the_tasks[-2]
+    # rich.print(f'[yellow][bold]User[/bold]: {task[0]}[/yellow]')
+    #
+    # async for response in agency.run(*task):
+    #     print_response(response)
 
 
 if __name__ == '__main__':
-    import os
-
     # For Windows; in case of Unicode error with PDF extraction
     os.environ['PYTHONUTF8'] = '1'
 

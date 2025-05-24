@@ -2,6 +2,7 @@ litellm~=1.70.0
 pydantic~=2.11.3
 python-dotenv~=1.1.0
 e2b-code-interpreter~=1.2.1
+requests~=2.32.3
 json_repair~=0.44.1
 
 # Dependency for colored display on terminals
@@ -10,6 +11,7 @@ rich~=14.0.0
 # Dependencies for the tools
 duckduckgo_search~=8.0.1
 markitdown[pdf, docx, xlsx]
+youtube-transcript-api~=1.0.3
 
 # Observability
 langfuse>=2.0.0
