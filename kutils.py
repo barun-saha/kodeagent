@@ -50,7 +50,6 @@ def detect_file_type(url: str) -> str:
         if content_disposition and 'filename=' in content_disposition:
             file_name = content_disposition.split('filename=')[1].strip()
             file_extension = file_name.split('.')[-1]
-            print(f'Detected file type from Content-Disposition: {file_extension}')
             return file_extension  # If this works, return immediately
 
         # Step 2: If HEAD didn't give useful info, send GET request for more details
@@ -58,12 +57,11 @@ def detect_file_type(url: str) -> str:
         content_type = response.headers.get('Content-Type')
 
         if content_type and content_type != 'application/json':  # Avoid false positives
-            print(f'Detected Content-Type from GET request: {content_type}')
             return content_type
 
         return 'Unknown file type'
     except requests.RequestException as e:
-        print(f'Error detecting file type: {e}')
+        logger.error('Error detecting file type: %s', str(e))
         return 'Unknown file type'
 
 

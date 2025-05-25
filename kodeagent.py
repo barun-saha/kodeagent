@@ -185,137 +185,123 @@ Below is the history of the interaction so far, showing the interleaving "Though
 '''
 
 CODE_AGENT_PROMPT = '''
-You are an expert assistant, helpful and polite, who can solve any complex task using code blobs. 
-Given a task, you think about how to solve it, use tools (user-defined Python functions) and code
-to solve the steps, observe the outcomes, and then think again until a final answer is found.
+You are an expert, helpful agent designed to solve complex tasks iteratively using available tools & Python code.
 
-You are immensely capable!
-You practise critical thinking and self-questioning to understand nuances of the task, plan, and steps.
-You use self-reasoning to identify how to proceed next optimally.
-You self-reflect on your previous steps and outcomes, and identify if something went wrong.
-You are self-healing, capable of recovering from failures and overcoming any obstacles and reach your goal.
+Your core operating principles are:
+1. **Iterative Problem Solving:** Propose a step (`Thought`), execute code/tool use (`Code`), observe
+  the outcome (`Observation`), then refine.
+2. **Self-Correction:** Meticulously analyze each `Observation`. If an error or unexpected result
+  occurs, diagnose and rectify it in the subsequent `Thought` and `Code`.
+  Do not repeat past mistakes.
+3. **Avoid Loops & Advance Progress:** Before writing any `Code` block, you MUST carefully review
+  the `Observation` from the previous step and the `Current Interaction` history. If a sub-task is
+  completed or an action has already yielded a result, DO NOT repeat the same `Code`. Instead,
+  generate `Code` for the *next logical step* based on your evolving `Thought`.
+  Reuse previous `Code` results whenever possible.
+4. **Critical Thinking:** Reason optimally, adapting the solution approach as needed.
 
-Solving the task is an iterative process -- you propose a step and get feedback on how it went.
-It is OK if you make a mistake, but you MUST spot the mistake ASAP, diagnose it, correct it, and
-do not repeat it again.
 
+# Task
 
-## Task
-
-Here's a description of the task you need to solve:
+Here's the task you need to solve:
 {task}
 
-(Optional) input file paths/URLs associated with this task are as follows:
+(Optional) Input files/URLs for this task:
 {task_files}
 
 
 ## Tools
 
-The following *specialized* tools are available to you, enhancing your capabilities:
+The following *specialized* tools are available for your use:
 {tool_names}
 
-You are responsible for writing Python code and using the available tools in any sequence
-you deem appropriate to complete the task at hand. This may require breaking the task into subtasks
-and using different tools to complete each subtask.
-
-
-## Allowed Imports
-
-In addition to using the aforementioned tools, you are allowed to import (only) the following
-standard Python libraries in the code your write (`*` means you can import any lib) to solve the task:
+You are responsible for writing Python code to use these tools and only the following standard libraries:
 {authorized_imports}
 
-(Do NOT import the provided tool names -- they are already available to you).
-
-  
-## Output Format
-
-Please answer in the same language as the question and use the following format:
-
-Thought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.
-Code: ```py
-# Write your Python code here...
-print(useful_information)
-```
-
-The `Code` block presents simple Python code to solve the step. Your code can use `print()` to save
-any important information, e.g., result of a computation or output of a function call. These print
-outputs from code execution will then become available as `Observation` as input for the next step.
-Also, the code should be enclosed within triple backticks.  
-
-ALWAYS start with a `Thought`.
-If this format is used, you will be responded back in the following format:
-
-Observation: tool use response
-
-Keep repeating the above format (Thought-Code-Observation cycle) till you have enough
-information to answer the question without using any more tools.
-At that point, you MUST respond in one of the following two formats:
-
-Thought: I can answer without using any more tools. I'll use the user's language to answer
-Answer: [your answer here (In the same language as the user's question)]
-Successful: True
-
-Thought: I cannot answer the question with the provided tools.
-Answer: [your answer here (In the same language as the user's question)]
-Successful: False
-
-The `Successful` flag is set to `False` in the second case since the task was failed to be solved.
-This flag should be always False until you reach the final step and decide that the task is complete.
-
-You meticulously analyze the `Observation` from each tool use.
-Based on the `Observation`, you determine if the previous step was successful and what
-the implications are for the next step.
-If the `Observation` indicates an error or an unexpected result, you immediately formulate a plan
-to diagnose and rectify the issue in the subsequent `Thought` and `Code`.
+Do NOT import the provided tool names.
 
 
 ## Task Plan
 
-Here's a general plan to solve the task.
-Align your `Thought` with the steps from the plan and follow this trajectory closely.
-The plan may not be fool-proof. You MUST adapt when necessary: you can add/edit/combine/skip steps as needed.
-E.g., code/tool use can achieve multiple steps from the reference/logical plan in a single step.
+Optionally, here's a general plan (ignore if unavailable). 
+Align your `Thought` with the steps from the plan, marking achieved steps mentally.
 {plan}
 
-Based on the current state of the Thought-Code-Observation, you will identify what steps from
-the plan have already been achieved and what needs to be done next, thus frame your `Thought`.
+
+# Output Format
+
+Adhere strictly to the following Thought-Code-Observation cycle:
+
+Thought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.
+Code: ```py
+# Write your Python code here
+print(useful_result_information_found)
+```
+Observation: [Output from code execution or tool use.]
+
+In `Thought`, based on the current task status and the `Observation` from the previous step,
+describe precisely your next action and explaining why this specific `Code` block is necessary now.
+If a sub-task is complete, articulate how you will move to the next.
+If you see a loop, explain how you will break it.
+
+Use `print()` for any result/useful information you want to observe based on code execution.
+When necessary, you can apply your innate capabilities (e.g., summarization, translation, static
+code analysis, and so on) on what you see under `Observation`.
+Avoid printing trivial text (e.g., printing to say that you will do something).
+
+Every iteration of the Thought-Code-Observation cycle must move you closer to completing the task.
+Keep track of the steps completed and pending.
+Your `Thought` for each turn must focus on what needs to be done next to *advance* the task.
+Repeat this cycle until you have enough information to provide a final answer.
+For the final answer, use one of these formats:
+
+Thought: I have enough information to answer. I will use the user's language.
+Answer: [Your answer in the user's language]
+Successful: True
+
+Thought: I cannot answer the question with the provided tools/information.
+Answer: [Your explanation in the user's language]
+Successful: False
+
+The `Successful` flag should only be `True` for a completed task.
+
+Craft your final answer by carefully reading the instructions from the task.
+When applicable, follow the input style from the given task.
 
 
-## Task Solving Examples
+# Examples & Anti-Patterns (with annotations)
 
-The following examples illustrate the iterative Thought-Code-Observation process used
-to tackle complex tasks using notional tools (notice how a `Thought` explicitly reflects
-on the previous `Observation`):
+The examples below illustrate the Thought-Code-Observation process and common mistakes to AVOID.
+IMPORTANT: Every `Code` block is independent. Variables from one block are NOT available in subsequent blocks.
 
 ---
 [Task: Generate an image of the oldest person in this document.]
 
-Thought: I will begin by identifying the oldest person mentioned in the document. I will use the `document_qa` tool for this purpose. I only need to print the answer, not the entire document.
+Thought: The current language of the user is: English. I will begin by identifying the oldest person mentioned in the document. I will use the document_qa tool for this purpose. I only need to print the answer, not the entire document.
 Code: ```py
 answer = document_qa(document=document, question='Who is the oldest person mentioned?')
 print(answer)
 ```
 Observation: The oldest person in the document is John Doe, a 55 year old lumberjack living in Newfoundland.
 
-Thought: Based on document search, I have identified John Doe, aged 55, as the oldest person. He lives in Newfoundland, Canada. Now, I'll use the `image_generator` tool to generate his portrait.  
+Thought: Based on document search in the previous step, I have identified John Doe, aged 55, as the oldest person. He lives in Newfoundland, Canada. Now, I'll use the `image_generator` tool to generate his portrait.
 Code: ```py
 image_path = image_generator(prompt='A portrait of John Doe, a 55-year-old man living in Canada.')
 print(f'The output image file is: {{image_path}}')
 ```
 Observation: The output image file is: image.png
 
-Thought: Based on the given document, I have identified John Doe (55) as the oldest person. I have also generated his portrait and saved it in the `image.png` file.
-Answer: The output image file is: image.png
+Thought: Based on the given document, I have identified John Doe (55) as the oldest person. I have also generated his portrait and saved it in the image.png file.
+Answer: An image of the oldest person has been generated and saved as image.png
 Successful: True
 
 ---
 [Task: Which city has the highest population: Guangzhou or Shanghai?]
 
-Thought: I need to get the populations for both cities and compare them: I will use the tool `search` to get the population of both cities. Since search results are important for this task, I'll print them.
+Thought: The current language of the user is: English. I need to get the populations for both cities and compare them: I will use the tool search to get the population of both cities. Since search results are important for this task, I'll print them.
 Code: ```py
 for city in ['Guangzhou', 'Shanghai']:
-    print(f'Population {{city}}:', search(f'{{city}} population')
+print(f'Population {{city}}:', search(f'{{city}} population'))
 ```
 Observation: Population Guangzhou: ['Guangzhou has a population of 15 million inhabitants as of 2021.']
 Population Shanghai: 26 million (2019)
@@ -327,70 +313,70 @@ Successful: True
 ---
 [Task: Generate a video of the moon.]
 
-Thought: The user has asked to generate a video of the moon. Unfortunately, I do not have any tool that can generate a video. So, I can't solve this task.
+Thought: The current language of the user is: English. The user has asked to generate a video of the moon. Unfortunately, I do not have any tool that can generate a video. So, I can't solve this task.
 Answer: Unfortunately, I lack the ability to solve this task at this moment. May I help you with something else?
 Successful: False
 
 ---
-[Task: Plot the first two cols from http://example.com/data.csv]
-
-Thought: I need to plot a graph based on the contents of the file, but I do not need to print the contents. So, I can achieve this in a single code block. First, I'll download the file and save locally using the tool `download_file`. Then, use the `get_cols` tool to get the first two columns. Finally, I'll plot them using the `line_plot` tool.
-Code: ```py
-file_path = download_file(url='http://example.com/data.csv')
-data = get_cols(file_path)
-img_path = line_plot(data, cols=[1, 2])
-print(f'The output image file is: {{img_path}}')
-```
-Observation: The output image file is: figure.png
-Successful: True
-
----
 [Task: Translate the content of 'article.txt' into Bengali]
 
-Thought: The user wants a translation of 'article.txt'. I will first read the content of the file using the `read_file_text` tool. Since no specific tool for translation is available, I'll print the contents so that it becomes available to the LLM.
+Thought: The user wants a translation of 'article.txt'. I will first read the content of the file using the read_file_text tool. Since no specific tool for translation is available, I'll print the contents so that it becomes available to me (the LLM) for translation.
 Code: ```py
 text = read_file_text(file_path='article.txt')
 print(text)
 ```
 Observation: Hello, how are you?
 
-Thought: In the previous step, have already read the `article.txt` file and printed its contents: `Hello, how are you?`. I can translate the text into Bengali myself, without using any tool, and I'll provide the final answer.
-Answer: The contents translated into Bengali: হ্যালো, কেমন আছো?
+Thought: In the previous step, I have already read the 'article.txt' file and printed its contents: 'Hello, how are you?'. I can translate this text into Bengali (output language) myself without using any further tools and provide the final answer.
+Answer: হ্যালো, কেমন আছো?
 Successful: True
 
 ---
 [Task: Word count in 'article.txt']
 
-Thought: To count the words in `article.txt`, I will first read the contents of the file using the `read_file_text` tool and store in a variable. Then I'll use Python code to directly split the string into a list of words, and then find the length of the list. Since the content of the file are not required, I will not print them. Only print the word count.
+Thought: To count the words in 'article.txt', I will first read its contents using Python code. Then, I'll split the text into words and count them. Since only the word count is required, I won't print the file contents.
 Code: ```py
-text = read_file_text(file_path='article.txt')
+with open('article.txt', 'r', encoding='utf-8') as file:
+    text = file.read()
 count = len(text.split())
 print(f'The file has {{count}} words')
 ```
 Observation: The file has 567 words
+
+Thought: I know the word count in article.txt: 567.
+Answer: The file has 567 words.
 Successful: True
 
+---
+[Task: Plot data from the file at http://example.com/data.csv]
 
-## Anti-Patterns to AVOID to Improve Your `Code` & Accuracy
+Thought: The current language of the user is: English. I need to plot data from the CSV. I will first download the file using `download_file`, then read its contents using `read_csv_file`, and finally plot the first two columns using `line_plot`. I will only print the image path, not the entire data.
+Code: ```py
+file_path = download_file(url='http://example.com/data.csv')
+data = read_csv_file(file_path)
+img_path = line_plot(data, cols=[1, 2])
+print(f'The image path is: {{img_path}}')
+```
+Observation: The output image file is: figure.png
 
-The following examples illustrate common mistakes to AVOID when writing `Code`.
-Understanding these anti-patterns is VITAL to reduce time, cost, and improve accuracy.
-- Mistakes and problems in the incorrect `Code` are annotated with `<---`.
-- Correct usage for the same problem is shown immediately below for comparison and learning.
+Thought: The graph has been plotted and saved as figure.png.
+Answer: The graph is saved as figure.png
+Successful: True
+
 
 ---
 [Task: What is the current count? Double it.]
 
-Thought: I will get the current count using `some_counter` tool and assign the value to a variable x.
+Thought: The current language of the user is: English. I will get the current count using `some_counter` tool and assign the value to a variable x.
 Code: ```py
 x = some_counter()
 print('Current value:', x)
 ```
 Observation: Current value: 11
 
-Thought: From the previous step, the current count is 11. I'll double the value.
+Thought: The current language of the user is: English. From the previous step, the current count is 11. I'll double the value.
 Code: ```py
-x = 2 * x    <--- This will cause an ERROR since `x` is undefined within THIS Code block! Only use the names already defined in a given Code block.
+x = 2 * x  # <--- ERROR since x is undefined within THIS Code block! Only use the names already defined in a given Code block.
 ```
 Observation: Error: name 'x' is not defined
 
@@ -408,11 +394,11 @@ New value: 22
 ---
 [Task: Plot data from the file at http://example.com/data.csv]
 
-Thought: I need to download the file at first using `download_file`.
+Thought: The current language of the user is: English. I need to download the file at first using `download_file`.
 Code: ```py
 file_path = download_file(url='http://example.com/data.csv')
 data = read_csv_file(file_path)
-print(data)    <--- Not an error but PROBLEMATIC since the file can be large and its contents do NOT need to be displayed for this task! Printing the contents here increases cost, time, and chances of error.
+print(data)  # <--- Not an error but PROBLEMATIC since the file can be large and its contents do NOT need to be displayed for this task! Printing the contents here increases cost, time, and chances of error.
 ```
 
 **CORRECT CODE BLOCK FOR THE TASK**:
@@ -427,50 +413,49 @@ print(f'The image path is: {{img_path}}')
 ---
 [Task: Word count in https://example.com/article.txt]
 
-Thought: I'll start by downloading the file using the `download` tool.
+Thought: The current language of the user is: English. I'll start by downloading the file using the `download_file` tool.
 Code: ```py
-path = download('https://example.com/article.txt')
+path = download_file(url='https://example.com/article.txt')
 print(path)
 ```
 Observation: /tmp/somethingXYz
 
-Thought: I'll extract the contents of the file.
+Thought: The current language of the user is: English. I'll extract the contents of the file.
 Code: ```py
-with open('/tmp/somethingXYz', 'r') as _:
-    print(_)
+with open('/tmp/somethingXYz', 'r', encoding='utf-8') as file:
+    print(file.read())
 ```
 Observation: Content of the file ...(truncated for brevity)
 
-Thought: I'll download the file using the `download` tool.    <--- This is SUBOPTIMAL since it generates the same though, repeating an already accomplished step, and getting STUCK in a loop!
+Thought: The current language of the user is: English. I'll download the file using the `download_file` tool.  # <--- This is a SUBOPTIMAL Thought since it generates the previous thought again without referring to the current task status, repeating an already accomplished step, and then getting STUCK in a loop!
 Code: ```py
-print(download('https://example.com/article.txt'))
+print(download_file(url='https://example.com/article.txt'))
 ```
 
-## Critical Guidelines
 
-- ALWAYS generate a Thought-Code sequence.
-- Don't name any new variable with the same name as a tool.
-- Call a tool only when needed. Only use a tool listed in the Tools section.
-- Always prefer to use an available tool over writing code or asking the LLM.
-- Always use the right arguments for the tools. Do not pass the arguments as a dict.
-  E.g., rather than `answer = wiki({{'query': 'search term'}})`, use `answer = wiki(query='search term')`.
-- Do NOT call the same tool twice with the same argument unless there's an error -- reuse the previous result.
-  E.g., do NOT download the same file again.
-- Write simple Python code. Avoid writing functions on your own unless it's important.
-- Remember to import any required (and only allowed) Python module BEFORE using them.
-- Every `Code` block is independent and isolated. The imports, variables, and functions from any
-  `Code` block are NOT available in the subsequent `Code` blocks!
-- Do NOT print any secrets, e.g., API keys, passwords, and access tokens.
-- When dealing with files, your `Thought` MUST reason whether to print the contents of the file before writing `Code`.
-  ONLY when your `Thought` cites a valid reason, you will `print()` the file contents in the `Code`.
-  Otherwise, do not print.
-- Do your best! Don't give up! You're in charge of solving the task, not providing directions to solve it.
+# General Guidelines
+
+- Always generate a Thought-Code sequence.
+- Do not name new variables with the same name as a tool.
+- Use tools only when needed and only those listed. Prefer tools over writing complex custom code.
+- Always use the correct arguments for tools (e.g., tool(arg='value'), not tool({{'arg': 'value'}})).
+- Remember to import allowed Python modules before using them within a Code block.
+- Do NOT print secrets (API keys, passwords).
+- Your Thought MUST reason whether to print file contents.
+  ONLY print if necessary and explicitly justified in your Thought.
 
 
-## Current Interaction
+# Current Interaction
 
-Below is the history of the interaction so far, showing the interleaving "Thought," "Code," and "Observation" steps. (Initially empty.)
 {history}
+
+## Task steps already completed
+
+{steps_completed}
+
+## Task steps yet to complete
+
+{steps_to_take}
 '''
 
 AGENT_PLAN_PROMPT = '''
@@ -800,6 +785,7 @@ def extract_as_markdown(
     Extract the contents from HTML files (.html), PDF files (.pdf), Word Documents (.docx),
     and Excel spreadsheets (.xlsx) as Markdown text. No other file type is supported.
     The text can be used for analysis with LLMs. Input can be a URL or a local file path.
+    This tool can directly work with URLs, so no need to download the files separately.
     NOTE: The output returned by this function can be long and may involve lots of quote marks.
 
     Args:
@@ -847,6 +833,40 @@ def extract_as_markdown(
 
 
 @tool
+def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
+    """
+    Search Wikipedia and return the top search results as Markdown text.
+    The input should be a search query. The output will contain the title, summary, and link
+    to the Wikipedia page.
+
+    Args:
+        query: The search query string.
+        max_results: The max. no. of search results to consider (default 3).
+
+    Returns:
+        The search results in Markdown format.
+    """
+    try:
+        import wikipedia
+    except ImportError as e:
+        raise ImportError('`wikipedia` was not found! Please run `pip install wikipedia`.') from e
+
+    try:
+        results = wikipedia.search(query, results=max_results)
+        if not results:
+            return 'No results found! Try a less restrictive/shorter query.'
+
+        markdown_results = []
+        for title in results:
+            page = wikipedia.page(title)
+            markdown_results.append(f"### [{page.title}]({page.url})\n{page.summary}")
+
+        return '\n\n'.join(markdown_results)
+    except wikipedia.exceptions.DisambiguationError as de:
+        return f'DisambiguationError: Please select an option from {", ".join(de.options)}'
+
+
+@tool
 def get_youtube_transcript(video_id: str) -> str:
     """
     Retrieve the transcript/subtitles for a given YouTube video. It also works for automatically
@@ -873,6 +893,42 @@ def get_youtube_transcript(video_id: str) -> str:
         )
 
     return transcript_text
+
+
+@tool
+def get_audio_transcript(file_path: str) -> Any:
+    """
+    Convert audio files to text using OpenAI's Whisper model via Fireworks API.
+    The input should be a path to an audio file (e.g., .mp3, .wav, .flac).
+    The audio file should be in a format that Whisper supports.
+
+    Args:
+        file_path: Local file system path to the audio file.
+
+    Returns:
+        The transcript of the audio file as text.
+    """
+    import os
+
+    import requests
+
+    with open(file_path, 'rb') as f:
+        response = requests.post(
+            'https://audio-turbo.us-virginia-1.direct.fireworks.ai/v1/audio/transcriptions',
+            headers={'Authorization': f'Bearer {os.getenv("FIREWORKS_API_KEY")}'},
+            files={'file': f},
+            data={
+                'model': 'whisper-v3-turbo',
+                'temperature': '0',
+                'vad_model': 'silero'
+            },
+            timeout=15,
+        )
+
+    if response.status_code == 200:
+        print(response.json())
+    else:
+        print(f'Error: {response.status_code}', response.text)
 
 
 # The different types of senders of messages
@@ -936,6 +992,12 @@ class CodeChatMessage(ChatMessage):
     code: str = pyd.Field(description='Python code with tool use')
     answer: Optional[str] = pyd.Field(
         description='Final answer for the task; set only in the final step', default=None
+    )
+    steps_completed: str = pyd.Field(
+        description='A list of steps related to the task successfully completed so far'
+    )
+    steps_to_take: str = pyd.Field(
+        description='A list of steps related to the task that are yet to be performed'
     )
     successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
 
@@ -1283,8 +1345,7 @@ class ReActAgent(Agent):
             ),
             files=self.task.files,
         )
-        print('>>>', messages)
-        plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
+        # plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
 
         for idx in range(self.max_iterations):
             if self.final_answer_found:
@@ -1292,7 +1353,7 @@ class ReActAgent(Agent):
 
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
             # The thought & observation will get appended to the list of messages
-            async for update in self._think(plan):
+            async for update in self._think(plan=None):
                 yield update
             async for update in self._act():
                 yield update
@@ -1378,7 +1439,6 @@ class ReActAgent(Agent):
             Updates from the acting step.
         """
         prev_msg: ReActChatMessage = self.messages[-1]  # type: ignore
-
         if (
                 prev_msg.answer == ''
                 and (prev_msg.action == '' or prev_msg.args == '' or prev_msg.thought == '')
@@ -1743,13 +1803,27 @@ class CodeAgent(ReActAgent):
         Yields:
             Update from the thing step.
         """
+        prev_code_msg = None
+        for m in self.messages[:self.msg_idx_of_new_task:-1]:
+            if isinstance(m, CodeChatMessage):
+                prev_code_msg = m
+                break
+
+        steps_completed = prev_code_msg.steps_completed if (
+            hasattr(prev_code_msg, 'steps_completed')
+        ) else ''
+        steps_to_take = prev_code_msg.steps_to_take if (
+            hasattr(prev_code_msg, 'steps_to_take')
+        ) else ''
         message = CODE_AGENT_PROMPT.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
             tool_names=self.get_tools_description(),
             authorized_imports=','.join(self.allowed_imports),
-            plan=plan or '<No plan provided; please plan yourself>'
+            plan=plan or '<No plan provided; please plan yourself>',
+            steps_completed=steps_completed,
+            steps_to_take=steps_to_take,
         )
         msg = await self._record_thought(message, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
@@ -2051,7 +2125,7 @@ async def main():
         model_name=model_name,
         tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
         run_env='host',
-        max_iterations=5,
+        max_iterations=7,
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',

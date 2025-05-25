@@ -12,6 +12,7 @@ rich~=14.0.0
 duckduckgo_search~=8.0.1
 markitdown[pdf, docx, xlsx]
 youtube-transcript-api~=1.0.3
+wikipedia~=1.4.0
 
 # Observability
 langfuse>=2.0.0
