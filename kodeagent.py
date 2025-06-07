@@ -189,22 +189,18 @@ CODE_AGENT_PROMPT = '''
 You are an expert, helpful agent designed to solve complex tasks iteratively using available tools & Python code.
 
 Your core operating principles are:
-1. **Iterative Problem Solving:** Propose a step (`Thought`), execute code/tool use (`Code`), observe
-  the outcome (`Observation`), then refine.
-2. **Self-Correction:** Meticulously analyze each `Observation`. If an error or unexpected result
-  occurs, diagnose and rectify it in the subsequent `Thought` and `Code`.
-  Do not repeat past mistakes.
-3. **Avoid Loops & Advance Progress:** Before writing any `Code` block, you MUST carefully review
-  the `Observation` from the previous step and the `Current Interaction` history. If a sub-task is
-  completed or an action has already yielded a result, DO NOT repeat the same `Code`. Instead,
-  generate `Code` for the *next logical step* based on your evolving `Thought`.
-  Reuse previous `Code` results whenever possible.
-4. **Critical Thinking:** Reason optimally, adapting the solution approach as needed.
+1. Iterative Problem Solving: Propose a step (`Thought`), execute code/tool use (`Code`), observe the outcome (`Observation`), then refine until the task is solved.
+2. Self-Correction & Adaptive Reasoning: Analyze each `Observation`. If an error occurs, diagnose and adapt.
+   Never repeat failed attempts without modification.
+3. State Tracking & Task Progression: Maintain awareness of completed sub-tasks.
+   Before writing new `Code`, explicitly refer to prior results and reuse available computations.
+4. Loop Avoidance & Optimal Execution: Ensure each iteration meaningfully advances the task.
+   Avoid redundant execution of already completed actions and move forward.
 
 
 # Task
 
-Here's the task you need to solve:
+Read the following task description very carefully:
 {task}
 
 (Optional) Input files/URLs for this task:
@@ -242,7 +238,6 @@ Observation: [Output from code execution or tool use.]
 
 In `Thought`, based on the current task status and the `Observation` from the previous step,
 describe precisely your next action and explaining why this specific `Code` block is necessary now.
-If a sub-task is complete, articulate how you will move to the next.
 If you see a loop, explain how you will break it.
 
 Use `print()` for any result/useful information you want to observe based on code execution.
@@ -251,7 +246,7 @@ code analysis, and so on) on what you see under `Observation`.
 Avoid printing trivial text (e.g., printing to say that you will do something).
 
 Every iteration of the Thought-Code-Observation cycle must move you closer to completing the task.
-Keep track of the steps completed and pending.
+Keep track of the steps already completed and pending.
 Your `Thought` for each turn must focus on what needs to be done next to *advance* the task.
 Repeat this cycle until you have enough information to provide a final answer.
 For the final answer, use one of these formats:
@@ -278,28 +273,28 @@ IMPORTANT: Every `Code` block is independent. Variables from one block are NOT a
 ---
 [Task: Generate an image of the oldest person in this document.]
 
-Thought: The current language of the user is: English. I will begin by identifying the oldest person mentioned in the document. I will use the document_qa tool for this purpose. I only need to print the answer, not the entire document.
+Thought: The current language of the user is: English. I will begin by identifying the oldest person mentioned in the document using the `document_qa tool`. I only need to print the answer, not the entire document.
 Code: ```py
 answer = document_qa(document=document, question='Who is the oldest person mentioned?')
 print(answer)
 ```
 Observation: The oldest person in the document is John Doe, a 55 year old lumberjack living in Newfoundland.
 
-Thought: Based on document search in the previous step, I have identified John Doe, aged 55, as the oldest person. He lives in Newfoundland, Canada. Now, I'll use the `image_generator` tool to generate his portrait.
+Thought: Based on the latest `Observation`, I have identified John Doe, aged 55, as the oldest person. He lives in Newfoundland, Canada. As my next logical step, I'll use the `image_generator` tool to generate his portrait.
 Code: ```py
 image_path = image_generator(prompt='A portrait of John Doe, a 55-year-old man living in Canada.')
 print(f'The output image file is: {{image_path}}')
 ```
 Observation: The output image file is: image.png
 
-Thought: Based on the given document, I have identified John Doe (55) as the oldest person. I have also generated his portrait and saved it in the image.png file.
+Thought: Based on the given document, John Doe (55) is the oldest person. I have also generated his portrait and saved it in the image.png file.
 Answer: An image of the oldest person has been generated and saved as image.png
 Successful: True
 
 ---
 [Task: Which city has the highest population: Guangzhou or Shanghai?]
 
-Thought: The current language of the user is: English. I need to get the populations for both cities and compare them: I will use the tool search to get the population of both cities. Since search results are important for this task, I'll print them.
+Thought: The current language of the user is: English. I need to get the populations for both cities and compare them: I will use the tool `search` for this purpose. Since search results are important for this task, I'll print them.
 Code: ```py
 for city in ['Guangzhou', 'Shanghai']:
 print(f'Population {{city}}:', search(f'{{city}} population'))
@@ -307,7 +302,7 @@ print(f'Population {{city}}:', search(f'{{city}} population'))
 Observation: Population Guangzhou: ['Guangzhou has a population of 15 million inhabitants as of 2021.']
 Population Shanghai: 26 million (2019)
 
-Thought: Based on the search results from the previous step, I know that Shanghai has the highest population.
+Thought: Based on the search results in the `Observation` from the previous step, I know that Shanghai has the highest population.
 Answer: Based on the search results, Shanghai has the highest population.
 Successful: True
 
@@ -321,7 +316,7 @@ Successful: False
 ---
 [Task: Translate the content of 'article.txt' into Bengali]
 
-Thought: The user wants a translation of 'article.txt'. I will first read the content of the file. Since no specific tool for translation is available, I'll print the contents so that it becomes available to me (the LLM) for translation.
+Thought: The user wants a translation of 'article.txt'. I will first read the contents of the file. Since no specific tool for translation is available, I'll print the contents so that it becomes available to me (the LLM) for translation.
 Code: ```py
 with open('article.txt', 'r', encoding='utf-8') as file:
     print(file.read())
@@ -330,22 +325,6 @@ Observation: Hello, how are you?
 
 Thought: In the previous step, I have already read the 'article.txt' file and printed its contents: 'Hello, how are you?'. I can translate this text into Bengali (output language) myself without using any further tools and provide the final answer.
 Answer: হ্যালো, কেমন আছো?
-Successful: True
-
----
-[Task: Word count in 'article.txt']
-
-Thought: To count the words in 'article.txt', I will first read its contents using Python code. Then, I'll split the text into words and count them. Since only the word count is required, I won't print the file contents.
-Code: ```py
-with open('article.txt', 'r', encoding='utf-8') as file:
-    text = file.read()
-count = len(text.split())
-print(f'The file has {{count}} words')
-```
-Observation: The file has 567 words
-
-Thought: I know the word count in article.txt: 567.
-Answer: The file has 567 words.
 Successful: True
 
 ---
@@ -360,56 +339,9 @@ print(f'The image path is: {{img_path}}')
 ```
 Observation: The output image file is: figure.png
 
-Thought: The graph has been plotted and saved as figure.png.
+Thought: Based on the latest `Observation`, the graph has been plotted and saved as figure.png. I have completed the task.
 Answer: The graph is saved as figure.png
 Successful: True
-
-
----
-[Task: What is the current count? Double it.]
-
-Thought: The current language of the user is: English. I will get the current count using `some_counter` tool and assign the value to a variable x.
-Code: ```py
-x = some_counter()
-print('Current value:', x)
-```
-Observation: Current value: 11
-
-Thought: The current language of the user is: English. From the previous step, the current count is 11. I'll double the value.
-Code: ```py
-x = 2 * x  # <--- ERROR since x is undefined within THIS Code block! Only use the names already defined in a given Code block.
-```
-Observation: Error: name 'x' is not defined
-
-**CORRECT CODE BLOCK FOR THE TASK**:
-
-Code: ```py
-x = some_counter()
-print(f'Old value: {{x}}')
-x = 2 * x
-print(f'New value: {{x}}')
-```
-Observation: Old value: 11
-New value: 22
-
----
-[Task: Plot data from the file at http://example.com/data.csv]
-
-Thought: The current language of the user is: English. I need to download the file at first using `download_file`.
-Code: ```py
-file_path = download_file(url='http://example.com/data.csv')
-data = read_csv_file(file_path)
-print(data)  # <--- Not an error but PROBLEMATIC since the file can be large and its contents do NOT need to be displayed for this task! Printing the contents here increases cost, time, and chances of error.
-```
-
-**CORRECT CODE BLOCK FOR THE TASK**:
-
-Code: ```py
-file_path = download_file(url='http://example.com/data.csv')
-data = read_csv_file(file_path)
-img_path = line_plot(data, cols=[1, 2])
-print(f'The image path is: {{img_path}}')
-```
 
 ---
 [Task: Word count in https://example.com/article.txt]
@@ -450,11 +382,14 @@ print(download_file(url='https://example.com/article.txt'))
 
 {history}
 
-## Task steps already completed
+
+# State Tracking & Task Progression
+
+## Steps already completed
 
 {steps_completed}
 
-## Task steps yet to complete
+## Steps pending
 
 {steps_to_take}
 '''
@@ -711,16 +646,18 @@ def calculator(expression: str) -> Union[float, None]:
 
 
 @tool
-def web_search(query: str, max_results: int = 10) -> str:
+def web_search(query: str, max_results: int = 10, show_description: bool = False) -> str:
     """
     Search the Web using DuckDuckGo. The input should be a search query.
     Use this tool when you need to answer questions about current events.
-    Returns (as Markdown text) the top search results with titles, links, and descriptions.
+    Returns (as Markdown text) the top search results with titles, links, and optional descriptions.
     NOTE: The returned URLs should be visited to retrieve the contents the pages.
 
     Args:
         query: The query string.
         max_results: Maximum no. of search results (links) to return.
+        show_description: If `True`, includes the description of each search result.
+         Default is `False`.
 
     Returns:
          The search results.
@@ -744,7 +681,11 @@ def web_search(query: str, max_results: int = 10) -> str:
     if len(results) == 0:
         return 'No results found! Try a less restrictive/shorter query.'
 
-    results = [f"[{result['title']}]({result['href']})\n{result['body']}" for result in results]
+    if not show_description:
+        # If descriptions are not needed, only return titles and links
+        results = [f"[{result['title']}]({result['href']})" for result in results]
+    else:
+        results = [f"[{result['title']}]({result['href']})\n{result['body']}" for result in results]
     return '## Search Results\n\n' + '\n\n'.join(results)
 
 
@@ -779,7 +720,7 @@ def file_download(url: str) -> str:
 @tool
 def extract_as_markdown(
         url_or_file_path: str,
-        scrub_links: bool = False,
+        scrub_links: bool = True,
         max_length: int = None
 ) -> str:
     """
@@ -791,8 +732,8 @@ def extract_as_markdown(
 
     Args:
         url_or_file_path: URL or Path to a .html, .pdf, .docx, or .xlsx file.
-        scrub_links: If `True`, removes all links from the extracted Markdown text. This should be
-         set only when you are confident that the links are not required.
+        scrub_links: Defaults to `True`, which removes all links from the extracted Markdown text.
+         Set it to `False` if you want to retain the links in the text.
         max_length: If set, limit the output to the first `max_length` characters. This can be used
          to truncate the output but doing so can also lead to loss of information.
 
