@@ -10,6 +10,7 @@ azure/gpt-4.1-mini: 35%
 The scores may vary for different runs.
 """
 import asyncio
+import json
 import os
 import random
 import sys
@@ -53,9 +54,9 @@ async def main():
     Evaluate a subset of the GAIA benchmark for HF Agents Course finale.
     """
     questions = get_questions_list()
-    # model_name = 'gemini/gemini-2.0-flash-lite'  # 45% score
+    model_name = 'gemini/gemini-2.0-flash-lite'  # 45% score
     # model_name = 'gemini/gemini-2.5-flash-preview-04-17'  # 60% score
-    model_name = 'azure/gpt-4.1-mini'  # 35% score
+    # model_name = 'azure/gpt-4.1-mini'  # 35% score
     litellm_params = {'temperature': 0}
     agent = ka.CodeAgent(
         name='Multi-task agent',
@@ -69,13 +70,13 @@ async def main():
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'duckduckgo_search', 'markdownify', 'markitdown', 'youtube_transcript_api',
-            'wikipedia',
+            'duckduckgo_search', 'markitdown', 'youtube_transcript_api', 'wikipedia',
         ],
         pip_packages=(
-            'duckduckgo_search~=8.0.1;markitdown[pdf, docx, xlsx];'
+            'duckduckgo_search~=8.0.1;"markitdown[all]";'
             'youtube-transcript-api~=1.0.3;wikipedia~=1.4.0'
         ),
+        env_vars_to_set={'FIREWORKS_API_KEY': os.environ.get('FIREWORKS_API_KEY', '')},
         timeout=35,
     )
 
@@ -144,6 +145,8 @@ async def main():
 
     # Submit
     print(f'Submitting {len(answers_payload)} answers to: {submit_url}')
+    print(json.dumps(answers_payload, indent=4))
+
     try:
         response = requests.post(submit_url, json=submission_data, timeout=60)
         response.raise_for_status()

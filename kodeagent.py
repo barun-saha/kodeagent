@@ -164,9 +164,10 @@ Successful: False
 
 Here's a general plan that someone who may or may not have your tools might try to solve this task.
 You can refer to it but adapt as necessary, e.g., add/edit/combine/skip steps:
+(ignore if plan is not available)
 {plan}
 
-Based on the current state of the Thought-Code-Observation, you will identify what steps from
+Based on the current state of the Thought-Action-Observation, you will identify what steps from
 the plan have already been achieved and what needs to be done next, thus frame your `Thought`.
 
 
@@ -320,10 +321,10 @@ Successful: False
 ---
 [Task: Translate the content of 'article.txt' into Bengali]
 
-Thought: The user wants a translation of 'article.txt'. I will first read the content of the file using the read_file_text tool. Since no specific tool for translation is available, I'll print the contents so that it becomes available to me (the LLM) for translation.
+Thought: The user wants a translation of 'article.txt'. I will first read the content of the file. Since no specific tool for translation is available, I'll print the contents so that it becomes available to me (the LLM) for translation.
 Code: ```py
-text = read_file_text(file_path='article.txt')
-print(text)
+with open('article.txt', 'r', encoding='utf-8') as file:
+    print(file.read())
 ```
 Observation: Hello, how are you?
 
@@ -713,7 +714,7 @@ def calculator(expression: str) -> Union[float, None]:
 def web_search(query: str, max_results: int = 10) -> str:
     """
     Search the Web using DuckDuckGo. The input should be a search query.
-    Useful for when you need to answer questions about current events.
+    Use this tool when you need to answer questions about current events.
     Returns (as Markdown text) the top search results with titles, links, and descriptions.
     NOTE: The returned URLs should be visited to retrieve the contents the pages.
 
@@ -739,7 +740,7 @@ def web_search(query: str, max_results: int = 10) -> str:
     # can set it to `False` but generally not recommended
     results = DDGS(verify=False).text(query, max_results=max_results)
     # DDGS throws a rate limit error
-    time.sleep(random.uniform(1.1, 2.2))
+    time.sleep(random.uniform(1.5, 3.5))
     if len(results) == 0:
         return 'No results found! Try a less restrictive/shorter query.'
 
@@ -926,9 +927,9 @@ def get_audio_transcript(file_path: str) -> Any:
         )
 
     if response.status_code == 200:
-        print(response.json())
+        return response.json()
     else:
-        print(f'Error: {response.status_code}', response.text)
+        return f'Audio transcription error: {response.status_code}: {response.text}'
 
 
 # The different types of senders of messages
@@ -1548,6 +1549,7 @@ class CodeRunner:
             allowed_imports: list[str],
             pip_packages: Optional[str] = None,
             timeout: int = 30,
+            env_vars_to_set: Optional[dict[str, str]] = None
     ):
         """
         Create an environment to run Python code.
@@ -1557,6 +1559,8 @@ class CodeRunner:
             allowed_imports: A list of Python modules that are allowed to be imported.
             pip_packages: Optional Python libs to be installed by `pip` [E2B].
             timeout: Code execution timeout (default 30s).
+            env_vars_to_set: Optional environment variables to set in the code execution
+             environment (E2B only).
         """
         self.allowed_imports: set[str] = set(allowed_imports)
         self.env: CODE_ENV_NAMES = env
@@ -1564,6 +1568,7 @@ class CodeRunner:
         self.default_timeout = timeout
         self.local_modules_to_copy = ['kutils.py']
         self.pip_packages_str = ' '.join(self.pip_packages)
+        self.env_vars_to_set = env_vars_to_set
 
     def check_imports(self, code) -> set[Union[str]]:
         """
@@ -1666,7 +1671,10 @@ class CodeRunner:
             if running_sandboxes:
                 sbx = e2b.Sandbox.connect(running_sandboxes[0].sandbox_id)
             else:
-                sbx = e2b.Sandbox(timeout=self.default_timeout + 15)
+                sbx = e2b.Sandbox(
+                    timeout=self.default_timeout + 15,
+                    envs=self.env_vars_to_set or {},
+                )
                 sbx.commands.run(f'pip install {self.pip_packages_str}')
 
             # Copy the local dependency modules
@@ -1711,8 +1719,8 @@ class CodeAgent(ReActAgent):
             max_iterations: int = 20,
             allowed_imports: Optional[list[str]] = None,
             pip_packages: Optional[str] = None,
-            copy_from_env: bool = False,
             timeout: int = 30,
+            env_vars_to_set: Optional[dict[str, str]] = None,
     ):
         """
         Instantiate a CodeAgent.
@@ -1731,6 +1739,7 @@ class CodeAgent(ReActAgent):
             pip_packages: Optional Python libs to be installed with `pip` [for E2B].
             copy_from_env: Whether to copy the keys from the local .env file.
             timeout: Code execution timeout (default 30s).
+            env_vars_to_set: Optional environment variables to set in the code execution.
         """
         super().__init__(
             name=name,
@@ -1760,9 +1769,9 @@ class CodeAgent(ReActAgent):
             env=run_env,
             allowed_imports=self.allowed_imports + ['kutils'],
             pip_packages=pip_packages,
-            timeout=timeout
+            timeout=timeout,
+            env_vars_to_set=env_vars_to_set,
         )
-        self.copy_from_env = copy_from_env
 
     def format_messages_for_prompt(self, start_idx: int = 0) -> str:
         """
@@ -2129,9 +2138,9 @@ async def main():
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'duckduckgo_search', 'markdownify', 'markitdown', 'youtube_transcript_api',
+            'duckduckgo_search', 'markitdown', 'youtube_transcript_api',
         ],
-        pip_packages='duckduckgo_search~=8.0.1;markdownify~=1.1.0',
+        pip_packages='duckduckgo_search~=8.0.1;"markitdown[all]";',
     )
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
