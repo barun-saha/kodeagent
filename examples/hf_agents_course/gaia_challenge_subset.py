@@ -2,10 +2,10 @@
 Use KodeAgent to solve the hands-on exercises from Hugging Face's Agents course:
 https://huggingface.co/learn/agents-course/en/unit4/hands-on
 
-As of May 25, 2025, the evaluation scores are:
+As of June 8, 2025, the evaluation scores (max) are:
 gemini/gemini-2.0-flash-lite: 45%
 gemini/gemini-2.5-flash-preview-04-17: 60%
-azure/gpt-4.1-mini: 35%
+azure/gpt-4.1-mini: 45%
 
 The scores may vary for different runs.
 """
@@ -49,16 +49,19 @@ def get_questions_list() -> list[dict]:
     return response.json()
 
 
-async def main():
+def get_code_act_agent(model_name: str) -> ka.Agent:
     """
-    Evaluate a subset of the GAIA benchmark for HF Agents Course finale.
+    Create a CodeActAgent for solving the GAIA benchmark tasks.
+
+    Args:
+        model_name: The LLM to use.
+
+    Returns:
+        A configured CodeAgent instance.
     """
-    questions = get_questions_list()
-    model_name = 'gemini/gemini-2.0-flash-lite'  # 45% score
-    # model_name = 'gemini/gemini-2.5-flash-preview-04-17'  # 60% score
-    # model_name = 'azure/gpt-4.1-mini'  # 35% score
     litellm_params = {'temperature': 0}
-    agent = ka.CodeAgent(
+
+    agent = ka.CodeActAgent(
         name='Multi-task agent',
         model_name=model_name,
         tools=[
@@ -80,6 +83,66 @@ async def main():
         timeout=35,
     )
 
+    return agent
+
+
+def get_multiagent(model_name: str) -> ka.Agent:
+    """
+    Create a SupervisorAgent with two agents to solve the GAIA benchmark tasks.
+    Probably going to fail.
+
+    Args:
+        model_name: The LLM to use.
+
+    Returns:
+        A SupervisorAgent instance.
+    """
+    litellm_params = {'temperature': 0}
+
+    agent1 = ka.ReActAgent(
+        name='Audio video transcription agent',
+        model_name=model_name,
+        tools=[ka.get_youtube_transcript, ka.get_audio_transcript, ka.file_download,],
+        max_iterations=5,
+    )
+    agent2 = ka.CodeActAgent(
+        name='Information retrieval agent',
+        model_name=model_name,
+        tools=[ka.web_search, ka.extract_as_markdown, ka.file_download, ka.search_wikipedia,],
+        run_env='host',
+        max_iterations=7,
+        litellm_params=litellm_params,
+        allowed_imports=[
+            'os', 're', 'time', 'random', 'requests', 'tempfile',
+            'duckduckgo_search', 'markitdown', 'wikipedia',
+        ],
+        pip_packages=(
+            'duckduckgo_search~=8.0.1;"markitdown[all]";wikipedia~=1.4.0'
+        ),
+        env_vars_to_set={'FIREWORKS_API_KEY': os.environ.get('FIREWORKS_API_KEY', '')},
+        timeout=35,
+    )
+    agency = ka.SupervisorAgent(
+        name='Supervisor',
+        model_name=model_name,
+        agents=[agent1, agent2],
+        max_iterations=5
+    )
+
+    return agency
+
+
+async def main():
+    """
+    Evaluate a subset of the GAIA benchmark for HF Agents Course finale.
+    """
+    questions = get_questions_list()
+    model_name = 'gemini/gemini-2.0-flash-lite'  # 45% score
+    # model_name = 'gemini/gemini-2.5-flash-preview-05-20'  # 60% score
+    # model_name = 'azure/gpt-4.1-mini'  # 45% score
+
+    agent = get_code_act_agent(model_name=model_name)
+
     answers_payload = []
     agent_code = 'https://github.com/barun-saha/kodeagent'
     username = 'barunsaha'
@@ -99,7 +162,9 @@ async def main():
         file_name = a_question.get('file_name')
         files = None
 
-        # if task_id != '99c9cc74-fdc8-46c6-8f8d-3ce2d3bfeea3':
+        # if task_id not in [
+        #     '99c9cc74-fdc8-46c6-8f8d-3ce2d3bfeea3', '840bfca7-4f7b-481a-8794-c560c340185d'
+        # ]:
         #     continue
 
         print(f'Task# {task_id}: {question}\nFile: {file_name}')

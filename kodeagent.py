@@ -1,6 +1,6 @@
 """
 A minimalistic approach to building AI agents.
-Implements ReAct and CodeAgent. Supports multi-agent via SupervisorAgent.
+Implements ReAct and CodeActAgent. Supports multi-agent via SupervisorAgent.
 """
 import ast
 import asyncio
@@ -185,7 +185,7 @@ Below is the history of the interaction so far, showing the interleaving "Though
 {history}
 '''
 
-CODE_AGENT_PROMPT = '''
+CODE_ACT_AGENT_PROMPT = '''
 You are an expert, helpful agent designed to solve complex tasks iteratively using available tools & Python code.
 
 Your core operating principles are:
@@ -415,31 +415,11 @@ Here are a few tools that you can use to solve the task:
 {tool_names}
 
 Now make a plan to solve the task using one or more tools.
-  - ONLY if you're CodeAgent type, you can also write Python code to solve some problems.
+  - ONLY if you're CodeActAgent type, you can also write Python code to solve some problems.
   - You can also use the LLM to solve something if there is no appropriate tool available.
   - Do not use the same tool twice to do the same thing.
 Your output should be a numbered list of step-by-step plan. Each step listing only one sub-task
 in plain English, without any code, but can refer to a tool name.
-'''
-
-SUPERVISOR_PLAN_PROMPT = '''
-You are a helpful planning assistant. Given a task, you can create a plan to solve the task.
-A given task can be complex -- you may need to split it into smaller sub-tasks so that
-collectively completing the sub-tasks would enable to achieve the main task.
-
-## Task
-
-{task}
-
-(Optional) input file paths/URLs associated with this task are as follows:
-{task_files}
-
-Your output should be a step-by-step plan. Each step listing only one sub-task.
-Since the tasks will be executed in the real-world, there are possibilities of having
-unexpected errors, e.g., no API key, permission denied, wrong format, and so on. Accordingly, 
-your planning should include some of the relevant failure modes and their potential mitigations.
-
-At the end of your plan, also provide a numbered list of facts that needs to be found out to complete the task.
 '''
 
 SUPERVISOR_TASK_PROMPT = '''
@@ -869,8 +849,8 @@ def get_audio_transcript(file_path: str) -> Any:
 
     if response.status_code == 200:
         return response.json()
-    else:
-        return f'Audio transcription error: {response.status_code}: {response.text}'
+
+    return f'Audio transcription error: {response.status_code}: {response.text}'
 
 
 # The different types of senders of messages
@@ -925,7 +905,7 @@ class ReActChatMessage(ChatMessage):
 
 class CodeChatMessage(ChatMessage):
     """
-    Messages for the CodeAgent.
+    Messages for the CodeActAgent.
     """
     # The content field will not be used by this message (but the LLM can still assign a value)
     # Higher versions of Pydantic allows to exclude the field altogether
@@ -1289,15 +1269,15 @@ class ReActAgent(Agent):
             value=f'Solving task: `{self.task.description}`',
             channel='run'
         )
-        messages = ku.make_user_message(
-            text_content=AGENT_PLAN_PROMPT.format(
-                agent_type=self.__class__.__name__,
-                task=self.task.description,
-                task_files='\n'.join(self.task.files) if self.task.files else '',
-                tool_names=self.get_tools_description(),
-            ),
-            files=self.task.files,
-        )
+        # messages = ku.make_user_message(
+        #     text_content=AGENT_PLAN_PROMPT.format(
+        #         agent_type=self.__class__.__name__,
+        #         task=self.task.description,
+        #         task_files='\n'.join(self.task.files) if self.task.files else '',
+        #         tool_names=self.get_tools_description(),
+        #     ),
+        #     files=self.task.files,
+        # )
         # plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
 
         for idx in range(self.max_iterations):
@@ -1650,13 +1630,13 @@ class CodeRunner:
             raise ValueError(f'Unsupported code execution env: {self.env}')
 
 
-class CodeAgent(ReActAgent):
+class CodeActAgent(ReActAgent):
     """
-    CodeAgent is somewhat like ReAct but uses the Thought-Code-Observation loop rather than
+    CodeAct is somewhat like ReAct but uses the Thought-Code-Observation loop rather than
     the Thought-Action-Observation loop. In the TCO loop, Python code is written to invoke
     tools, print & capture the results, and observe the results.
 
-    CodeAgent will retain most of the functionality from ReActAgent. Only the prompt formatting,
+    CodeActAgent will retain most of the functionality from ReActAgent. Only the prompt formatting,
     `_think(), and the `_act()` steps will change.
     """
     def __init__(
@@ -1675,7 +1655,7 @@ class CodeAgent(ReActAgent):
             env_vars_to_set: Optional[dict[str, str]] = None,
     ):
         """
-        Instantiate a CodeAgent.
+        Instantiate a CodeActAgent.
 
         Args:
             name: The name of the agent.
@@ -1689,7 +1669,6 @@ class CodeAgent(ReActAgent):
             max_iterations: The maximum number of steps that the agent should try to solve a task.
             allowed_imports: A list of Python modules that the agent is allowed to import.
             pip_packages: Optional Python libs to be installed with `pip` [for E2B].
-            copy_from_env: Whether to copy the keys from the local .env file.
             timeout: Code execution timeout (default 30s).
             env_vars_to_set: Optional environment variables to set in the code execution.
         """
@@ -1776,7 +1755,7 @@ class CodeAgent(ReActAgent):
         steps_to_take = prev_code_msg.steps_to_take if (
             hasattr(prev_code_msg, 'steps_to_take')
         ) else ''
-        message = CODE_AGENT_PROMPT.format(
+        message = CODE_ACT_AGENT_PROMPT.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
@@ -1791,7 +1770,7 @@ class CodeAgent(ReActAgent):
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
         """
-        Code action based on CodeAgent's previous thought.
+        Code action based on CodeActAgent's previous thought.
 
         The LLM has suggested code. This method will run the code.
 
@@ -1860,6 +1839,8 @@ class CodeAgent(ReActAgent):
 class SupervisorAgent(Agent):
     """
     A supervising agency, consisting of multiple agents, which can solve tasks via delegations.
+
+    WARNING: SupervisorAgent is an experimental feature and may not work as expected.
     """
     def __init__(self, model_name: str, agents: list[Agent], name: str, max_iterations: int = 20):
         """
@@ -2071,7 +2052,7 @@ def print_response(response: AgentResponse):
 
 async def main():
     """
-    Demonstrate the use of ReActAgent and CodeAgent.
+    Demonstrate the use of ReActAgent and CodeActAgent.
     """
     litellm_params = {'temperature': 0}
     model_name = 'gemini/gemini-2.0-flash-lite'
@@ -2079,14 +2060,14 @@ async def main():
     # model_name = 'azure/gpt-4.1-mini'
     # model_name = 'azure/gpt-4o-mini'
 
-    agent1 = ReActAgent(
-        name='Maths agent',
-        model_name=model_name,
-        tools=[calculator, ],
-        max_iterations=3,
-        litellm_params=litellm_params
-    )
-    agent2 = CodeAgent(
+    # agent1 = ReActAgent(
+    #     name='Maths agent',
+    #     model_name=model_name,
+    #     tools=[calculator, ],
+    #     max_iterations=3,
+    #     litellm_params=litellm_params
+    # )
+    agent2 = CodeActAgent(
         name='Web agent',
         model_name=model_name,
         tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
@@ -2120,8 +2101,8 @@ async def main():
         ),
     ]
 
-    print('CodeAgent demo\n')
-    for task, img_urls in the_tasks[-2:]:
+    print('CodeActAgent demo\n')
+    for task, img_urls in the_tasks:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in agent2.run(task, files=img_urls):
             print_response(response)

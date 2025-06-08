@@ -11,7 +11,7 @@ Here are some reasons why you should use KodeAgent:
 - **Learn-first design**: Helps developers understand agent-building from scratch.
 - **Multimodal**: Supports both text and images in the inputs. 
 
-Written in less than 2000 lines (including prompts and documentation), KodeAgent comes with built-in ReAct, CodeAgent, and a multi-agent supervisor. Or you can create your own agent by subclassing `Agent`.
+Written in about 2100 lines (including **prompts**, **documentation**, and **examples**), KodeAgent comes with built-in ReAct, CodeAct, and a multi-agent supervisor. Or you can create your own agent by subclassing `Agent`.
 
 A key motivation beyond KodeAgent is also to teach building agentic frameworks from scratch. KodeAgent introduces a few primitives and code flows that should help you to get an idea about how such frameworks typically work. 
 
@@ -58,18 +58,18 @@ agent = ReActAgent(
 )
 ```
 
-Or if you want to use CodeAgent:
+Or if you want to use CodeAct agent:
+
 ```python
-from kodeagent import CodeAgent
+from kodeagent import CodeActAgent
 
-
-agent = CodeAgent(
+agent = CodeActAgent(
     name='Web agent',
     model_name='gemini/gemini-2.0-flash-lite',
-    tools=[web_search, visit_webpage],
+    tools=[web_search, extract_as_markdown],
     run_env='e2b',
     max_iterations=3,
-    allowed_imports=['re', 'requests', 'duckduckgo_search', 'markdownify'],
+    allowed_imports=['re', 'requests', 'duckduckgo_search', 'markitdown'],
 )
 ```
 
@@ -104,7 +104,7 @@ LLM model names, parameters, and keys should be set as per [LiteLLM documentatio
 
 ### Code Execution
 
-CodeAgent executes LLM-generated code to leverage the tools. KodeAgent currently supports two different code run environments:
+`CodeActAgent` executes LLM-generated code to leverage the tools. KodeAgent currently supports two different code run environments:
 - `host`: The Python code will be run on the system where you created this agent. In other words, where the application is running.
 - `e2b`:  The Python code will be run on an [E2B sandbox](https://e2b.dev/). You will need an E2B API key and add to your `.env` file.
 
