@@ -84,7 +84,7 @@ for task in [
         print_response(response)
 ```
 
-That's it! Your agent should start solving the task and keep streaming the updates.
+That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [kodeagent.py](kodeagent.py) module.
 
 **Early-stage multi-agent capability** is available. Create multiple agents and associate them with a supervisor, like this:
 ```python
