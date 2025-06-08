@@ -1060,6 +1060,7 @@ class Agent(ABC):
             self,
             task: str,
             files: Optional[list[str]] = None,
+            task_id: Optional[str] = None
     ) -> AsyncIterator[AgentResponse]:
         """
         Execute a task using the agent. All subclasses must override this method to solve tasks
@@ -1068,6 +1069,7 @@ class Agent(ABC):
         Args:
             task: A description of the task.
             files: An optional list of file paths or URLs.
+            task_id: (Optional) An ID for the task, if provided by the caller.
 
         Yields:
             An update from the agent.
@@ -1110,12 +1112,19 @@ class Agent(ABC):
         logger.info(token_usage)
         return response.choices[0].message['content']
 
-    def _run_init(self, description: str, files: Optional[list[str]] = None):
+    def _run_init(
+            self,
+            description: str,
+            files: Optional[list[str]] = None,
+            task_id: Optional[str] = None
+    ):
         """
         Initialize the running of a task by an agent.
         """
         self.add_to_history(ChatMessage(role='user', content=description))
         self.task = Task(description=description, files=files)
+        if task_id:
+            self.task.id = task_id
         # Since `messages` stores every message generated while interacting with the agent,
         # we need to know which all messages correspond to the current task
         # (so that the ones pertaining to the previous tasks can be ignored)
@@ -1259,7 +1268,8 @@ class ReActAgent(Agent):
     async def run(
             self,
             task: str,
-            files: Optional[list[str]] = None
+            files: Optional[list[str]] = None,
+            task_id: Optional[str] = None
     ) -> AsyncIterator[AgentResponse]:
         """
         Solve a task using ReAct's TAO loop.
@@ -1267,11 +1277,12 @@ class ReActAgent(Agent):
         Args:
             task: A description of the task.
             files: An optional list of file paths or URLs.
+            task_id: (Optional) An ID for the task, if provided by the caller.
 
         Yields:
             An update from the agent.
         """
-        self._run_init(task, files)
+        self._run_init(task, files, task_id)
 
         yield self.response(
             rtype='log',
@@ -1467,9 +1478,9 @@ class ReActAgent(Agent):
 
         for msg in self.messages[start_idx:]:
             if msg.role == 'assistant' and isinstance(msg, ReActChatMessage):
-                    history += f'Thought: {msg.thought}\n'
-                    history += f'Action: {msg.action}\n'
-                    history += f'Args: {msg.args}\n'
+                history += f'Thought: {msg.thought}\n'
+                history += f'Action: {msg.action}\n'
+                history += f'Args: {msg.args}\n'
             elif msg.role == 'tool':
                 history += f'Observation: {msg.content}\n\n'
 
@@ -1867,6 +1878,7 @@ class SupervisorAgent(Agent):
             self,
             task: str,
             files: Optional[list[str]] = None,
+            task_id: Optional[str] = None
     ) -> AsyncIterator[AgentResponse]:
         """
         Solve a task using the supervisor agent/agency.
@@ -1874,11 +1886,12 @@ class SupervisorAgent(Agent):
         Args:
             task: A description of the task.
             files: An optional list of file paths or URLs.
+            task_id: (Optional) An ID for the task, if provided by the caller.
 
         Yields:
             An update from the agency.
         """
-        self._run_init(task, files)
+        self._run_init(task, files, task_id)
 
         agents_desc = ''
         for idx, agent in enumerate(self.agents):
@@ -1889,7 +1902,7 @@ class SupervisorAgent(Agent):
                 task=task,
                 task_files=files,
                 agents=agents_desc,
-                history=self.get_history(),
+                history=self.get_history(start_idx=self.msg_idx_of_new_task),
             ).strip()
             update = await self._call_llm(
                 ku.make_user_message(text_content=prompt, files=files),
@@ -1899,6 +1912,9 @@ class SupervisorAgent(Agent):
             task_msg: SupervisorTaskMessage = SupervisorTaskMessage.model_validate_json(update)
 
             if task_msg.task_complete:
+                # Currently, this is the ONLY way to stop the supervisor's loop
+                # In some cases, it is possible that `task_complete` is not set, and the supervisor
+                # keeps repeating the same task
                 yield AgentResponse(
                     type='final',
                     channel='supervisor',
