@@ -140,6 +140,8 @@ async def main():
     model_name = 'gemini/gemini-2.0-flash-lite'  # 45% score
     # model_name = 'gemini/gemini-2.5-flash-preview-05-20'  # 60% score
     # model_name = 'azure/gpt-4.1-mini'  # 45% score
+    # model_name = 'gemini/gemini-2.5-flash'  # 65% score
+    # model_name = 'gemini/gemini-2.5-pro'  # 60% score
 
     agent = get_code_act_agent(model_name=model_name)
 
