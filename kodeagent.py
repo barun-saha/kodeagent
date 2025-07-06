@@ -1933,7 +1933,7 @@ class ContextualAgent(CodeActAgent):
 
             return relevant_tool_names
         except Exception as e:
-            logger.error(f'Error in get_relevant_tools: %s', str(e))
+            logger.error('Error in get_relevant_tools: %s', str(e))
             # Fallback to using all tools if LLM call fails or parsing fails
             return [tool_func.name for tool_func in available_tools]
 
