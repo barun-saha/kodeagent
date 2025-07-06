@@ -1222,16 +1222,17 @@ class ReActAgent(Agent):
             max_iterations: int = 20,
     ):
         """
-        Instantiate a ReAct agent.
-
-        Args:
-            name: The name of the agent.
-            description: Description of the agent's capabilities or scope. Recommended to have.
-            model_name: The name of the LLM to be used (use names from LiteLLM).
-            tools: The tools available to the agent.
-            litellm_params: Optional parameters for LiteLLM.
-            max_iterations: The maximum number of steps that the agent should try to solve a task.
-        """
+            Initializes a ReAct agent with a specified name, language model, and set of tools.
+            
+            Parameters:
+                name (str): The agent's identifier.
+                model_name (str): The name of the language model to use.
+                tools (list): List of callable tools available to the agent.
+                description (str, optional): Description of the agent's purpose or capabilities.
+                vision_model_name (str, optional): Name of the vision model, if applicable.
+                litellm_params (dict, optional): Additional parameters for LiteLLM.
+                max_iterations (int, optional): Maximum number of reasoning steps per task. Defaults to 20.
+            """
         super().__init__(
             name=name,
             model_name=model_name,
@@ -1253,16 +1254,16 @@ class ReActAgent(Agent):
             task_id: Optional[str] = None
     ) -> AsyncIterator[AgentResponse]:
         """
-        Solve a task using ReAct's TAO loop.
-
-        Args:
-            task: A description of the task.
-            files: An optional list of file paths or URLs.
-            task_id: (Optional) An ID for the task, if provided by the caller.
-
-        Yields:
-            An update from the agent.
-        """
+            Executes the agent's task-solving loop, yielding progress updates and results as the agent iteratively reasons and acts.
+            
+            Parameters:
+                task (str): The description of the task to solve.
+                files (Optional[list[str]]): Optional list of file paths or URLs relevant to the task.
+                task_id (Optional[str]): Optional identifier for the task.
+            
+            Yields:
+                AgentResponse: Progress updates, intermediate steps, and the final result or failure message.
+            """
         self._run_init(task, files, task_id)
 
         yield self.response(
@@ -1656,23 +1657,24 @@ class CodeActAgent(ReActAgent):
             env_vars_to_set: Optional[dict[str, str]] = None,
     ):
         """
-        Instantiate a CodeActAgent.
-
-        Args:
-            name: The name of the agent.
-            description: Description of the agent's capabilities or scope. Recommended to have.
-            model_name: The name of the LLM to be used (use names from LiteLLM).
-            tools: The tools available to the agent.
-            run_env: The code execution environment. `host` means code will be run on the system
-             where you create this agent. `e2b` means code will be run on an E2B sandbox. You will
-             need an E2B API key.
-            litellm_params: Optional parameters for LiteLLM.
-            max_iterations: The maximum number of steps that the agent should try to solve a task.
-            allowed_imports: A list of Python modules that the agent is allowed to import.
-            pip_packages: Optional Python libs to be installed with `pip` [for E2B].
-            timeout: Code execution timeout (default 30s).
-            env_vars_to_set: Optional environment variables to set in the code execution.
-        """
+            Initializes a CodeActAgent with specified tools, code execution environment, and configuration.
+            
+            Parameters:
+                name (str): Name of the agent.
+                model_name (str): Name of the language model to use.
+                run_env (CODE_ENV_NAMES): Code execution environment ('host', 'e2b', etc.).
+                tools (Optional[list[Callable]]): List of callable tools available to the agent.
+                description (Optional[str]): Description of the agent's purpose or capabilities.
+                vision_model_name (Optional[str]): Name of the vision-capable model, if any.
+                litellm_params (Optional[dict]): Additional parameters for LiteLLM.
+                max_iterations (int): Maximum number of reasoning steps per task.
+                allowed_imports (Optional[list[str]]): Python modules allowed for import during code execution.
+                pip_packages (Optional[str]): Python packages to install in the execution environment.
+                timeout (int): Maximum code execution time in seconds.
+                env_vars_to_set (Optional[dict[str, str]]): Environment variables to set in the execution environment.
+            
+            The agent combines the source code of all provided tools for use during code execution and configures a CodeRunner for running generated code in the specified environment.
+            """
         super().__init__(
             name=name,
             model_name=model_name,
@@ -1772,12 +1774,12 @@ class CodeActAgent(ReActAgent):
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
         """
-        Code action based on CodeActAgent's previous thought.
-
-        The LLM has suggested code. This method will run the code.
-
+        Executes the code suggested by the LLM in the previous step and yields the result as an agent response.
+        
+        Runs the generated Python code, captures its output, and adds the result to the message history. If a final answer is present, marks the task as finished and yields the final response. Otherwise, yields the output or error from code execution as a step update.
+        
         Yields:
-            Updates from the acting step.
+            AgentResponse: Updates from the code execution step, including final answer or intermediate results.
         """
         prev_msg: CodeChatMessage = self.messages[-1]  # type: ignore
 
@@ -1859,7 +1861,12 @@ class ContextualAgent(CodeActAgent):
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
     ):
-        super().__init__(
+        """
+            Initializes a ContextualAgent that selects relevant tools for each task before execution.
+            
+            Stores the original list of tools for dynamic filtering based on task context.
+            """
+            super().__init__(
             name=name,
             model_name=model_name,
             run_env=run_env,
@@ -1882,16 +1889,16 @@ class ContextualAgent(CodeActAgent):
             task_files: Optional[list[str]] = None,
     ) -> list[str]:
         """
-        Calls an LLM to determine which tools are relevant for the given task.
-
-        Args:
-            task_description: The description of the task.
-            available_tools: A list of all available tools.
-            task_files: Optional list of files relevant to the task.
-
-        Returns:
-            A list of names of the tools deemed relevant by the LLM.
-        """
+            Determine which tools are relevant for a given task by querying a language model.
+            
+            Parameters:
+                task_description (str): The description of the task to solve.
+                available_tools (list[Callable]): List of available tool functions.
+                task_files (Optional[list[str]]): Optional list of files associated with the task.
+            
+            Returns:
+                list[str]: Names of tools identified as relevant to the task. If the language model call fails, returns all available tool names.
+            """
         # Implementation will be done in the next step
         tool_descriptions = ''
         for tool_func in available_tools:
@@ -1945,7 +1952,12 @@ class ContextualAgent(CodeActAgent):
     ) -> AsyncIterator[AgentResponse]:
         # First, call _run_init to set up the task description, similar to the parent class
         # This is important because get_relevant_tools might use self.task.id for tracing
-        super()._run_init(task, files, task_id)
+        """
+            Runs the agent on a given task, first selecting relevant tools via LLM, then executing the task using only those tools.
+            
+            Yields agent responses as the task progresses, including a log of selected tools and all subsequent outputs from the parent agent's execution loop.
+            """
+            super()._run_init(task, files, task_id)
 
         relevant_tool_names = await self.get_relevant_tools(
             self.task.description, self.original_tools, self.task.files
@@ -2194,7 +2206,9 @@ def print_response(response: AgentResponse):
 
 async def main():
     """
-    Demonstrate the use of ReActAgent and CodeActAgent.
+    Demonstrates the usage of ContextualAgent to solve a series of example tasks, printing agent responses for each task.
+    
+    Runs the agent on tasks involving arithmetic, date queries, image analysis, and content summarization, optionally providing image or document URLs as input.
     """
     litellm_params = {'temperature': 0}
     model_name = 'gemini/gemini-2.0-flash-lite'

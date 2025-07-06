@@ -134,7 +134,9 @@ def get_multiagent(model_name: str) -> ka.Agent:
 
 async def main():
     """
-    Evaluate a subset of the GAIA benchmark for HF Agents Course finale.
+    Automates the process of retrieving benchmark questions, solving them using a configured language model agent, and submitting answers for evaluation in the Hugging Face Agents Course finale.
+    
+    The function fetches a list of tasks from a remote API, uses a CodeActAgent to generate answers (optionally handling file attachments), and submits the results for scoring. It handles network errors, skips incomplete questions, and prints progress and results using rich formatting.
     """
     questions = get_questions_list()
     model_name = 'gemini/gemini-2.0-flash-lite'  # 45% score
