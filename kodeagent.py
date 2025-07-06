@@ -1689,7 +1689,7 @@ class CodeActAgent(ReActAgent):
 
         if tools:
             for t in self.tools:
-                self.tools_source_code += inspect.getsource(t).strip('@tool') + '\n'
+                self.tools_source_code += inspect.getsource(t).replace('@tool\n', '', 1) + '\n'
 
         self.pip_packages = pip_packages
 
@@ -1970,7 +1970,7 @@ class ContextualAgent(CodeActAgent):
         # Update tools_source_code as well, this is important for CodeActAgent
         self.tools_source_code = 'from typing import *\n\nimport kutils as ku\n\n'
         for t in self.tools:  # Use the filtered list of tools
-            self.tools_source_code += inspect.getsource(t).strip('@tool') + '\n'
+            self.tools_source_code += inspect.getsource(t).replace('@tool\n', '', 1) + '\n'
 
         # Now, call the parent's run method to execute the task with the filtered tools
         # The parent run method will use the updated self.tools, self.tool_names etc
