@@ -1,4 +1,4 @@
-litellm~=1.70.0
+litellm~=1.74.0
 pydantic~=2.11.3
 python-dotenv~=1.1.0
 e2b-code-interpreter~=1.2.1
@@ -9,7 +9,7 @@ json_repair~=0.44.1
 rich~=14.0.0
 
 # Dependencies for the tools
-duckduckgo_search~=8.0.1
+duckduckgo_search~=8.1.0
 markitdown[pdf, docx, xlsx]
 youtube-transcript-api~=1.0.3
 wikipedia~=1.4.0
