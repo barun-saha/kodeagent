@@ -1243,7 +1243,8 @@ class ReActAgent(Agent):
         )
 
         self.final_answer_found: bool = False
-        logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
+        if tools:
+            logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
 
     async def run(
             self,
@@ -1686,8 +1687,9 @@ class CodeActAgent(ReActAgent):
         # TODO Somehow dynamically identify and include the modules used by the tools
         self.tools_source_code: str = 'from typing import *\n\nimport kutils as ku\n\n'
 
-        for t in self.tools:
-            self.tools_source_code += inspect.getsource(t).strip('@tool') + '\n'
+        if tools:
+            for t in self.tools:
+                self.tools_source_code += inspect.getsource(t).replace('@tool\n', '', 1) + '\n'
 
         self.pip_packages = pip_packages
 
@@ -1834,6 +1836,146 @@ class CodeActAgent(ReActAgent):
                     channel='_act',
                     metadata={'is_error': True}
                 )
+
+
+class ContextualAgent(CodeActAgent):
+    """
+    An agent that first determines relevant tools for a task via an LLM call
+    before proceeding with the standard CodeActAgent execution flow.
+    """
+
+    def __init__(
+            self,
+            name: str,
+            model_name: str,
+            run_env: CODE_ENV_NAMES,
+            tools: Optional[list[Callable]] = None,
+            description: Optional[str] = None,
+            vision_model_name: Optional[str] = None,
+            litellm_params: Optional[dict] = None,
+            max_iterations: int = 20,
+            allowed_imports: Optional[list[str]] = None,
+            pip_packages: Optional[str] = None,
+            timeout: int = 30,
+            env_vars_to_set: Optional[dict[str, str]] = None,
+    ):
+        super().__init__(
+            name=name,
+            model_name=model_name,
+            run_env=run_env,
+            tools=tools,
+            description=description,
+            vision_model_name=vision_model_name,
+            litellm_params=litellm_params,
+            max_iterations=max_iterations,
+            allowed_imports=allowed_imports,
+            pip_packages=pip_packages,
+            timeout=timeout,
+            env_vars_to_set=env_vars_to_set,
+        )
+        self.original_tools: list[Callable] = tools or []
+
+    async def get_relevant_tools(
+            self,
+            task_description: str,
+            available_tools: list[Callable] | None,
+            task_files: Optional[list[str]] = None,
+    ) -> list[str]:
+        """
+        Calls an LLM to determine which tools are relevant for the given task.
+
+        Args:
+            task_description: The description of the task.
+            available_tools: A list of all available tools.
+            task_files: Optional list of files relevant to the task.
+
+        Returns:
+            A list of names of the tools deemed relevant by the LLM.
+        """
+        # Implementation will be done in the next step
+        tool_descriptions = ''
+        for tool_func in available_tools:
+            tool_descriptions += f'- {tool_func.name}: {tool_func.description}\n'
+
+        prompt = f'''
+        You are an expert resource planner for solving tasks. Given the following task:
+        {task_description}
+        
+        optional files for the task:
+        {task_files}
+
+        And the following available tools:
+        {tool_descriptions}
+
+        Which of these tools are relevant to solving the task?
+        Identify carefully based on the task and tool descriptions so that nothing relevant is missed.
+        Return a comma-separated list of tool names. For example: tool_name1,tool_name2
+        If no tools are relevant, return an empty string.
+        '''
+
+        try:
+            response_str = await self._call_llm(
+                messages=ku.make_user_message(text_content=prompt),
+                trace_id=self.task.id if self.task else None,  # task might not be set yet
+            )
+
+            if not response_str or response_str.strip() == "":
+                return []
+
+            relevant_tool_names = [
+                name.strip() for name in response_str.split(',') if name.strip()
+            ]
+
+            # Filter out any tool names not actually in available_tools to prevent hallucination
+            valid_tool_names = [tool_func.name for tool_func in available_tools]
+            relevant_tool_names = [name for name in relevant_tool_names if
+                                   name in valid_tool_names]
+
+            return relevant_tool_names
+        except Exception as e:
+            logger.error('Error in get_relevant_tools: %s', str(e))
+            # Fallback to using all tools if LLM call fails or parsing fails
+            return [tool_func.name for tool_func in available_tools]
+
+    async def run(
+            self,
+            task: str,
+            files: Optional[list[str]] = None,
+            task_id: Optional[str] = None
+    ) -> AsyncIterator[AgentResponse]:
+        # First, call _run_init to set up the task description, similar to the parent class
+        # This is important because get_relevant_tools might use self.task.id for tracing
+        super()._run_init(task, files, task_id)
+
+        relevant_tool_names = await self.get_relevant_tools(
+            self.task.description, self.original_tools, self.task.files
+        )
+
+        yield self.response(
+            rtype='log',
+            value=(
+                f"Relevant tools for this task:"
+                f" {', '.join(relevant_tool_names) if relevant_tool_names else 'None'}"
+            ),
+            channel='ContextualAgent.run'
+        )
+
+        # Filter the agent's tools based on the LLM's response
+        self.tools = [
+            tool_func for tool_func in self.original_tools if tool_func.name in relevant_tool_names
+        ]
+        self.tool_names = set(relevant_tool_names)
+        self.tool_name_to_func = {name: func for name, func in zip(self.tool_names, self.tools)}
+
+        # Update tools_source_code as well, this is important for CodeActAgent
+        self.tools_source_code = 'from typing import *\n\nimport kutils as ku\n\n'
+        for t in self.tools:  # Use the filtered list of tools
+            self.tools_source_code += inspect.getsource(t).replace('@tool\n', '', 1) + '\n'
+
+        # Now, call the parent's run method to execute the task with the filtered tools
+        # The parent run method will use the updated self.tools, self.tool_names etc
+        async for response_item in super().run(task, files, task_id):
+            yield response_item
 
 
 class SupervisorAgent(Agent):
@@ -2067,7 +2209,20 @@ async def main():
     #     max_iterations=3,
     #     litellm_params=litellm_params
     # )
-    agent2 = CodeActAgent(
+    # agent2 = CodeActAgent(
+    #     name='Web agent',
+    #     model_name=model_name,
+    #     tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
+    #     run_env='host',
+    #     max_iterations=7,
+    #     litellm_params=litellm_params,
+    #     allowed_imports=[
+    #         'os', 're', 'time', 'random', 'requests', 'tempfile',
+    #         'duckduckgo_search', 'markitdown', 'youtube_transcript_api',
+    #     ],
+    #     pip_packages='duckduckgo_search~=8.0.1;"markitdown[all]";',
+    # )
+    agent3 = ContextualAgent(
         name='Web agent',
         model_name=model_name,
         tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
@@ -2101,10 +2256,10 @@ async def main():
         ),
     ]
 
-    print('CodeActAgent demo\n')
+    print('ContextualAgent demo\n')
     for task, img_urls in the_tasks:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
-        async for response in agent2.run(task, files=img_urls):
+        async for response in agent3.run(task, files=img_urls):
             print_response(response)
         print('\n\n')
 
@@ -2128,129 +2283,3 @@ if __name__ == '__main__':
     os.environ['PYTHONUTF8'] = '1'
 
     asyncio.run(main())
-
-
-class ContextualAgent(CodeActAgent):
-    """
-    An agent that first determines relevant tools for a task via an LLM call
-    before proceeding with the standard CodeActAgent execution flow.
-    """
-    def __init__(
-            self,
-            name: str,
-            model_name: str,
-            run_env: CODE_ENV_NAMES,
-            tools: Optional[list[Callable]] = None,
-            description: Optional[str] = None,
-            vision_model_name: Optional[str] = None,
-            litellm_params: Optional[dict] = None,
-            max_iterations: int = 20,
-            allowed_imports: Optional[list[str]] = None,
-            pip_packages: Optional[str] = None,
-            timeout: int = 30,
-            env_vars_to_set: Optional[dict[str, str]] = None,
-    ):
-        super().__init__(
-            name=name,
-            model_name=model_name,
-            run_env=run_env,
-            tools=tools,
-            description=description,
-            vision_model_name=vision_model_name,
-            litellm_params=litellm_params,
-            max_iterations=max_iterations,
-            allowed_imports=allowed_imports,
-            pip_packages=pip_packages,
-            timeout=timeout,
-            env_vars_to_set=env_vars_to_set,
-        )
-        self.original_tools: list[Callable] = tools if tools is not None else []
-
-    async def get_relevant_tools(self, task_description: str, available_tools: list[Callable]) -> list[str]:
-        """
-        Calls an LLM to determine which tools are relevant for the given task.
-
-        Args:
-            task_description: The description of the task.
-            available_tools: A list of all available tools.
-
-        Returns:
-            A list of names of the tools deemed relevant by the LLM.
-        """
-        # Implementation will be done in the next step
-        tool_descriptions = ""
-        for tool_func in available_tools:
-            tool_descriptions += f"- {tool_func.name}: {tool_func.description}\n"
-
-        prompt = f"""\
-Given the following task:
-"{task_description}"
-
-And the following available tools:
-{tool_descriptions}
-
-Which of these tools are relevant to solving the task?
-Please return a comma-separated list of tool names. For example: tool_name1,tool_name2
-If no tools are relevant, return an empty string.
-"""
-        try:
-            response_str = await self._call_llm(
-                messages=ku.make_user_message(text_content=prompt),
-                trace_id=self.task.id if self.task else None, # task might not be set yet
-            )
-
-            if not response_str or response_str.strip() == "":
-                return []
-
-            relevant_tool_names = [name.strip() for name in response_str.split(',') if name.strip()]
-
-            # Filter out any tool names not actually in available_tools to prevent hallucination
-            valid_tool_names = [tool_func.name for tool_func in available_tools]
-            relevant_tool_names = [name for name in relevant_tool_names if name in valid_tool_names]
-
-            return relevant_tool_names
-        except Exception as e:
-            logger.error(f"Error in get_relevant_tools: {e}")
-            # Fallback to using all tools if LLM call fails or parsing fails
-            return [tool_func.name for tool_func in available_tools]
-
-
-    async def run(
-            self,
-            task: str,
-            files: Optional[list[str]] = None,
-            task_id: Optional[str] = None
-    ) -> AsyncIterator[AgentResponse]:
-        # First, call _run_init to set up the task description, similar to the parent class.
-        # This is important because get_relevant_tools might use self.task.id for tracing.
-        super()._run_init(task, files, task_id)
-
-        yield self.response(
-            rtype='log',
-            value='Determining relevant tools for the task...',
-            channel='ContextualAgent.run'
-        )
-
-        relevant_tool_names = await self.get_relevant_tools(self.task.description, self.original_tools)
-
-        yield self.response(
-            rtype='log',
-            value=f"Relevant tools identified: {', '.join(relevant_tool_names) if relevant_tool_names else 'None'}",
-            channel='ContextualAgent.run'
-        )
-
-        # Filter the agent's tools based on the LLM's response
-        self.tools = [tool_func for tool_func in self.original_tools if tool_func.name in relevant_tool_names]
-        self.tool_names = set(relevant_tool_names)
-        self.tool_name_to_func = {name: func for name, func in zip(self.tool_names, self.tools)}
-
-        # Update tools_source_code as well, this is important for CodeActAgent
-        self.tools_source_code = 'from typing import *\n\nimport kutils as ku\n\n'
-        for t in self.tools: # Use the filtered list of tools
-            self.tools_source_code += inspect.getsource(t).strip('@tool') + '\n'
-
-        # Now, call the parent's run method to execute the task with the filtered tools
-        # We don't need to call super()._run_init() again as it's done above.
-        # The parent run method will use the updated self.tools, self.tool_names etc.
-        async for response_item in super().run(task, files, task_id):
-            yield response_item
