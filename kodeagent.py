@@ -1674,7 +1674,8 @@ class CodeRunner:
                     timeout=self.default_timeout + 15,
                     envs=self.env_vars_to_set or {},
                 )
-                sbx.commands.run(f'pip install {self.pip_packages_str}')
+                if self.pip_packages_str:
+                    sbx.commands.run(f'pip install {self.pip_packages_str}')
 
             # Copy the local dependency modules
             for a_file in self.local_modules_to_copy:
