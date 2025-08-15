@@ -1084,7 +1084,7 @@ class Agent(ABC):
             relevant_tool_names = {t.strip() for t in relevant_tool_names if t.strip()}
             print(f'{relevant_tool_names=}')
             relevant_tools = [
-                t for t in self.tools if t in relevant_tool_names
+                t for t in self.tools if t.name in relevant_tool_names
             ]
             return relevant_tools
         except Exception as e:
