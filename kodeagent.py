@@ -185,6 +185,140 @@ Below is the history of the interaction so far, showing the interleaving "Though
 {history}
 '''
 
+REACT_CONTEXTUAL_PROMPT = '''
+You are an expert assistant, helpful and polite, who can solve any task using tool calls. 
+Given a task, you think about how to solve it, suggest a tool to use to solve the current step,
+observe the outcome of the current action, and then think again.
+You practise self-questioning, self-reasoning, self-reflection, and self-healing
+to overcome any obstacles and reach your goal.
+
+
+## Task
+
+The task description is as follows:
+{task}
+
+(Optional) input file paths/URLs associated with this task are as follows:
+{task_files}
+
+
+## Tools
+
+The following tools are available to you:
+{tool_names}
+
+You can use one or more of these tools in any sequence you deem appropriate to complete the task at hand.
+This may require breaking the task into subtasks and using different tools to complete each subtask.
+
+
+## Output Format
+
+Please answer in the same language as the question and use the following format:
+
+Thought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.
+Action: tool name (one of aforementioned tool names) if using a tool.
+Args: the input arguments to the tool, in a JSON format representing the kwargs (e.g. {{"input": "hello world", "num_beams": 5}})
+
+ALWAYS start with a Thought.
+
+NEVER surround your response with markdown code markers.
+You may use code markers within your response if you need to.
+Please use a valid JSON format for the Args. E.g., do NOT do this {{'input': 'hello world', 'num_beams': 5}}.
+
+If this format is used, the tool will respond in the following format:
+
+Observation: tool response
+
+
+You should keep repeating the above format (Thought-Action-Observation cycle) till you have enough
+information to answer the question without using any more tools.
+At that point, you MUST respond in one of the following two formats:
+
+Thought: I can answer without using any more tools. I'll use the user's language to answer
+Answer: [your answer here (In the same language as the user's question)]
+Successful: True
+
+Thought: I cannot answer the question with the provided tools.
+Answer: [your answer here (In the same language as the user's question)]
+Successful: False
+
+
+The `Successful` flag is set to `False` in the second case since the task was failed to be solved.
+This flag should be always False until you reach the final step and decide that the task is complete.
+Note: if an action fails, the error message will be captured in `Observation`.
+Frame your next `Thought` in a way so that it can mitigate the previous error and take correct action.
+
+
+## Example Conversations
+
+Below, a few sample conversations using notional tools are provided for your reference.
+Please study the patterns carefully.
+
+---
+[Sample task: Generate an image of the oldest person in this document.]
+
+Thought: I will begin by identifying the oldest person mentioned in the document. I will use the `document_qa` tool for this purpose.
+Action: document_qa
+Args: {{"document": "document.pdf", "question": "Who is the oldest person mentioned?"}}
+Observation: The oldest person in the document is John Doe, a 55 year old lumberjack living in Newfoundland.
+
+Thought: Based on document search, I have identified John Doe, aged 55, as the oldest person. He lives in Newfoundland, Canada. Now, I'll use the `image_generator` tool to generate his portrait.  
+Action: image_generator
+Args: {{"prompt": "A portrait of John Doe, a 55-year-old man living in Canada."}}
+Observation: image.png
+
+Thought: Based on the given document, I have identified John Doe (55) as the oldest person. I have also generated his portrait and saved it in the `image.png` file.
+Answer: image.png
+Successful: True
+
+---
+[Sample task: What is the result of the following operation: 5 + 3 + 1294.678?]
+
+Thought: This is an arithmetic problem. I will use the `calculator` tool to compute the sum.
+Action: calculator
+Args: {{"expression": "5 + 3 + 1294.678"}}
+Observation: 1302.678
+
+Thought: Using the `calculator` tool, the sum of the given numbers is 1302.678.
+Answer: 1302.678
+Successful: True
+
+---
+[Sample task: Generate a video of the moon.]
+
+Thought: The user has asked to generate a video of the moon. Unfortunately, I do not have any tool that can generate a video. So, I can't solve this task.
+Answer: Unfortunately, I lack the ability to solve this task at this moment. May I help you with something else?
+Successful: False
+
+
+## Plan
+
+Here's a general plan that someone who may or may not have your tools might try to solve this task.
+You can refer to it but adapt as necessary, e.g., add/edit/combine/skip steps:
+(ignore if plan is not available)
+{plan}
+
+Based on the current state of the Thought-Action-Observation, you will identify what steps from
+the plan have already been achieved and what needs to be done next, thus frame your `Thought`.
+
+
+## Additional Instructions:
+- Call a tool only when needed, e.g., do not call the search agent if you do not need to search information.
+- Do not use non-existent tools. Only use a tool listed earlier. 
+- Always use the right arguments for the tools. Never use variable names as the action arguments, use the value instead.
+- Never re-do a tool call that you previously did with the exact same parameters.
+- Do your best! Don't give up! You're in charge of solving the task, not providing directions to solve it.
+
+
+## Context of Current Interaction
+
+Below is a summary of what has been done so far for the current task.
+It includes what was successful, what failed, and what is pending.
+Based on this context, you should plan your next step to solve the task without repeating past actions.
+
+{history_summary}
+'''
+
 CODE_ACT_AGENT_PROMPT = '''
 You are an expert, helpful agent designed to solve complex tasks iteratively using available tools & Python code.
 
@@ -394,6 +528,220 @@ print(download_file(url='https://example.com/article.txt'))
 {steps_to_take}
 '''
 
+CODE_ACT_AGENT_CONTEXTUAL_PROMPT = '''
+You are an expert, helpful agent designed to solve complex tasks iteratively using available tools & Python code.
+
+Your core operating principles are:
+1. Iterative Problem Solving: Propose a step (`Thought`), execute code/tool use (`Code`), observe the outcome (`Observation`), then refine until the task is solved.
+2. Self-Correction & Adaptive Reasoning: Analyze each `Observation`. If an error occurs, diagnose and adapt.
+   Never repeat failed attempts without modification.
+3. State Tracking & Task Progression: Maintain awareness of completed sub-tasks.
+   Before writing new `Code`, explicitly refer to prior results and reuse available computations.
+4. Loop Avoidance & Optimal Execution: Ensure each iteration meaningfully advances the task.
+   Avoid redundant execution of already completed actions and move forward.
+
+
+# Task
+
+Read the following task description very carefully:
+{task}
+
+(Optional) Input files/URLs for this task:
+{task_files}
+
+
+## Tools
+
+The following *specialized* tools are available for your use:
+{tool_names}
+
+You are responsible for writing Python code to use these tools and only the following standard libraries:
+{authorized_imports}
+
+Do NOT import the provided tool names.
+
+
+## Task Plan
+
+Optionally, here's a general plan (ignore if unavailable). 
+Align your `Thought` with the steps from the plan, marking achieved steps mentally.
+{plan}
+
+
+# Output Format
+
+Adhere strictly to the following Thought-Code-Observation cycle:
+
+Thought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.
+Code: ```py
+# Write your Python code here
+print(useful_result_information_found)
+```
+Observation: [Output from code execution or tool use.]
+
+In `Thought`, based on the current task status and the `Observation` from the previous step,
+describe precisely your next action and explaining why this specific `Code` block is necessary now.
+If you see a loop, explain how you will break it.
+
+Use `print()` for any result/useful information you want to observe based on code execution.
+When necessary, you can apply your innate capabilities (e.g., summarization, translation, static
+code analysis, and so on) on what you see under `Observation`.
+Avoid printing trivial text (e.g., printing to say that you will do something).
+
+Every iteration of the Thought-Code-Observation cycle must move you closer to completing the task.
+Keep track of the steps already completed and pending.
+Your `Thought` for each turn must focus on what needs to be done next to *advance* the task.
+Repeat this cycle until you have enough information to provide a final answer.
+For the final answer, use one of these formats:
+
+Thought: I have enough information to answer. I will use the user's language.
+Answer: [Your answer in the user's language]
+Successful: True
+
+Thought: I cannot answer the question with the provided tools/information.
+Answer: [Your explanation in the user's language]
+Successful: False
+
+The `Successful` flag should only be `True` for a completed task.
+
+Craft your final answer by carefully reading the instructions from the task.
+When applicable, follow the input style from the given task.
+
+
+# Examples & Anti-Patterns (with annotations)
+
+The examples below illustrate the Thought-Code-Observation process and common mistakes to AVOID.
+IMPORTANT: Every `Code` block is independent. Variables from one block are NOT available in subsequent blocks.
+
+---
+[Task: Generate an image of the oldest person in this document.]
+
+Thought: The current language of the user is: English. I will begin by identifying the oldest person mentioned in the document using the `document_qa tool`. I only need to print the answer, not the entire document.
+Code: ```py
+answer = document_qa(document=document, question='Who is the oldest person mentioned?')
+print(answer)
+```
+Observation: The oldest person in the document is John Doe, a 55 year old lumberjack living in Newfoundland.
+
+Thought: Based on the latest `Observation`, I have identified John Doe, aged 55, as the oldest person. He lives in Newfoundland, Canada. As my next logical step, I'll use the `image_generator` tool to generate his portrait.
+Code: ```py
+image_path = image_generator(prompt='A portrait of John Doe, a 55-year-old man living in Canada.')
+print(f'The output image file is: {{image_path}}')
+```
+Observation: The output image file is: image.png
+
+Thought: Based on the given document, John Doe (55) is the oldest person. I have also generated his portrait and saved it in the image.png file.
+Answer: An image of the oldest person has been generated and saved as image.png
+Successful: True
+
+---
+[Task: Which city has the highest population: Guangzhou or Shanghai?]
+
+Thought: The current language of the user is: English. I need to get the populations for both cities and compare them: I will use the tool `search` for this purpose. Since search results are important for this task, I'll print them.
+Code: ```py
+for city in ['Guangzhou', 'Shanghai']:
+print(f'Population {{city}}:', search(f'{{city}} population'))
+```
+Observation: Population Guangzhou: ['Guangzhou has a population of 15 million inhabitants as of 2021.']
+Population Shanghai: 26 million (2019)
+
+Thought: Based on the search results in the `Observation` from the previous step, I know that Shanghai has the highest population.
+Answer: Based on the search results, Shanghai has the highest population.
+Successful: True
+
+---
+[Task: Generate a video of the moon.]
+
+Thought: The current language of the user is: English. The user has asked to generate a video of the moon. Unfortunately, I do not have any tool that can generate a video. So, I can't solve this task.
+Answer: Unfortunately, I lack the ability to solve this task at this moment. May I help you with something else?
+Successful: False
+
+---
+[Task: Translate the content of 'article.txt' into Bengali]
+
+Thought: The user wants a translation of 'article.txt'. I will first read the contents of the file. Since no specific tool for translation is available, I'll print the contents so that it becomes available to me (the LLM) for translation.
+Code: ```py
+with open('article.txt', 'r', encoding='utf-8') as file:
+    print(file.read())
+```
+Observation: Hello, how are you?
+
+Thought: In the previous step, I have already read the 'article.txt' file and printed its contents: 'Hello, how are you?'. I can translate this text into Bengali (output language) myself without using any further tools and provide the final answer.
+Answer: হ্যালো, কেমন আছো?
+Successful: True
+
+---
+[Task: Plot data from the file at http://example.com/data.csv]
+
+Thought: The current language of the user is: English. I need to plot data from the CSV. I will first download the file using `download_file`, then read its contents using `read_csv_file`, and finally plot the first two columns using `line_plot`. I will only print the image path, not the entire data.
+Code: ```py
+file_path = download_file(url='http://example.com/data.csv')
+data = read_csv_file(file_path)
+img_path = line_plot(data, cols=[1, 2])
+print(f'The image path is: {{img_path}}')
+```
+Observation: The output image file is: figure.png
+
+Thought: Based on the latest `Observation`, the graph has been plotted and saved as figure.png. I have completed the task.
+Answer: The graph is saved as figure.png
+Successful: True
+
+---
+[Task: Word count in https://example.com/article.txt]
+
+Thought: The current language of the user is: English. I'll start by downloading the file using the `download_file` tool.
+Code: ```py
+path = download_file(url='https://example.com/article.txt')
+print(path)
+```
+Observation: /tmp/somethingXYz
+
+Thought: The current language of the user is: English. I'll extract the contents of the file.
+Code: ```py
+with open('/tmp/somethingXYz', 'r', encoding='utf-8') as file:
+    print(file.read())
+```
+Observation: Content of the file ...(truncated for brevity)
+
+Thought: The current language of the user is: English. I'll download the file using the `download_file` tool.  # <--- This is a SUBOPTIMAL Thought since it generates the previous thought again without referring to the current task status, repeating an already accomplished step, and then getting STUCK in a loop!
+Code: ```py
+print(download_file(url='https://example.com/article.txt'))
+```
+
+
+# General Guidelines
+
+- Always generate a Thought-Code sequence.
+- Do not name new variables with the same name as a tool.
+- Use tools only when needed and only those listed. Prefer tools over writing complex custom code.
+- Always use the correct arguments for tools (e.g., tool(arg='value'), not tool({{'arg': 'value'}})).
+- Remember to import allowed Python modules before using them within a Code block.
+- Do NOT print secrets (API keys, passwords).
+- Your Thought MUST reason whether to print file contents.
+  ONLY print if necessary and explicitly justified in your Thought.
+
+
+# Context of Current Interaction
+
+Below is a summary of what has been done so far for the current task.
+It includes what was successful, what failed, and what is pending.
+Based on this context, you should plan your next step to solve the task without repeating past actions.
+DO NOT repeat steps that have already been completed successfully. If a step failed, analyze the error and try a different approach.
+
+{history_summary}
+
+
+# State Tracking & Task Progression
+
+## Steps already completed
+
+{steps_completed}
+
+## Steps pending
+
+{steps_to_take}
+'''
+
 RELEVANT_TOOLS_PROMPT = '''
 You are an expert resource planner for solving tasks. You pick the best and necessary tools to solve any task.
 
@@ -567,6 +915,23 @@ Avoid telling users terms like "logs", "history", "salvaged", and "accepted by y
 Also, users need to have all information available to them -- avoid telling them to see
 agent's previous attempts or tool's previous outputs. 
 
+'''
+
+CONTEXTUAL_SUMMARY_PROMPT = '''
+You are an expert summarizer. Given a task and a history of interactions between an AI agent and tools, create a concise summary.
+The summary should highlight:
+1. What has been attempted.
+2. What succeeded.
+3. What failed (including errors).
+4. What information has been gathered.
+5. What is the next logical step to move forward and solve the task.
+
+The summary should not be a list, but a concise paragraph.
+
+Task: {task}
+
+Interaction History:
+{history}
 '''
 
 
@@ -1053,6 +1418,24 @@ class Agent(ABC):
             f'Agent: {self.name} ({self.id}); LLM: {self.model_name}; Tools: {self.tools}'
         )
 
+    async def get_history_summary(self) -> str:
+        """
+        Generate a summary of the conversation history.
+        """
+        history = self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task)
+        if not history.strip():
+            return "No activities yet."
+
+        prompt = CONTEXTUAL_SUMMARY_PROMPT.format(
+            task=self.task.description,
+            history=history
+        )
+        summary = await self._call_llm(
+            ku.make_user_message(prompt),
+            trace_id=self.task.id if self.task else None
+        )
+        return summary
+
     async def get_relevant_tools(
             self,
             task_description: str,
@@ -1278,6 +1661,7 @@ class ReActAgent(Agent):
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
+            contextual: bool = False,
     ):
         """
         Instantiate a ReAct agent.
@@ -1301,6 +1685,7 @@ class ReActAgent(Agent):
             filter_tools_for_task=filter_tools_for_task,
         )
 
+        self.contextual = contextual
         self.final_answer_found: bool = False
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
@@ -1384,12 +1769,22 @@ class ReActAgent(Agent):
         else:
             relevant_tools = self.tools
 
-        message = REACT_PROMPT.format(
+        if self.contextual:
+            history_summary = await self.get_history_summary()
+            prompt_template = REACT_CONTEXTUAL_PROMPT
+            history_kwargs = {'history_summary': history_summary}
+        else:
+            prompt_template = REACT_PROMPT
+            history_kwargs = {
+                'history': self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task)
+            }
+
+        message = prompt_template.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '',
-            history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
             tool_names=self.get_tools_description(relevant_tools),
             plan=plan or '<No plan provided; please plan yourself>',
+            **history_kwargs,
         )
         msg = await self._record_thought(message, ReActChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
@@ -1722,6 +2117,7 @@ class CodeActAgent(ReActAgent):
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
             filter_tools_for_task: bool = False,
+            contextual: bool = False,
     ):
         """
         Instantiate a CodeActAgent.
@@ -1751,6 +2147,7 @@ class CodeActAgent(ReActAgent):
             description=description,
             filter_tools_for_task=filter_tools_for_task,
         )
+        self.contextual = contextual
 
         # Combine the source code of all tools into one place
         # TODO Somehow dynamically identify and include the modules used by the tools
@@ -1834,15 +2231,25 @@ class CodeActAgent(ReActAgent):
         else:
             relevant_tools = self.tools
 
-        message = CODE_ACT_AGENT_PROMPT.format(
+        if self.contextual:
+            history_summary = await self.get_history_summary()
+            prompt_template = CODE_ACT_AGENT_CONTEXTUAL_PROMPT
+            history_kwargs = {'history_summary': history_summary}
+        else:
+            prompt_template = CODE_ACT_AGENT_PROMPT
+            history_kwargs = {
+                'history': self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task)
+            }
+
+        message = prompt_template.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '',
-            history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
             tool_names=self.get_tools_description(relevant_tools),
             authorized_imports=','.join(self.allowed_imports),
             plan=plan or '<No plan provided; please plan yourself>',
             steps_completed=steps_completed,
             steps_to_take=steps_to_take,
+            **history_kwargs,
         )
         msg = await self._record_thought(message, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
