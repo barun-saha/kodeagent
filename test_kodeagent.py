@@ -1,189 +1,292 @@
-import asyncio
+"""
+Unit tests for the KodeAgent ReActAgent class.
+"""
+import datetime
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
-from kodeagent import ContextualAgent, CodeActAgent, tool, AgentResponse, ChatMessage
+from kodeagent import (
+    ReActAgent,
+    tool,
+    ChatMessage,
+    ReActChatMessage,
+    calculator,
+    web_search,
+    file_download, CodeActAgent
+)
 
-# Define some dummy tools for testing
+
+MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
+
+
 @tool
 def dummy_tool_one(param1: str) -> str:
     """Description for dummy tool one."""
-    return f"tool one executed with {param1}"
+    return f'tool one executed with {param1}'
 
-@tool
-def dummy_tool_two(param1: int, param2: bool) -> str:
-    """Description for dummy tool two."""
-    return f"tool two executed with {param1} and {param2}"
 
-@tool
-def dummy_tool_three() -> str:
-    """Description for dummy tool three."""
-    return "tool three executed"
+@pytest.fixture
+def react_agent():
+    """Fixture to create a ReActAgent instance for testing."""
+    agent = ReActAgent(
+        name='test_react_agent',
+        model_name=MODEL_NAME,
+        tools=[dummy_tool_one, calculator, web_search, file_download],
+        description='Test ReAct agent for unit tests',
+        max_iterations=3
+    )
+    return agent
 
-mock_tools = [dummy_tool_one, dummy_tool_two, dummy_tool_three]
-mock_tool_names = [t.name for t in mock_tools]
 
-class TestContextualAgent:
+def test_react_agent_initialization(react_agent):
+    """Test the initialization of ReActAgent."""
+    assert react_agent.name == 'test_react_agent'
+    assert react_agent.model_name == MODEL_NAME
+    assert len(react_agent.tools) == 4  # dummy_tool_one, calculator, web_search, file_download
+    assert react_agent.max_iterations == 3
+    assert 'dummy_tool_one' in react_agent.tool_names
+    assert 'calculator' in react_agent.tool_names
 
-    @pytest.fixture
-    def agent(self) -> ContextualAgent:
-        return ContextualAgent(
-            name="TestContextualAgent",
-            model_name="test_model",
-            run_env="host",
-            tools=list(mock_tools), # Pass a copy
-            litellm_params={"temperature": 0}
-        )
 
-    @pytest.mark.asyncio
-    async def test_get_relevant_tools_llm_call_and_parsing(self, agent: ContextualAgent):
-        # Mock _call_llm
-        agent._call_llm = AsyncMock(return_value="dummy_tool_one,dummy_tool_three,hallucinated_tool")
-        agent.task = MagicMock() # Mock task object
-        agent.task.id = "test_task_id"
+def test_add_to_history(react_agent):
+    """Test adding messages to agent's history."""
+    msg = ChatMessage(role='user', content='test message')
+    react_agent.add_to_history(msg)
+    assert len(react_agent.messages) == 1
+    assert react_agent.messages[0].role == 'user'
+    assert react_agent.messages[0].content == 'test message'
 
-        relevant_tools = await agent.get_relevant_tools("test task", agent.original_tools)
+    # Test adding invalid message type
+    with pytest.raises(AssertionError):
+        react_agent.add_to_history('invalid message')
 
-        # Assert _call_llm was called correctly
-        agent._call_llm.assert_called_once()
-        call_args = agent._call_llm.call_args
-        prompt_message = call_args[1]['messages'][0]['content'] # Assuming make_user_message structure
-        prompt_message = prompt_message[0]['text']
 
-        # assert "test task" in prompt_message
-        assert "dummy_tool_one: Description for dummy tool one." in prompt_message
-        assert "dummy_tool_two: Description for dummy tool two." in prompt_message
-        assert "dummy_tool_three: Description for dummy tool three." in prompt_message
-        assert "Return a comma-separated list of tool names." in prompt_message
+def test_format_messages_for_prompt(react_agent):
+    """Test formatting of message history for prompt."""
+    msg1 = ReActChatMessage(
+        role='assistant',
+        thought='test thought',
+        action='dummy_tool_one',
+        args='{"param1": "test"}',
+        content='',  # Added missing content field
+        successful=False,
+        answer=None
+    )
+    msg2 = ChatMessage(role='tool', content='tool response')
 
-        # Assert correct parsing and filtering
-        assert sorted(relevant_tools) == sorted(["dummy_tool_one", "dummy_tool_three"])
+    react_agent.add_to_history(msg1)
+    react_agent.add_to_history(msg2)
 
-    @pytest.mark.asyncio
-    async def test_get_relevant_tools_llm_empty_response(self, agent: ContextualAgent):
-        agent._call_llm = AsyncMock(return_value="")
-        agent.task = MagicMock()
-        agent.task.id = "test_task_id"
+    formatted = react_agent.format_messages_for_prompt()
+    assert 'Thought: test thought' in formatted
+    assert 'Action: dummy_tool_one' in formatted
+    assert 'Observation: tool response' in formatted
 
-        relevant_tools = await agent.get_relevant_tools("test task", agent.original_tools)
-        assert relevant_tools == []
 
-        agent._call_llm = AsyncMock(return_value="  ") #whitespace only
-        relevant_tools = await agent.get_relevant_tools("test task", agent.original_tools)
-        assert relevant_tools == []
+@pytest.mark.asyncio
+async def test_react_agent_run_success(react_agent):
+    """Test successful task execution by ReActAgent."""
+    responses = []
+    async for response in react_agent.run('Add 2 and 2'):
+        responses.append(response)
 
-    @pytest.mark.asyncio
-    async def test_get_relevant_tools_llm_error_fallback(self, agent: ContextualAgent):
-        agent._call_llm = AsyncMock(side_effect=Exception("LLM API Error"))
-        agent.task = MagicMock()
-        agent.task.id = "test_task_id"
+    # Check that we got the expected responses
+    assert any(r['type'] == 'final' for r in responses)
+    assert react_agent.final_answer_found
+    assert react_agent.task.is_finished
+    # Verify we got a numerical answer since we used a calculator task
+    final_response = next(r for r in responses if r['type'] == 'final')
+    assert '4' in str(final_response['value'])
 
-        relevant_tools = await agent.get_relevant_tools("test task", agent.original_tools)
 
-        # Should fallback to all tools
-        assert sorted(relevant_tools) == sorted(mock_tool_names)
+@pytest.mark.asyncio
+async def test_react_agent_run_with_tool_error(react_agent):
+    """Test ReActAgent handling tool execution errors."""
+    # Create a broken tool that always raises an exception
+    @tool
+    def broken_tool(param1: str) -> str:
+        """A tool that always fails."""
+        raise Exception('Tool error')
 
-    @pytest.mark.asyncio
-    async def test_run_method_tool_filtering_and_parent_call(self, agent: ContextualAgent):
-        # Mock get_relevant_tools
-        agent.get_relevant_tools = AsyncMock(return_value=["dummy_tool_one"])
+    # Add the broken tool to the agent
+    react_agent.tools.append(broken_tool)
 
-        # Mock the parent's run method (CodeActAgent.run)
-        # We need to mock it as an async generator
-        mock_parent_run_responses = [
-            AgentResponse(type='log', value='Parent run log 1', channel='parent_run'),
-            AgentResponse(
-                type='final',
-                value=ChatMessage(role='assistant', content='Final answer from parent'),
-                channel='parent_run'
-            )
-        ]
+    responses = []
+    async for response in react_agent.run('Use the broken tool'):
+        responses.append(response)
 
-        async def mock_codeactagent_run(*args, **kwargs):
-            for response in mock_parent_run_responses:
-                yield response
+    # Check that error was captured in the response
+    error_responses = [r for r in responses if r["metadata"] and r["metadata"].get("is_error")]
+    assert len(error_responses) > 0
+    assert "Incorrect tool name generated" in str(error_responses[0]["value"])
 
-        # Patch super().run specifically for CodeActAgent
-        with patch.object(CodeActAgent, 'run', new_callable=lambda: AsyncMock(wraps=mock_codeactagent_run)) as mock_super_run:
-            # Also mock _run_init from the grandparent Agent class as it's called by ContextualAgent's run
-            with patch.object(ContextualAgent, '_run_init', new_callable=MagicMock) as mock_run_init:
 
-                task_description = "run test task"
-                responses = []
-                async for response in agent.run(task_description):
-                    responses.append(response)
+@pytest.mark.asyncio
+async def test_think_step(react_agent):
+    """Test the think step of ReActAgent."""
+    # Initialize the task first
+    react_agent._run_init("Calculate 5 plus 3")
 
-                mock_run_init.assert_called_once_with(task_description, None, None)
-                agent.get_relevant_tools.assert_called_once_with(task_description, agent.original_tools)
+    responses = []
+    async for response in react_agent._think():
+        responses.append(response)
 
-                # Check that tools are filtered
-                assert len(agent.tools) == 1
-                assert agent.tools[0].name == "dummy_tool_one"
-                assert agent.tool_names == {"dummy_tool_one"}
-                assert "dummy_tool_one" in agent.tool_name_to_func
-                assert len(agent.tool_name_to_func) == 1
-                assert "dummy_tool_one" in agent.tools_source_code
-                assert "dummy_tool_two" not in agent.tools_source_code
-                assert "dummy_tool_three" not in agent.tools_source_code
+    assert len(responses) == 1
+    assert responses[0]["type"] == "step"
+    assert isinstance(responses[0]["value"], ReActChatMessage)
+    assert responses[0]["value"].thought is not None
+    assert len(responses[0]["value"].thought) > 0
 
-                # Check that parent run was called
-                mock_super_run.assert_called_once()
 
-                # Check that responses from parent run are yielded
-                assert len(responses) == 4 # 2 logs from ContextualAgent + 2 from mocked parent
-                assert responses[0]['value'] == 'Determining relevant tools for the task...'
-                assert responses[1]['value'] == "Relevant tools identified: dummy_tool_one"
-                assert responses[2] == mock_parent_run_responses[0]
-                assert responses[3] == mock_parent_run_responses[1]
+@pytest.mark.asyncio
+async def test_act_step_with_invalid_tool(react_agent):
+    """Test the act step with an invalid tool name."""
+    invalid_response = ReActChatMessage(
+        thought="Test thought",
+        action="nonexistent_tool",
+        args='{"param1": "test"}',
+        answer=None,
+        successful=False,
+        role="assistant",
+        content=""
+    )
 
-    @pytest.mark.asyncio
-    async def test_run_method_no_relevant_tools(self, agent: ContextualAgent):
-        agent.get_relevant_tools = AsyncMock(return_value=[]) # No relevant tools
+    react_agent.add_to_history(invalid_response)
 
-        async def mock_codeactagent_run_empty(*args, **kwargs):
-            yield AgentResponse(type='final', value=ChatMessage(role='assistant', content='Final answer with no tools'), channel='parent_run')
-            # Must yield at least one item for an async generator
+    responses = []
+    async for response in react_agent._act():
+        responses.append(response)
 
-        with patch.object(CodeActAgent, 'run', new_callable=lambda: AsyncMock(wraps=mock_codeactagent_run_empty)) as mock_super_run:
-            with patch.object(ContextualAgent, '_run_init', new_callable=MagicMock):
-                responses = []
-                async for response in agent.run("task with no relevant tools"):
-                    responses.append(response)
+    assert len(responses) == 1
+    assert "Incorrect tool name" in responses[0]["value"]
+    assert responses[0]["metadata"]["is_error"]
 
-                assert len(agent.tools) == 0
-                assert agent.tool_names == set()
-                assert len(agent.tool_name_to_func) == 0
-                assert "dummy_tool_one" not in agent.tools_source_code # Check that it's empty or minimal
 
-                mock_super_run.assert_called_once()
-                assert responses[1]['value'] == "Relevant tools identified: None"
-                assert responses[2]['value'].content == 'Final answer with no tools'
+def test_get_tools_description(react_agent):
+    """Test getting tool descriptions."""
+    desc = react_agent.get_tools_description()
+    assert "dummy_tool_one" in desc
+    assert "calculator" in desc
+    assert "web_search" in desc
+    assert "file_download" in desc
+    assert "Description for dummy tool one" in desc
 
-    def test_init_stores_original_tools(self):
-        local_tools = [dummy_tool_one]
-        agent = ContextualAgent(
-            name="InitTestAgent",
-            model_name="test_model",
-            run_env="host",
-            tools=local_tools
-        )
-        assert agent.original_tools == local_tools
 
-        # Actually, the current implementation does `self.original_tools: list[Callable] = tools if tools is not None else []`
-        # This means it IS the same object if a list is passed.
-        # Let's adjust the agent or test for this.
-        # For now, the test reflects that it stores the reference. If we want a copy, agent.__init__ should change.
-        # Re-checking the plan: "Store the initial tools list in self.original_tools" - doesn't specify copy.
-        # Re-checking agent code: `self.original_tools: list[Callable] = tools if tools is not None else []`
-        # This is fine. The test `agent(tools=list(mock_tools))` fixture already passes a copy.
+@pytest.mark.asyncio
+async def test_get_relevant_tools(react_agent):
+    """Test filtering relevant tools for a task."""
+    task_description = 'What is 2 plus 3?'  # Simple calculator task
 
-        agent_no_tools = ContextualAgent(
-            name="InitTestAgentNoTools",
-            model_name="test_model",
-            run_env="host",
-            tools=None
-        )
-        assert agent_no_tools.original_tools == []
+    # Initialize the task with a proper task description
+    react_agent._run_init(task_description)
 
-# pip install pytest pytest-asyncio
-# pytest test_kodeagent.py
+    try:
+        # This will make an actual API call to determine relevant tools
+        tools = await react_agent.get_relevant_tools(task_description)
+
+        # The task requires calculation, so calculator should be relevant
+        assert len(tools) > 0, "No tools were returned from get_relevant_tools"
+        tool_names = {t.name for t in tools}
+        assert "calculator" in tool_names, "calculator should be relevant for arithmetic"
+    except Exception as e:
+        raise
+
+
+def test_clear_history(react_agent):
+    """Test clearing agent's message history."""
+    msg = ChatMessage(role='user', content='test message')
+    react_agent.add_to_history(msg)
+    assert len(react_agent.messages) == 1
+
+    react_agent.clear_history()
+    assert len(react_agent.messages) == 0
+
+
+@pytest.mark.asyncio
+async def test_unsupported_task(react_agent):
+    """Test that agent fails appropriately when given an unsupported task."""
+    task_description = 'Generate a 30-second video animation of a flying bird'
+
+    responses = []
+    async for response in react_agent.run(task_description):
+        responses.append(response)
+
+    response = ' | '.join([str(r) for r in responses])
+    assert (
+        'cannot' in response or
+        'no relevant tool' in response or
+        'unable' in response or
+        'failed' in response or
+        'unfortunately' in response
+    ), 'Agent should have failed for unsupported video generation task'
+
+
+async def _codeact_agent_date_(code_agent) -> tuple[bool, str]:
+    """Helper function to run a code block and return the response."""
+    task = "What is today's date? Express it in words without time."
+    responses = []
+    async for response in code_agent.run(task):
+        responses.append(response['value'])
+
+    # Get today's date for verification
+    today = datetime.datetime.now().strftime('%B %d, %Y')
+    response = ' | '.join([str(r) for r in responses])
+
+    # The agent's response should contain today's date
+    return today.lower() in response.lower(), f'Expected {today} in response but got: {response}'
+
+
+@pytest.mark.asyncio
+async def test_codeact_agent_host():
+    """Test the CodeActAgent functionality on a local system."""
+    code_agent1 = CodeActAgent(
+        name='Code agent',
+        model_name=MODEL_NAME,
+        run_env='host',
+        max_iterations=3,
+        allowed_imports=['datetime'],
+        description='Agent that can write and execute Python code'
+    )
+
+    status, assert_error = await _codeact_agent_date_(code_agent1)
+    assert status, assert_error
+
+
+@pytest.mark.asyncio
+async def test_codeact_agent_e2b():
+    """Test the CodeActAgent functionality ona remote E2B sandbox."""
+    code_agent2 = CodeActAgent(
+        name='Code agent',
+        model_name=MODEL_NAME,
+        run_env='e2b',
+        max_iterations=3,
+        allowed_imports=['datetime'],
+        description='Agent that can write and execute Python code',
+        pip_packages=None,
+    )
+
+    status, assert_error = await _codeact_agent_date_(code_agent2)
+    assert status, assert_error
+
+
+@pytest.mark.asyncio
+async def test_codeact_agent_unsupported():
+    """Test the CodeActAgent functionality on an unsupported env."""
+    code_agent = CodeActAgent(
+        name='Code agent',
+        model_name=MODEL_NAME,
+        run_env='docker',
+        max_iterations=3,
+        allowed_imports=['datetime'],
+        description='Agent that can write and execute Python code',
+        pip_packages=None,
+    )
+
+    responses = []
+    async for response in code_agent.run('What is the date today?'):
+        responses.append(response)
+
+    response = ' | '.join([str(r) for r in responses])
+    print(f'{response=}')
+    assert (
+        'Unsupported code execution' in response
+    ), 'Expected code execution to fail on unsupported env'

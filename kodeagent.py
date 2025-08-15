@@ -43,7 +43,7 @@ load_dotenv()
 
 warnings.simplefilter('once', UserWarning)
 logging.basicConfig(
-    level=logging.WARNING,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 # Get a logger for the current module
@@ -394,6 +394,25 @@ print(download_file(url='https://example.com/article.txt'))
 {steps_to_take}
 '''
 
+RELEVANT_TOOLS_PROMPT = '''
+You are an expert resource planner for solving tasks. You pick the best and necessary tools to solve any task.
+
+Given the following task:
+{task_description}
+
+and optional files or URLs for the task:
+{task_files}
+
+And the following available tools:
+
+{tool_descriptions}
+
+Which of the above tools are relevant to solving the task?
+Identify carefully based on the task and tool descriptions so that no relevant tool is missed.
+Return only a comma-separated list of tool names. For example: tool_name1,tool_name2
+If no tools are relevant, return an empty string.
+'''
+
 AGENT_PLAN_PROMPT = '''
 You are a helpful planning assistant. Given a task, you can create a plan to solve the task.
 A given task can be complex -- you may need to split it into smaller sub-tasks so that
@@ -432,7 +451,7 @@ a final, satisfactory task completion result is found. You should do it carefull
 stuck in the same loop.
 
 Important: Carefully read the original given task. When delegating tasks to the agents or when you
-need to split into sub-tasks, remember to retain ALL information from the original task.
+need to split it into sub-tasks, remember to retain ALL information from the original task.
 Even punctuations matter sometimes! Otherwise, you might get stuck in an infinite loop where you
 ask an agent something but get a different thing in response. The specifications, expectations,
 and responses need to be in sync.
@@ -995,6 +1014,7 @@ class Agent(ABC):
             tools: Optional[list[Callable]] = None,
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
+            filter_tools_for_task: bool = False,
     ):
         """
         Initialize an agent.
@@ -1006,6 +1026,8 @@ class Agent(ABC):
             vision_model_name: (Optional) vision model to use; None by default.
             tools: A list of tools available to the agent.
             litellm_params: Optional parameters for LiteLLM.
+            max_iterations: Maximum number of iterations for task solving.
+            filter_tools_for_task: Whether to filter tools based on task relevance.
         """
         self.id = uuid.uuid4()
         self.name: str = name
@@ -1013,14 +1035,13 @@ class Agent(ABC):
         self.model_name: str = model_name
         self.vision_model_name = vision_model_name or model_name
 
-        self.tools = tools
+        self.tools = tools or []
+        self.filter_tools_for_task = filter_tools_for_task
         self.litellm_params: dict = litellm_params or {}
         self.max_iterations = max_iterations
 
-        self.tool_names = set([t.name for t in tools]) if tools else set([])
-        self.tool_name_to_func = {
-            t.name: t for t in tools
-        } if tools else {}
+        self.tool_names = {t.name for t in tools} if tools else set()
+        self.tool_name_to_func = {t.name: t for t in tools} if tools else {}
 
         self.task: Optional[Task] = None
         self.messages: list[ChatMessage] = []
@@ -1028,12 +1049,63 @@ class Agent(ABC):
         self.final_answer_found = False
 
     def __str__(self):
-        """
-        A string representation of the agent.
-        """
         return (
             f'Agent: {self.name} ({self.id}); LLM: {self.model_name}; Tools: {self.tools}'
         )
+
+    async def get_relevant_tools(
+            self,
+            task_description: str,
+            task_files: Optional[list[str]] = None,
+    ) -> list[Any]:
+        """
+        Calls an LLM to determine which tools are relevant for the given task.
+
+        Args:
+            task_description: The task description.
+            task_files: Optional list of files associated with the task.
+
+        Returns:
+            A list of relevant tools or all tools, in case of error.
+        """
+        tool_descriptions = self.get_tools_description()
+        prompt = RELEVANT_TOOLS_PROMPT.format(
+            task_description=task_description,
+            task_files=task_files,
+            tool_descriptions=tool_descriptions,
+        )
+
+        try:
+            response = await self._call_llm(
+                ku.make_user_message(prompt),
+                trace_id=self.task.id if self.task else None
+            )
+            relevant_tool_names = response.split(',') if response.strip() else []
+            relevant_tool_names = {t.strip() for t in relevant_tool_names if t.strip()}
+            logger.debug('Relevant tool names: %s', relevant_tool_names)
+            relevant_tools = [
+                t for t in self.tools if t.name in relevant_tool_names
+            ]
+            return relevant_tools
+        except Exception as e:
+            logger.error('Error determining relevant tools: %s', str(e))
+            return list(self.tools)
+
+    def _run_init(
+            self,
+            description: str,
+            files: Optional[list[str]] = None,
+            task_id: Optional[str] = None
+    ):
+        """
+        Initialize the running of a task by an agent.
+        """
+        self.add_to_history(ChatMessage(role='user', content=description))
+        self.task = Task(description=description, files=files)
+        if task_id:
+            self.task.id = task_id
+        self.msg_idx_of_new_task = len(self.messages)
+        self.final_answer_found = False  # Reset from any previous task
 
     @abstractmethod
     async def run(
@@ -1043,8 +1115,7 @@ class Agent(ABC):
             task_id: Optional[str] = None
     ) -> AsyncIterator[AgentResponse]:
         """
-        Execute a task using the agent. All subclasses must override this method to solve tasks
-        in their own way. The method should yield an `AgentResponse`.
+        Execute a task using the agent.
 
         Args:
             task: A description of the task.
@@ -1091,25 +1162,6 @@ class Agent(ABC):
         }
         logger.info(token_usage)
         return response.choices[0].message['content']
-
-    def _run_init(
-            self,
-            description: str,
-            files: Optional[list[str]] = None,
-            task_id: Optional[str] = None
-    ):
-        """
-        Initialize the running of a task by an agent.
-        """
-        self.add_to_history(ChatMessage(role='user', content=description))
-        self.task = Task(description=description, files=files)
-        if task_id:
-            self.task.id = task_id
-        # Since `messages` stores every message generated while interacting with the agent,
-        # we need to know which all messages correspond to the current task
-        # (so that the ones pertaining to the previous tasks can be ignored)
-        self.msg_idx_of_new_task = len(self.messages)
-        self.final_answer_found = False  # Reset from any previous task
 
     def response(
             self,
@@ -1160,20 +1212,25 @@ class Agent(ABC):
         """
         return self.get_history(start_idx)
 
-    def get_tools_description(self) -> str:
+    def get_tools_description(self, tools: Optional[list[Any]] = None) -> str:
         """
         Generate a description of all the tools available to the agent.
 
+        Args:
+            tools: Optional list of tools to describe. If not provided, uses the agent's tools.
+
         Returns:
-            A description of the available tools.
+            A description of the requested or all available tools.
         """
         description = ''
+        filtered_tool_names = {t.name for t in (tools or self.tools)}
         for t in self.tools:
-            description += f'- Tool name: {t.name}'
-            # description += f'\n  -
-            # Schema: {t.args_schema.model_json_schema()}'
-            description += f'\n- Tool description: {t.description}'
-            description += '\n---\n'
+            if t.name in filtered_tool_names:
+                description += f'- Tool name: {t.name}'
+                # description += f'\n  -
+                # Schema: {t.args_schema.model_json_schema()}'
+                description += f'\n- Tool description: {t.description}'
+                description += '\n---\n'
 
         return description
 
@@ -1220,6 +1277,7 @@ class ReActAgent(Agent):
             vision_model_name: Optional[str] = None,
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
+            filter_tools_for_task: bool = False,
     ):
         """
         Instantiate a ReAct agent.
@@ -1240,6 +1298,7 @@ class ReActAgent(Agent):
             litellm_params=litellm_params,
             description=description,
             max_iterations=max_iterations,
+            filter_tools_for_task=filter_tools_for_task,
         )
 
         self.final_answer_found: bool = False
@@ -1318,11 +1377,18 @@ class ReActAgent(Agent):
         """
         # Note: we're not going to chat with the LLM by sending a sequence of messages
         # Instead, every think step will send a single message containing all historical info
+        if self.filter_tools_for_task:
+            relevant_tools = await self.get_relevant_tools(
+                task_description=self.task.description, task_files=self.task.files
+            )
+        else:
+            relevant_tools = self.tools
+
         message = REACT_PROMPT.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
-            tool_names=self.get_tools_description(),
+            tool_names=self.get_tools_description(relevant_tools),
             plan=plan or '<No plan provided; please plan yourself>',
         )
         msg = await self._record_thought(message, ReActChatMessage)
@@ -1608,7 +1674,8 @@ class CodeRunner:
                     timeout=self.default_timeout + 15,
                     envs=self.env_vars_to_set or {},
                 )
-                sbx.commands.run(f'pip install {self.pip_packages_str}')
+                if self.pip_packages_str:
+                    sbx.commands.run(f'pip install {self.pip_packages_str}')
 
             # Copy the local dependency modules
             for a_file in self.local_modules_to_copy:
@@ -1654,6 +1721,7 @@ class CodeActAgent(ReActAgent):
             pip_packages: Optional[str] = None,
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
+            filter_tools_for_task: bool = False,
     ):
         """
         Instantiate a CodeActAgent.
@@ -1681,6 +1749,7 @@ class CodeActAgent(ReActAgent):
             litellm_params=litellm_params,
             max_iterations=max_iterations,
             description=description,
+            filter_tools_for_task=filter_tools_for_task,
         )
 
         # Combine the source code of all tools into one place
@@ -1753,15 +1822,23 @@ class CodeActAgent(ReActAgent):
 
         steps_completed = prev_code_msg.steps_completed if (
             hasattr(prev_code_msg, 'steps_completed')
-        ) else ''
+        ) else '<None>'
         steps_to_take = prev_code_msg.steps_to_take if (
             hasattr(prev_code_msg, 'steps_to_take')
         ) else ''
+
+        if self.filter_tools_for_task:
+            relevant_tools = await self.get_relevant_tools(
+                task_description=self.task.description, task_files=self.task.files
+            )
+        else:
+            relevant_tools = self.tools
+
         message = CODE_ACT_AGENT_PROMPT.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
-            tool_names=self.get_tools_description(),
+            tool_names=self.get_tools_description(relevant_tools),
             authorized_imports=','.join(self.allowed_imports),
             plan=plan or '<No plan provided; please plan yourself>',
             steps_completed=steps_completed,
@@ -1836,146 +1913,6 @@ class CodeActAgent(ReActAgent):
                     channel='_act',
                     metadata={'is_error': True}
                 )
-
-
-class ContextualAgent(CodeActAgent):
-    """
-    An agent that first determines relevant tools for a task via an LLM call
-    before proceeding with the standard CodeActAgent execution flow.
-    """
-
-    def __init__(
-            self,
-            name: str,
-            model_name: str,
-            run_env: CODE_ENV_NAMES,
-            tools: Optional[list[Callable]] = None,
-            description: Optional[str] = None,
-            vision_model_name: Optional[str] = None,
-            litellm_params: Optional[dict] = None,
-            max_iterations: int = 20,
-            allowed_imports: Optional[list[str]] = None,
-            pip_packages: Optional[str] = None,
-            timeout: int = 30,
-            env_vars_to_set: Optional[dict[str, str]] = None,
-    ):
-        super().__init__(
-            name=name,
-            model_name=model_name,
-            run_env=run_env,
-            tools=tools,
-            description=description,
-            vision_model_name=vision_model_name,
-            litellm_params=litellm_params,
-            max_iterations=max_iterations,
-            allowed_imports=allowed_imports,
-            pip_packages=pip_packages,
-            timeout=timeout,
-            env_vars_to_set=env_vars_to_set,
-        )
-        self.original_tools: list[Callable] = tools or []
-
-    async def get_relevant_tools(
-            self,
-            task_description: str,
-            available_tools: list[Callable] | None,
-            task_files: Optional[list[str]] = None,
-    ) -> list[str]:
-        """
-        Calls an LLM to determine which tools are relevant for the given task.
-
-        Args:
-            task_description: The description of the task.
-            available_tools: A list of all available tools.
-            task_files: Optional list of files relevant to the task.
-
-        Returns:
-            A list of names of the tools deemed relevant by the LLM.
-        """
-        # Implementation will be done in the next step
-        tool_descriptions = ''
-        for tool_func in available_tools:
-            tool_descriptions += f'- {tool_func.name}: {tool_func.description}\n'
-
-        prompt = f'''
-        You are an expert resource planner for solving tasks. Given the following task:
-        {task_description}
-        
-        optional files for the task:
-        {task_files}
-
-        And the following available tools:
-        {tool_descriptions}
-
-        Which of these tools are relevant to solving the task?
-        Identify carefully based on the task and tool descriptions so that nothing relevant is missed.
-        Return a comma-separated list of tool names. For example: tool_name1,tool_name2
-        If no tools are relevant, return an empty string.
-        '''
-
-        try:
-            response_str = await self._call_llm(
-                messages=ku.make_user_message(text_content=prompt),
-                trace_id=self.task.id if self.task else None,  # task might not be set yet
-            )
-
-            if not response_str or response_str.strip() == "":
-                return []
-
-            relevant_tool_names = [
-                name.strip() for name in response_str.split(',') if name.strip()
-            ]
-
-            # Filter out any tool names not actually in available_tools to prevent hallucination
-            valid_tool_names = [tool_func.name for tool_func in available_tools]
-            relevant_tool_names = [name for name in relevant_tool_names if
-                                   name in valid_tool_names]
-
-            return relevant_tool_names
-        except Exception as e:
-            logger.error('Error in get_relevant_tools: %s', str(e))
-            # Fallback to using all tools if LLM call fails or parsing fails
-            return [tool_func.name for tool_func in available_tools]
-
-    async def run(
-            self,
-            task: str,
-            files: Optional[list[str]] = None,
-            task_id: Optional[str] = None
-    ) -> AsyncIterator[AgentResponse]:
-        # First, call _run_init to set up the task description, similar to the parent class
-        # This is important because get_relevant_tools might use self.task.id for tracing
-        super()._run_init(task, files, task_id)
-
-        relevant_tool_names = await self.get_relevant_tools(
-            self.task.description, self.original_tools, self.task.files
-        )
-
-        yield self.response(
-            rtype='log',
-            value=(
-                f"Relevant tools for this task:"
-                f" {', '.join(relevant_tool_names) if relevant_tool_names else 'None'}"
-            ),
-            channel='ContextualAgent.run'
-        )
-
-        # Filter the agent's tools based on the LLM's response
-        self.tools = [
-            tool_func for tool_func in self.original_tools if tool_func.name in relevant_tool_names
-        ]
-        self.tool_names = set(relevant_tool_names)
-        self.tool_name_to_func = {name: func for name, func in zip(self.tool_names, self.tools)}
-
-        # Update tools_source_code as well, this is important for CodeActAgent
-        self.tools_source_code = 'from typing import *\n\nimport kutils as ku\n\n'
-        for t in self.tools:  # Use the filtered list of tools
-            self.tools_source_code += inspect.getsource(t).replace('@tool\n', '', 1) + '\n'
-
-        # Now, call the parent's run method to execute the task with the filtered tools
-        # The parent run method will use the updated self.tools, self.tool_names etc
-        async for response_item in super().run(task, files, task_id):
-            yield response_item
 
 
 class SupervisorAgent(Agent):
@@ -2202,27 +2139,15 @@ async def main():
     # model_name = 'azure/gpt-4.1-mini'
     # model_name = 'azure/gpt-4o-mini'
 
-    # agent1 = ReActAgent(
-    #     name='Maths agent',
-    #     model_name=model_name,
-    #     tools=[calculator, ],
-    #     max_iterations=3,
-    #     litellm_params=litellm_params
-    # )
-    # agent2 = CodeActAgent(
-    #     name='Web agent',
-    #     model_name=model_name,
-    #     tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
-    #     run_env='host',
-    #     max_iterations=7,
-    #     litellm_params=litellm_params,
-    #     allowed_imports=[
-    #         'os', 're', 'time', 'random', 'requests', 'tempfile',
-    #         'duckduckgo_search', 'markitdown', 'youtube_transcript_api',
-    #     ],
-    #     pip_packages='duckduckgo_search~=8.0.1;"markitdown[all]";',
-    # )
-    agent3 = ContextualAgent(
+    react_agent = ReActAgent(
+        name='Maths agent',
+        model_name=model_name,
+        tools=[calculator, ],
+        max_iterations=3,
+        litellm_params=litellm_params,
+        filter_tools_for_task=True,
+    )
+    code_agent = CodeActAgent(
         name='Web agent',
         model_name=model_name,
         tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
@@ -2234,7 +2159,9 @@ async def main():
             'duckduckgo_search', 'markitdown', 'youtube_transcript_api',
         ],
         pip_packages='duckduckgo_search~=8.0.1;"markitdown[all]";',
+        filter_tools_for_task=False,
     )
+
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
         ('What is the date today? Express it in words.', None),
@@ -2259,23 +2186,10 @@ async def main():
     print('ContextualAgent demo\n')
     for task, img_urls in the_tasks:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
-        async for response in agent3.run(task, files=img_urls):
+        # await code_agent.get_relevant_tools(task_description=task, task_files=img_urls)
+        async for response in code_agent.run(task, files=img_urls):
             print_response(response)
         print('\n\n')
-
-    # print('\n\nMulti-agent with supervisor demo\n')
-    #
-    # agency = SupervisorAgent(
-    #     name='Supervisor',
-    #     model_name=model_name,
-    #     agents=[agent1, agent2],
-    #     max_iterations=5
-    # )
-    # task = the_tasks[-2]
-    # rich.print(f'[yellow][bold]User[/bold]: {task[0]}[/yellow]')
-    #
-    # async for response in agency.run(*task):
-    #     print_response(response)
 
 
 if __name__ == '__main__':
