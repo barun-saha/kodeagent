@@ -1082,7 +1082,7 @@ class Agent(ABC):
             )
             relevant_tool_names = response.split(',') if response.strip() else []
             relevant_tool_names = {t.strip() for t in relevant_tool_names if t.strip()}
-            print(f'{relevant_tool_names=}')
+            logger.debug('Relevant tool names: %s', relevant_tool_names)
             relevant_tools = [
                 t for t in self.tools if t.name in relevant_tool_names
             ]
