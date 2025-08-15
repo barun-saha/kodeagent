@@ -1,3 +1,6 @@
+"""
+Unit tests for the KodeAgent ReActAgent class.
+"""
 import pytest
 
 from kodeagent import (
@@ -14,7 +17,7 @@ from kodeagent import (
 @tool
 def dummy_tool_one(param1: str) -> str:
     """Description for dummy tool one."""
-    return f"tool one executed with {param1}"
+    return f'tool one executed with {param1}'
 
 
 @pytest.fixture
@@ -29,62 +32,67 @@ def react_agent():
     )
     return agent
 
+
 def test_react_agent_initialization(react_agent):
     """Test the initialization of ReActAgent."""
-    assert react_agent.name == "test_react_agent"
-    assert react_agent.model_name == "gemini/gemini-2.0-flash-lite"
+    assert react_agent.name == 'test_react_agent'
+    assert react_agent.model_name == 'gemini/gemini-2.0-flash-lite'
     assert len(react_agent.tools) == 4  # dummy_tool_one, calculator, web_search, file_download
     assert react_agent.max_iterations == 3
-    assert "dummy_tool_one" in react_agent.tool_names
-    assert "calculator" in react_agent.tool_names
+    assert 'dummy_tool_one' in react_agent.tool_names
+    assert 'calculator' in react_agent.tool_names
+
 
 def test_add_to_history(react_agent):
     """Test adding messages to agent's history."""
-    msg = ChatMessage(role="user", content="test message")
+    msg = ChatMessage(role='user', content='test message')
     react_agent.add_to_history(msg)
     assert len(react_agent.messages) == 1
-    assert react_agent.messages[0].role == "user"
-    assert react_agent.messages[0].content == "test message"
+    assert react_agent.messages[0].role == 'user'
+    assert react_agent.messages[0].content == 'test message'
 
     # Test adding invalid message type
     with pytest.raises(AssertionError):
-        react_agent.add_to_history("invalid message")
+        react_agent.add_to_history('invalid message')
+
 
 def test_format_messages_for_prompt(react_agent):
     """Test formatting of message history for prompt."""
     msg1 = ReActChatMessage(
-        role="assistant",
-        thought="test thought",
-        action="dummy_tool_one",
+        role='assistant',
+        thought='test thought',
+        action='dummy_tool_one',
         args='{"param1": "test"}',
-        content="",  # Added missing content field
+        content='',  # Added missing content field
         successful=False,
         answer=None
     )
-    msg2 = ChatMessage(role="tool", content="tool response")
+    msg2 = ChatMessage(role='tool', content='tool response')
 
     react_agent.add_to_history(msg1)
     react_agent.add_to_history(msg2)
 
     formatted = react_agent.format_messages_for_prompt()
-    assert "Thought: test thought" in formatted
-    assert "Action: dummy_tool_one" in formatted
-    assert "Observation: tool response" in formatted
+    assert 'Thought: test thought' in formatted
+    assert 'Action: dummy_tool_one' in formatted
+    assert 'Observation: tool response' in formatted
+
 
 @pytest.mark.asyncio
 async def test_react_agent_run_success(react_agent):
     """Test successful task execution by ReActAgent."""
     responses = []
-    async for response in react_agent.run("Add 2 and 2"):
+    async for response in react_agent.run('Add 2 and 2'):
         responses.append(response)
 
     # Check that we got the expected responses
-    assert any(r["type"] == "final" for r in responses)
+    assert any(r['type'] == 'final' for r in responses)
     assert react_agent.final_answer_found
     assert react_agent.task.is_finished
     # Verify we got a numerical answer since we used a calculator task
-    final_response = next(r for r in responses if r["type"] == "final")
-    assert "4" in final_response["value"].content
+    final_response = next(r for r in responses if r['type'] == 'final')
+    assert '4' in str(final_response['value'])
+
 
 @pytest.mark.asyncio
 async def test_react_agent_run_with_tool_error(react_agent):
@@ -107,6 +115,7 @@ async def test_react_agent_run_with_tool_error(react_agent):
     assert len(error_responses) > 0
     assert "Incorrect tool name generated" in str(error_responses[0]["value"])
 
+
 @pytest.mark.asyncio
 async def test_think_step(react_agent):
     """Test the think step of ReActAgent."""
@@ -122,6 +131,7 @@ async def test_think_step(react_agent):
     assert isinstance(responses[0]["value"], ReActChatMessage)
     assert responses[0]["value"].thought is not None
     assert len(responses[0]["value"].thought) > 0
+
 
 @pytest.mark.asyncio
 async def test_act_step_with_invalid_tool(react_agent):
@@ -145,6 +155,7 @@ async def test_act_step_with_invalid_tool(react_agent):
     assert len(responses) == 1
     assert "Incorrect tool name" in responses[0]["value"]
     assert responses[0]["metadata"]["is_error"]
+
 
 def test_get_tools_description(react_agent):
     """Test getting tool descriptions."""
@@ -188,11 +199,32 @@ async def test_get_relevant_tools(react_agent):
         print(f"Agent history: {react_agent.messages}")
         raise
 
+
 def test_clear_history(react_agent):
     """Test clearing agent's message history."""
-    msg = ChatMessage(role="user", content="test message")
+    msg = ChatMessage(role='user', content='test message')
     react_agent.add_to_history(msg)
     assert len(react_agent.messages) == 1
 
     react_agent.clear_history()
     assert len(react_agent.messages) == 0
+
+
+@pytest.mark.asyncio
+async def test_unsupported_task(react_agent):
+    """Test that agent fails appropriately when given an unsupported task."""
+    task_description = 'Generate a 30-second video animation of a flying bird'
+
+    # Try to run the task - should fail
+    responses = []
+    async for response in react_agent.run(task_description):
+        responses.append(response)
+
+    response = ' | '.join([str(r) for r in responses])
+    assert (
+        'cannot' in response or
+        'no relevant tool' in response or
+        'unable' in response or
+        'failed' in response or
+        'unfortunately' in response
+    ), 'Agent should have failed for unsupported video generation task'
