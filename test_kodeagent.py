@@ -220,7 +220,7 @@ async def test_unsupported_task(react_agent):
     ), 'Agent should have failed for unsupported video generation task'
 
 
-async def _codeact_agent_date_(code_agent) -> (bool, str):
+async def _codeact_agent_date_(code_agent) -> tuple[bool, str]:
     """Helper function to run a code block and return the response."""
     task = "What is today's date? Express it in words without time."
     responses = []
