@@ -1,6 +1,7 @@
 """
 Unit tests for the KodeAgent ReActAgent class.
 """
+import datetime
 import pytest
 
 from kodeagent import (
@@ -10,8 +11,11 @@ from kodeagent import (
     ReActChatMessage,
     calculator,
     web_search,
-    file_download
+    file_download, CodeActAgent
 )
+
+
+MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
 
 
 @tool
@@ -25,7 +29,7 @@ def react_agent():
     """Fixture to create a ReActAgent instance for testing."""
     agent = ReActAgent(
         name='test_react_agent',
-        model_name='gemini/gemini-2.0-flash-lite',
+        model_name=MODEL_NAME,
         tools=[dummy_tool_one, calculator, web_search, file_download],
         description='Test ReAct agent for unit tests',
         max_iterations=3
@@ -36,7 +40,7 @@ def react_agent():
 def test_react_agent_initialization(react_agent):
     """Test the initialization of ReActAgent."""
     assert react_agent.name == 'test_react_agent'
-    assert react_agent.model_name == 'gemini/gemini-2.0-flash-lite'
+    assert react_agent.model_name == MODEL_NAME
     assert len(react_agent.tools) == 4  # dummy_tool_one, calculator, web_search, file_download
     assert react_agent.max_iterations == 3
     assert 'dummy_tool_one' in react_agent.tool_names
@@ -101,13 +105,13 @@ async def test_react_agent_run_with_tool_error(react_agent):
     @tool
     def broken_tool(param1: str) -> str:
         """A tool that always fails."""
-        raise Exception("Tool error")
+        raise Exception('Tool error')
 
     # Add the broken tool to the agent
     react_agent.tools.append(broken_tool)
 
     responses = []
-    async for response in react_agent.run("Use the broken tool"):
+    async for response in react_agent.run('Use the broken tool'):
         responses.append(response)
 
     # Check that error was captured in the response
@@ -172,31 +176,18 @@ async def test_get_relevant_tools(react_agent):
     """Test filtering relevant tools for a task."""
     task_description = 'What is 2 plus 3?'  # Simple calculator task
 
-    print("\nStarting test_get_relevant_tools...")
-    print(f"Task description: {task_description}")
-    print(f"Available tools: {[t.name for t in react_agent.tools]}")
-    print(f"Tools description: {react_agent.get_tools_description()}")
-
     # Initialize the task with a proper task description
     react_agent._run_init(task_description)
 
     try:
         # This will make an actual API call to determine relevant tools
-        print("\nCalling get_relevant_tools...")
         tools = await react_agent.get_relevant_tools(task_description)
-
-        print(f"\nReturned tools: {[t.name for t in tools]}")
-        print(f"Returned tool count: {len(tools)}")
 
         # The task requires calculation, so calculator should be relevant
         assert len(tools) > 0, "No tools were returned from get_relevant_tools"
         tool_names = {t.name for t in tools}
-        print(f"Tool names set: {tool_names}")
         assert "calculator" in tool_names, "calculator should be relevant for arithmetic"
     except Exception as e:
-        print(f"\nError during test: {str(e)}")
-        print(f"Agent state: Task initialized={hasattr(react_agent, 'task')}")
-        print(f"Agent history: {react_agent.messages}")
         raise
 
 
@@ -215,7 +206,6 @@ async def test_unsupported_task(react_agent):
     """Test that agent fails appropriately when given an unsupported task."""
     task_description = 'Generate a 30-second video animation of a flying bird'
 
-    # Try to run the task - should fail
     responses = []
     async for response in react_agent.run(task_description):
         responses.append(response)
@@ -228,3 +218,75 @@ async def test_unsupported_task(react_agent):
         'failed' in response or
         'unfortunately' in response
     ), 'Agent should have failed for unsupported video generation task'
+
+
+async def _codeact_agent_date_(code_agent) -> (bool, str):
+    """Helper function to run a code block and return the response."""
+    task = "What is today's date? Express it in words without time."
+    responses = []
+    async for response in code_agent.run(task):
+        responses.append(response['value'])
+
+    # Get today's date for verification
+    today = datetime.datetime.now().strftime('%B %d, %Y')
+    response = ' | '.join([str(r) for r in responses])
+
+    # The agent's response should contain today's date
+    return today.lower() in response.lower(), f'Expected {today} in response but got: {response}'
+
+
+@pytest.mark.asyncio
+async def test_codeact_agent_host():
+    """Test the CodeActAgent functionality on a local system."""
+    code_agent1 = CodeActAgent(
+        name='Code agent',
+        model_name=MODEL_NAME,
+        run_env='host',
+        max_iterations=3,
+        allowed_imports=['datetime'],
+        description='Agent that can write and execute Python code'
+    )
+
+    status, assert_error = await _codeact_agent_date_(code_agent1)
+    assert status, assert_error
+
+
+@pytest.mark.asyncio
+async def test_codeact_agent_e2b():
+    """Test the CodeActAgent functionality ona remote E2B sandbox."""
+    code_agent2 = CodeActAgent(
+        name='Code agent',
+        model_name=MODEL_NAME,
+        run_env='e2b',
+        max_iterations=3,
+        allowed_imports=['datetime'],
+        description='Agent that can write and execute Python code',
+        pip_packages=None,
+    )
+
+    status, assert_error = await _codeact_agent_date_(code_agent2)
+    assert status, assert_error
+
+
+@pytest.mark.asyncio
+async def test_codeact_agent_unsupported():
+    """Test the CodeActAgent functionality on an unsupported env."""
+    code_agent = CodeActAgent(
+        name='Code agent',
+        model_name=MODEL_NAME,
+        run_env='docker',
+        max_iterations=3,
+        allowed_imports=['datetime'],
+        description='Agent that can write and execute Python code',
+        pip_packages=None,
+    )
+
+    responses = []
+    async for response in code_agent.run('What is the date today?'):
+        responses.append(response)
+
+    response = ' | '.join([str(r) for r in responses])
+    print(f'{response=}')
+    assert (
+        'Unsupported code execution' in response
+    ), 'Expected code execution to fail on unsupported env'
