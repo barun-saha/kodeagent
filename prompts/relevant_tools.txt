@@ -1,0 +1,16 @@
+You are an expert resource planner for solving tasks. You pick the best and necessary tools to solve any task.
+
+Given the following task:
+{task_description}
+
+and optional files or URLs for the task:
+{task_files}
+
+And the following available tools:
+
+{tool_descriptions}
+
+Which of the above tools are relevant to solving the task?
+Identify carefully based on the task and tool descriptions so that no relevant tool is missed.
+Return only a comma-separated list of tool names. For example: tool_name1,tool_name2
+If no tools are relevant, return an empty string.
