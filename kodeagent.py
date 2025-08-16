@@ -554,7 +554,7 @@ class Agent(ABC):
             f'Agent: {self.name} ({self.id}); LLM: {self.model_name}; Tools: {self.tools}'
         )
 
-    async def create_plan(self) -> str:
+    async def create_plan(self):
         """
         Create a plan to solve the current task.
         """
@@ -570,18 +570,21 @@ class Agent(ABC):
             files=self.task.files,
         )
         plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
-        return self._format_plan_as_todo(plan)
+        self.plan = plan
+        self.plan = self._format_plan_as_todo()
 
     @property
     def current_plan(self) -> Optional[str]:
         """Returns the current plan for the task."""
         return self.plan
 
-    def _format_plan_as_todo(self, plan: str) -> str:
+    def _format_plan_as_todo(self) -> str:
         """
         Convert a numbered list plan into a markdown checklist.
         """
-        lines = plan.strip().split('\n')
+        if not self.plan:
+            return ''
+        lines = self.plan.strip().split('\n')
         todo_list = []
         for line in lines:
             line = line.strip()
@@ -915,7 +918,7 @@ class ReActAgent(Agent):
         )
 
         if self.use_planning:
-            self.plan = await self.create_plan()
+            await self.create_plan()
             yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
 
         for idx in range(self.max_iterations):
