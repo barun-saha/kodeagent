@@ -400,6 +400,17 @@ class Task(pyd.BaseModel):
     )
 
 
+class PlanStep(pyd.BaseModel):
+    """A single step in an agent's plan."""
+    description: str = pyd.Field(description='A brief description of the step')
+    is_done: bool = pyd.Field(description='Whether the step has been completed', default=False)
+
+
+class AgentPlan(pyd.BaseModel):
+    """A structured plan for an agent to follow."""
+    steps: list[PlanStep] = pyd.Field(description='List of steps to accomplish the task')
+
+
 class ChatMessage(pyd.BaseModel):
     """
     Generic chat message. This is primarily intended to internal and tool usage.
