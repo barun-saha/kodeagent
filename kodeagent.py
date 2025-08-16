@@ -1145,18 +1145,21 @@ def get_youtube_transcript(video_id: str) -> str:
     Returns:
         The transcript/subtitle of the video, if available.
     """
-    import youtube_transcript_api
-    from youtube_transcript_api import YouTubeTranscriptApi
+    from youtube_transcript_api import YouTubeTranscriptApi, _errors as yt_errors
 
     transcript_text = ''
     try:
         transcript = YouTubeTranscriptApi().fetch(video_id)
         transcript_text = ' '.join([item.text for item in transcript.snippets])
-    except youtube_transcript_api._errors.TranscriptsDisabled:
+    except yt_errors.TranscriptsDisabled:
         transcript_text = (
             '*** ERROR: Could not retrieve a transcript for the video -- subtitles appear to be'
             ' disabled for this video, so this tool cannot help, unfortunately.'
         )
+    except yt_errors.NoTranscriptFound:
+        return '*** ERROR: No transcript found for this video.'
+    except Exception as e:
+        return f'*** ERROR: YouTube transcript retrieval failed: {e}'
 
     return transcript_text
 
@@ -1333,7 +1336,7 @@ class Agent(ABC):
             tools: Optional[list[Callable]] = None,
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
-            filter_tools_for_task: bool = False,
+            filter_tools_for_task: bool = False
     ):
         """
         Initialize an agent.
@@ -1381,7 +1384,10 @@ class Agent(ABC):
         todo_list = []
         for line in lines:
             line = line.strip()
-            if re.match(r'^\d+\.\s*', line):
+            # Preserve existing checklist items
+            if re.match(r'^\s*-\s*\[\s*[xX ]\s*\]\s+', line):
+                todo_list.append(line)
+            elif re.match(r'^\d+\.\s*', line):
                 # Remove the number and dot
                 task = re.sub(r'^\d+\.\s*', '', line)
                 todo_list.append(f'- [ ] {task}')
