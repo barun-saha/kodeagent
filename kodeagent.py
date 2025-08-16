@@ -325,29 +325,19 @@ You are an expert, helpful agent designed to solve complex tasks iteratively usi
 You have powerful multimodal capabilities, which allow you to analyze images directly.
 </system>
 
-<principles>
-<principle>
-Iterative Problem Solving: Propose a step (`Thought`), execute code/tool use (`Code`),
-observe the outcome (`Observation`), then refine until the task is solved.
-</principle>
-<principle>
-Self-Correction and Adaptive Reasoning: Analyze each `Observation`. If an error occurs, diagnose and adapt.
-Never repeat failed attempts without modification.
-</principle>
-<principle>
-State Tracking and Task Progression: Maintain awareness of completed sub-tasks.
-Before writing new `Code`, explicitly refer to prior results and reuse available computations.
-</principle>
-<principle>
-Loop Avoidance and Optimal Execution: Ensure each iteration meaningfully advances the task.
-Avoid redundant execution of already completed thought/actions and move forward.
-Never call the same tool with the same arguments twice.
-</principle>
-<principle>
-Innate Visual Intelligence: If a task involves an image, use your inherent visual capabilities to analyze it. 
-Do not use a tool for image analysis unless a specific, complex, non-standard operation is required.
-</principle>
-</principles>
+<core_principles>
+1. Iterative Problem Solving: Propose a step (`Thought`), execute code/tool use (`Code`),
+    observe the outcome (`Observation`), then refine until the task is solved.
+2. Self-Correction and Adaptive Reasoning: Analyze each `Observation`. If an error occurs, diagnose and adapt.
+    Never repeat failed attempts without modification.
+3. State Tracking and Task Progression: Maintain awareness of completed sub-tasks.
+    Before writing new `Code`, explicitly refer to prior results and reuse available computations.
+4. Loop Avoidance and Optimal Execution: Ensure each iteration meaningfully advances the task.
+    Avoid redundant execution of already completed thought/code and move forward.
+    Never call the same tool with the same arguments twice.
+5. Innate Visual Intelligence: If a task involves an image, use your inherent visual capabilities to analyze it. 
+    Do not use a tool for image analysis unless a specific, complex, non-standard operation is required.
+</core_principles>
 
 <task>
 <task_description>{task}</task_description>
@@ -368,8 +358,9 @@ Do NOT import the provided tool names.
 </tools>
 
 <plan>
-Optionally, here's a TODO list of items (general plan to follow to solve the task) -- ignore if unavailable.
-Align your `Thought` and `Action` with the steps from the plan, marking achieved steps mentally.
+Optionally, here's a TODO list of items -- general plan to follow to solve the task (ignore if unavailable).
+Align your `Thought` and `Code` with the steps from the plan, marking achieved steps mentally.
+Completed tasks are marked with `[x]`; pending tasks as `[ ]`.
 <todo_list>
 {plan}
 </todo_list>
@@ -394,7 +385,7 @@ print(useful_result_information_found)
 </example_cycle>
 
 In `Thought`, based on the current task status and the `Observation` from the previous step, 
-describe precisely your next action and explaining why this specific `Code` block is necessary now. 
+describe precisely your next action (code) and explaining why this specific `Code` block is necessary now. 
 If you see a loop, explain how you will break it.
 
 Use `print()` for any result/useful information you want to observe based on code execution. 
@@ -733,17 +724,8 @@ You're agent type: {agent_type}
 (Optional) input file paths/URLs associated with this task are as follows:
 {task_files}
 
-## Tools
-
-Here are a few tools that you can use to solve the task:
-{tool_names}
-
-Now make a plan to solve the task using one or more tools.
-  - ONLY if you're CodeActAgent type, you can also write Python code to solve some problems.
-  - You can also use the LLM to solve something if there is no appropriate tool available.
-  - Do not use the same tool twice to do the same thing.
-Your output should be a numbered list of step-by-step plan. Each step listing only one sub-task
-in plain English, without any code, but can refer to a tool name.
+Your output should be a numbered list of step-by-step plan.
+Each step listing only one sub-task in plain English, without any code.
 '''
 
 UPDATE_PLAN_PROMPT = '''
@@ -1384,6 +1366,7 @@ class Agent(ABC):
         self.messages: list[ChatMessage] = []
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
+        self.plan = ''
 
     def __str__(self):
         return (
@@ -1731,8 +1714,8 @@ class ReActAgent(Agent):
                 text_content=AGENT_PLAN_PROMPT.format(
                     agent_type=self.__class__.__name__,
                     task=self.task.description,
-                    task_files='\n'.join(self.task.files) if self.task.files else '',
-                    tool_names=self.get_tools_description(),
+                    task_files='\n'.join(self.task.files) if self.task.files else '[None]',
+                    # tool_names=self.get_tools_description(),
                 ),
                 files=self.task.files,
             )
@@ -2251,10 +2234,10 @@ class CodeActAgent(ReActAgent):
 
         message = prompt_template.format(
             task=self.task.description,
-            task_files='\n'.join(self.task.files) if self.task.files else '',
+            task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
             authorized_imports=','.join(self.allowed_imports),
-            plan=plan or '<No plan provided; please plan yourself>',
+            plan=plan or '[No plan provided; please plan yourself]',
             **history_kwargs,
         )
         msg = await self._record_thought(message, CodeChatMessage)
@@ -2565,7 +2548,7 @@ async def main():
         model_name=model_name,
         tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
         run_env='host',
-        max_iterations=4,
+        max_iterations=6,
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',
@@ -2574,6 +2557,7 @@ async def main():
         pip_packages='ddgs~=9.5.2;"markitdown[all]";',
         filter_tools_for_task=False,
         contextual=False,
+        use_planning=True
     )
 
     the_tasks = [
