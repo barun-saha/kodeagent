@@ -580,17 +580,12 @@ class Agent(ABC):
             ),
             files=self.task.files,
         )
-        plan_str: str = await self._call_llm(messages=messages, trace_id=self.task.id)
-
-        steps = []
-        for line in plan_str.strip().split('\n'):
-            line = line.strip()
-            if re.match(r'^\d+\.\s*', line):
-                task_desc = re.sub(r'^\d+\.\s*', '', line)
-                steps.append(PlanStep(description=task_desc))
-            elif line:
-                steps.append(PlanStep(description=line))
-        self.plan = AgentPlan(steps=steps)
+        response = await self._call_llm(
+            messages=messages,
+            response_format=AgentPlan,
+            trace_id=self.task.id
+        )
+        self.plan = AgentPlan.model_validate_json(response)
 
     @property
     def current_plan(self) -> Optional[str]:
@@ -953,7 +948,7 @@ class ReActAgent(Agent):
 
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
             # The thought & observation will get appended to the list of messages
-            async for update in self._think(plan=self.current_plan):
+            async for update in self._think():
                 yield update
             async for update in self._act():
                 yield update
@@ -972,15 +967,12 @@ class ReActAgent(Agent):
                 channel='run'
             )
 
-    async def _think(self, plan: Optional[str] = None) -> AsyncIterator[AgentResponse]:
+    async def _think(self) -> AsyncIterator[AgentResponse]:
         """
         Think about the next step to be taken to solve the given task.
 
         The LLM is prompted with the available tools and the TAO sequence so far. Based on them,
         the LLM will suggest the next action. "Think" of ReAct is also "Observe."
-
-        Args:
-            plan: A tentative plan to solve the task [Optional].
 
         Yields:
             Update from the thing step.
@@ -1008,7 +1000,7 @@ class ReActAgent(Agent):
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
-            plan=plan or '<No plan provided; please plan yourself>',
+            plan=self.current_plan or '<No plan provided; please plan yourself>',
             **history_kwargs,
         )
         msg = await self._record_thought(message, ReActChatMessage)
@@ -1426,15 +1418,12 @@ class CodeActAgent(ReActAgent):
 
         return history
 
-    async def _think(self, plan: Optional[str] = None) -> AsyncIterator[AgentResponse]:
+    async def _think(self) -> AsyncIterator[AgentResponse]:
         """
         Think about the next step to be taken to solve the given task.
 
         The LLM is prompted with the available tools and the TCO sequence so far. Based on them,
         the LLM will suggest the next action/code.
-
-        Args:
-            plan: A tentative plan to solve the task [Optional].
 
         Yields:
             Update from the thing step.
@@ -1461,7 +1450,7 @@ class CodeActAgent(ReActAgent):
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
             authorized_imports=','.join(self.allowed_imports),
-            plan=plan or '[No plan provided; please plan yourself]',
+            plan=self.current_plan or '[No plan provided; please plan yourself]',
             **history_kwargs,
         )
         msg = await self._record_thought(message, CodeChatMessage)

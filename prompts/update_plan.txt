@@ -1,10 +1,9 @@
 You are an expert plan progress tracker.
-Given the current plan, the last thought of an agent, and the observation from the last action, update the plan.
-- Mark completed tasks with `[x]`.
-- Keep pending tasks as `[ ]`.
-- If necessary, add new tasks.
-- If necessary, modify existing tasks.
-- Return ONLY the updated plan in markdown checklist format.
+Given the current plan (as a JSON object), the last thought of an agent, and the observation from the last action, update the plan.
+- Update the `is_done` field for completed tasks to `true`.
+- If necessary, add new steps.
+- If necessary, modify the description of existing steps.
+- Return ONLY the updated plan as a JSON object that conforms to the `AgentPlan` schema. Do not add any other text.
 
 Current Plan:
 {plan}
