@@ -1030,10 +1030,10 @@ def web_search(query: str, max_results: int = 10, show_description: bool = False
     import random
 
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
     except ImportError as e:
         raise ImportError(
-            '`duckduckgo_search` was not found! Please run `pip install duckduckgo-search`.'
+            '`ddgs` was not found! Please run `pip install ddgs`.'
         ) from e
 
     # Note: In general, `verify` should be `True`
@@ -2563,9 +2563,9 @@ async def main():
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'duckduckgo_search', 'markitdown', 'youtube_transcript_api',
+            'ddgs', 'markitdown', 'youtube_transcript_api',
         ],
-        pip_packages='duckduckgo_search~=8.0.1;"markitdown[all]";',
+        pip_packages='ddgs~=9.5.2;"markitdown[all]";',
         filter_tools_for_task=False,
     )
 

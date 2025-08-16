@@ -73,10 +73,10 @@ def get_code_act_agent(model_name: str) -> ka.Agent:
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'duckduckgo_search', 'markitdown', 'youtube_transcript_api', 'wikipedia',
+            'ddgs', 'markitdown', 'youtube_transcript_api', 'wikipedia',
         ],
         pip_packages=(
-            'duckduckgo_search~=8.0.1;"markitdown[all]";'
+            'ddgs~=9.5.2;"markitdown[all]";'
             'youtube-transcript-api~=1.0.3;wikipedia~=1.4.0'
         ),
         env_vars_to_set={'FIREWORKS_API_KEY': os.environ.get('FIREWORKS_API_KEY', '')},
