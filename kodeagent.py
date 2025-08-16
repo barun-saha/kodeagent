@@ -368,16 +368,12 @@ Do NOT import the provided tool names.
 </tools>
 
 <plan>
-<plan_description>
-Optionally, here's a general plan (ignore if unavailable).
-Align your `Thought` with the steps from the plan, marking achieved steps mentally.
-{plan}
-</plan_description>
-</plan>
-
+Optionally, here's a TODO list of items (general plan to follow to solve the task) -- ignore if unavailable.
+Align your `Thought` and `Action` with the steps from the plan, marking achieved steps mentally.
 <todo_list>
-{todo_list_content}
+{plan}
 </todo_list>
+</plan>
 
 <output_format>
 Adhere strictly to the following `Thought`-`Code`-`Observation` cycle.
@@ -532,12 +528,10 @@ Do NOT import the provided tool names.
 
 ## Task Plan
 
-Optionally, here's a general plan (ignore if unavailable). 
+Optionally, here's a TODO list of items (general plan to follow to solve the task) -- ignore if unavailable. 
 Align your `Thought` with the steps from the plan, marking achieved steps mentally.
-{plan}
-
 <todo_list>
-{todo_list_content}
+{plan}
 </todo_list>
 
 # Output Format
@@ -750,6 +744,27 @@ Now make a plan to solve the task using one or more tools.
   - Do not use the same tool twice to do the same thing.
 Your output should be a numbered list of step-by-step plan. Each step listing only one sub-task
 in plain English, without any code, but can refer to a tool name.
+'''
+
+UPDATE_PLAN_PROMPT = '''
+You are an expert plan progress tracker.
+Given the current plan, the last thought of an agent, and the observation from the last action, update the plan.
+- Mark completed tasks with `[x]`.
+- Keep pending tasks as `[ ]`.
+- If necessary, add new tasks.
+- If necessary, modify existing tasks.
+- Return ONLY the updated plan in markdown checklist format.
+
+Current Plan:
+{plan}
+
+Last Thought:
+{thought}
+
+Last Observation:
+{observation}
+
+Updated Plan:
 '''
 
 SUPERVISOR_TASK_PROMPT = '''
@@ -1262,9 +1277,6 @@ class CodeChatMessage(ChatMessage):
     answer: Optional[str] = pyd.Field(
         description='Final answer for the task; set only in the final step', default=None
     )
-    todo_list_content: str = pyd.Field(
-        description='A markdown checklist of tasks to do, with completed tasks marked with [x]'
-    )
     successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
 
 
@@ -1377,6 +1389,42 @@ class Agent(ABC):
         return (
             f'Agent: {self.name} ({self.id}); LLM: {self.model_name}; Tools: {self.tools}'
         )
+
+    def _format_plan_as_todo(self, plan: str) -> str:
+        """
+        Convert a numbered list plan into a markdown checklist.
+        """
+        lines = plan.strip().split('\n')
+        todo_list = []
+        for line in lines:
+            line = line.strip()
+            if re.match(r'^\d+\.\s*', line):
+                # Remove the number and dot
+                task = re.sub(r'^\d+\.\s*', '', line)
+                todo_list.append(f'- [ ] {task}')
+            elif line:
+                todo_list.append(f'- [ ] {line}')
+        return '\n'.join(todo_list)
+
+    async def _update_plan_progress(self):
+        """
+        Update the plan based on the last thought and observation.
+        """
+        last_thought = ''
+        last_observation = ''
+        if len(self.messages) > 1:
+            if isinstance(self.messages[-2], (ReActChatMessage, CodeChatMessage)):
+                last_thought = self.messages[-2].thought
+            if self.messages[-1].role == 'tool':
+                last_observation = self.messages[-1].content
+
+        prompt = UPDATE_PLAN_PROMPT.format(
+            plan=self.plan,
+            thought=last_thought,
+            observation=last_observation
+        )
+        updated_plan = await self._call_llm(ku.make_user_message(prompt), trace_id=self.task.id)
+        self.plan = updated_plan
 
     async def get_history_summary(self) -> str:
         """
@@ -1622,6 +1670,7 @@ class ReActAgent(Agent):
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
             contextual: bool = False,
+            use_planning: bool = False,
     ):
         """
         Instantiate a ReAct agent.
@@ -1646,6 +1695,8 @@ class ReActAgent(Agent):
         )
 
         self.contextual = contextual
+        self.use_planning = use_planning
+        self.plan: Optional[str] = None
         self.final_answer_found: bool = False
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
@@ -1674,16 +1725,20 @@ class ReActAgent(Agent):
             value=f'Solving task: `{self.task.description}`',
             channel='run'
         )
-        # messages = ku.make_user_message(
-        #     text_content=AGENT_PLAN_PROMPT.format(
-        #         agent_type=self.__class__.__name__,
-        #         task=self.task.description,
-        #         task_files='\n'.join(self.task.files) if self.task.files else '',
-        #         tool_names=self.get_tools_description(),
-        #     ),
-        #     files=self.task.files,
-        # )
-        # plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
+
+        if self.use_planning:
+            messages = ku.make_user_message(
+                text_content=AGENT_PLAN_PROMPT.format(
+                    agent_type=self.__class__.__name__,
+                    task=self.task.description,
+                    task_files='\n'.join(self.task.files) if self.task.files else '',
+                    tool_names=self.get_tools_description(),
+                ),
+                files=self.task.files,
+            )
+            plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
+            self.plan = self._format_plan_as_todo(plan)
+            yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
 
         for idx in range(self.max_iterations):
             if self.final_answer_found:
@@ -1691,10 +1746,13 @@ class ReActAgent(Agent):
 
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
             # The thought & observation will get appended to the list of messages
-            async for update in self._think(plan=None):
+            async for update in self._think(plan=self.plan):
                 yield update
             async for update in self._act():
                 yield update
+
+            if self.use_planning and self.plan:
+                await self._update_plan_progress()
             print('-' * 30)
 
         if not self.final_answer_found:
@@ -2079,6 +2137,7 @@ class CodeActAgent(ReActAgent):
             env_vars_to_set: Optional[dict[str, str]] = None,
             filter_tools_for_task: bool = False,
             contextual: bool = False,
+            use_planning: bool = False,
     ):
         """
         Instantiate a CodeActAgent.
@@ -2107,6 +2166,7 @@ class CodeActAgent(ReActAgent):
             max_iterations=max_iterations,
             description=description,
             filter_tools_for_task=filter_tools_for_task,
+            use_planning=use_planning,
         )
         self.contextual = contextual
 
@@ -2172,16 +2232,6 @@ class CodeActAgent(ReActAgent):
         Yields:
             Update from the thing step.
         """
-        prev_code_msg = None
-        for m in self.messages[:self.msg_idx_of_new_task:-1]:
-            if isinstance(m, CodeChatMessage):
-                prev_code_msg = m
-                break
-
-        todo_list_content = prev_code_msg.todo_list_content if (
-            prev_code_msg and hasattr(prev_code_msg, 'todo_list_content')
-        ) else 'The todo list is empty. Please start by creating a todo list in markdown format.'
-
         if self.filter_tools_for_task:
             relevant_tools = await self.get_relevant_tools(
                 task_description=self.task.description, task_files=self.task.files
@@ -2205,7 +2255,6 @@ class CodeActAgent(ReActAgent):
             tool_names=self.get_tools_description(relevant_tools),
             authorized_imports=','.join(self.allowed_imports),
             plan=plan or '<No plan provided; please plan yourself>',
-            todo_list_content=todo_list_content,
             **history_kwargs,
         )
         msg = await self._record_thought(message, CodeChatMessage)
