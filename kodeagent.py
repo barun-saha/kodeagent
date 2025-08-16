@@ -741,6 +741,9 @@ class Agent(ABC):
 
         Returns:
             The LLM response as string.
+
+        Raises:
+            ValueError: If the LLM returns an empty or invalid response body.
         """
         params = {
             'model': self.model_name,
@@ -749,7 +752,13 @@ class Agent(ABC):
         if response_format:
             params['response_format'] = response_format
         params.update(self.litellm_params)
+
         response = litellm.completion(**params, metadata={'trace_id': str(trace_id)})
+
+        # Check for empty content
+        response_content = response.choices[0].message.get('content')
+        if not response_content or not response_content.strip():
+            raise ValueError('LLM returned an empty or invalid response body.')
 
         token_usage = {
             'cost': response._hidden_params['response_cost'],
@@ -758,7 +767,7 @@ class Agent(ABC):
             'total_tokens': response.usage.get('total_tokens'),
         }
         logger.info(token_usage)
-        return response.choices[0].message['content']
+        return response_content
 
     def response(
             self,
@@ -1798,6 +1807,7 @@ async def main():
         # await code_agent.get_relevant_tools(task_description=task, task_files=img_urls)
         async for response in code_agent.run(task, files=img_urls):
             print_response(response)
+        print(code_agent.current_plan)
         print('\n\n')
 
 

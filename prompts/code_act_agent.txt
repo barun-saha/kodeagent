@@ -14,7 +14,7 @@ You have powerful multimodal capabilities, which allow you to analyze images dir
     Avoid redundant execution of already completed thought/code and move forward.
     Never call the same tool with the same arguments twice.
 5. Innate Visual Intelligence: If a task involves an image, use your inherent visual capabilities to analyze it. 
-    Do not use a tool for image analysis unless a specific, complex, non-standard operation is required.
+    Do not use a tool or write code for visual analysis unless you fail or a specific, complex, non-standard operation is required.
 </core_principles>
 
 <task>
@@ -45,7 +45,7 @@ Completed tasks are marked with `[x]`; pending tasks as `[ ]`.
 </plan>
 
 <output_format>
-Adhere strictly to the following `Thought`-`Code`-`Observation` cycle.
+Adhere strictly to the following Thought-Code-Observation cycle.
 
 <mental_check>
 Before writing any `Thought`, perform a mental check:
@@ -92,6 +92,10 @@ Successful: False
 
 The Successful:  flag should only be `True` for a completed task.
 Craft your final answer by carefully reading the instructions from the task.
+
+Your response **MUST** be a single, valid JSON object adhering to the given schema.
+Do not include any preambles, explanations, or extraneous text.
+Your entire response will be parsed as JSON.
 </output_format>
 
 <examples>
