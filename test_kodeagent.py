@@ -37,6 +37,20 @@ def react_agent():
     return agent
 
 
+@pytest.fixture
+def planning_react_agent():
+    """Fixture to create a ReActAgent instance with planning enabled."""
+    agent = ReActAgent(
+        name='planning_react_agent',
+        model_name=MODEL_NAME,
+        tools=[dummy_tool_one, calculator, web_search, file_download],
+        description='Test ReAct agent with planning for unit tests',
+        max_iterations=3,
+        use_planning=True
+    )
+    return agent
+
+
 def test_react_agent_initialization(react_agent):
     """Test the initialization of ReActAgent."""
     assert react_agent.name == 'test_react_agent'
@@ -218,6 +232,75 @@ async def test_unsupported_task(react_agent):
         'failed' in response or
         'unfortunately' in response
     ), 'Agent should have failed for unsupported video generation task'
+
+
+@pytest.mark.asyncio
+async def test_create_plan(planning_react_agent):
+    """Test plan creation."""
+    planning_react_agent._run_init('Solve 2+2')
+    await planning_react_agent.create_plan()
+    assert planning_react_agent.plan is not None
+    assert len(planning_react_agent.plan) > 0
+    assert '- [ ]' in planning_react_agent.plan
+
+
+def test_format_plan_as_todo(react_agent):
+    """Test formatting of plan into a markdown checklist."""
+    react_agent.plan = '1. First step.\n2. Second step.'
+    formatted_plan = react_agent._format_plan_as_todo()
+    expected = '- [ ] First step.\n- [ ] Second step.'
+    assert formatted_plan == expected
+
+
+def test_sanitize_checklist(react_agent):
+    """Test sanitization of markdown checklist."""
+    dirty_checklist = '- [ ] one\n- [x] two\n- [X] three\nThis is not a checklist item.\n- [ ] four'
+    sanitized = react_agent._sanitize_checklist(dirty_checklist)
+    expected = '- [ ] one\n- [x] two\n- [x] three\n- [ ] four'
+    assert sanitized == expected
+
+
+@pytest.mark.asyncio
+async def test_update_plan_progress(planning_react_agent):
+    """Test plan progress update."""
+    agent = planning_react_agent
+    agent._run_init('What is 2+2?')
+    agent.plan = '- [ ] Use calculator to find 2+2.\n- [ ] Provide the final answer.'
+
+    # Simulate a thought-action-observation cycle
+    thought_msg = ReActChatMessage(
+        role='assistant',
+        thought='I need to calculate 2+2.',
+        action='calculator',
+        args='{"expression": "2+2"}',
+        content='',
+        successful=False,
+        answer=None
+    )
+    agent.add_to_history(thought_msg)
+
+    obs_msg = ChatMessage(role='tool', content='4')
+    agent.add_to_history(obs_msg)
+
+    original_plan = agent.plan
+    await agent._update_plan_progress()
+
+    assert agent.plan is not None
+    assert original_plan != agent.plan
+    # A reasonable expectation is that the first item is checked off
+    assert '- [x]' in agent.plan
+
+
+@pytest.mark.asyncio
+async def test_run_with_planning(planning_react_agent):
+    """Test a successful run with planning enabled."""
+    responses = []
+    async for response in planning_react_agent.run('Add 2 and 2'):
+        responses.append(response)
+
+    plan_logs = [r for r in responses if r['type'] == 'log' and 'Plan:' in r['value']]
+    assert len(plan_logs) == 1
+    assert any(r['type'] == 'final' for r in responses)
 
 
 async def _codeact_agent_date_(code_agent) -> tuple[bool, str]:
