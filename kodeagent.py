@@ -185,7 +185,306 @@ Below is the history of the interaction so far, showing the interleaving "Though
 {history}
 '''
 
+REACT_CONTEXTUAL_PROMPT = '''
+You are an expert assistant, helpful and polite, who can solve any task using tool calls. 
+Given a task, you think about how to solve it, suggest a tool to use to solve the current step,
+observe the outcome of the current action, and then think again.
+You practise self-questioning, self-reasoning, self-reflection, and self-healing
+to overcome any obstacles and reach your goal.
+
+
+## Task
+
+The task description is as follows:
+{task}
+
+(Optional) input file paths/URLs associated with this task are as follows:
+{task_files}
+
+
+## Tools
+
+The following tools are available to you:
+{tool_names}
+
+You can use one or more of these tools in any sequence you deem appropriate to complete the task at hand.
+This may require breaking the task into subtasks and using different tools to complete each subtask.
+
+
+## Output Format
+
+Please answer in the same language as the question and use the following format:
+
+Thought: The current language of the user is: (user's language). I need to use a tool to help me answer the question.
+Action: tool name (one of aforementioned tool names) if using a tool.
+Args: the input arguments to the tool, in a JSON format representing the kwargs (e.g. {{"input": "hello world", "num_beams": 5}})
+
+ALWAYS start with a Thought.
+
+NEVER surround your response with markdown code markers.
+You may use code markers within your response if you need to.
+Please use a valid JSON format for the Args. E.g., do NOT do this {{'input': 'hello world', 'num_beams': 5}}.
+
+If this format is used, the tool will respond in the following format:
+
+Observation: tool response
+
+
+You should keep repeating the above format (Thought-Action-Observation cycle) till you have enough
+information to answer the question without using any more tools.
+At that point, you MUST respond in one of the following two formats:
+
+Thought: I can answer without using any more tools. I'll use the user's language to answer
+Answer: [your answer here (In the same language as the user's question)]
+Successful: True
+
+Thought: I cannot answer the question with the provided tools.
+Answer: [your answer here (In the same language as the user's question)]
+Successful: False
+
+
+The `Successful` flag is set to `False` in the second case since the task was failed to be solved.
+This flag should be always False until you reach the final step and decide that the task is complete.
+Note: if an action fails, the error message will be captured in `Observation`.
+Frame your next `Thought` in a way so that it can mitigate the previous error and take correct action.
+
+
+## Example Conversations
+
+Below, a few sample conversations using notional tools are provided for your reference.
+Please study the patterns carefully.
+
+---
+[Sample task: Generate an image of the oldest person in this document.]
+
+Thought: I will begin by identifying the oldest person mentioned in the document. I will use the `document_qa` tool for this purpose.
+Action: document_qa
+Args: {{"document": "document.pdf", "question": "Who is the oldest person mentioned?"}}
+Observation: The oldest person in the document is John Doe, a 55 year old lumberjack living in Newfoundland.
+
+Thought: Based on document search, I have identified John Doe, aged 55, as the oldest person. He lives in Newfoundland, Canada. Now, I'll use the `image_generator` tool to generate his portrait.  
+Action: image_generator
+Args: {{"prompt": "A portrait of John Doe, a 55-year-old man living in Canada."}}
+Observation: image.png
+
+Thought: Based on the given document, I have identified John Doe (55) as the oldest person. I have also generated his portrait and saved it in the `image.png` file.
+Answer: image.png
+Successful: True
+
+---
+[Sample task: What is the result of the following operation: 5 + 3 + 1294.678?]
+
+Thought: This is an arithmetic problem. I will use the `calculator` tool to compute the sum.
+Action: calculator
+Args: {{"expression": "5 + 3 + 1294.678"}}
+Observation: 1302.678
+
+Thought: Using the `calculator` tool, the sum of the given numbers is 1302.678.
+Answer: 1302.678
+Successful: True
+
+---
+[Sample task: Generate a video of the moon.]
+
+Thought: The user has asked to generate a video of the moon. Unfortunately, I do not have any tool that can generate a video. So, I can't solve this task.
+Answer: Unfortunately, I lack the ability to solve this task at this moment. May I help you with something else?
+Successful: False
+
+
+## Plan
+
+Here's a general plan that someone who may or may not have your tools might try to solve this task.
+You can refer to it but adapt as necessary, e.g., add/edit/combine/skip steps:
+(ignore if plan is not available)
+{plan}
+
+Based on the current state of the Thought-Action-Observation, you will identify what steps from
+the plan have already been achieved and what needs to be done next, thus frame your `Thought`.
+
+
+## Additional Instructions:
+- Call a tool only when needed, e.g., do not call the search agent if you do not need to search information.
+- Do not use non-existent tools. Only use a tool listed earlier. 
+- Always use the right arguments for the tools. Never use variable names as the action arguments, use the value instead.
+- Never re-do a tool call that you previously did with the exact same parameters.
+- Do your best! Don't give up! You're in charge of solving the task, not providing directions to solve it.
+
+
+## Context of Current Interaction
+
+Below is a summary of what has been done so far for the current task.
+It includes what was successful, what failed, and what is pending.
+Based on this context, you should plan your next step to solve the task without repeating past actions.
+
+{history_summary}
+'''
+
 CODE_ACT_AGENT_PROMPT = '''
+<system>
+You are an expert, helpful agent designed to solve complex tasks iteratively using available tools and Python code.
+You have powerful multimodal capabilities, which allow you to analyze images directly.
+</system>
+
+<core_principles>
+1. Iterative Problem Solving: Propose a step (`Thought`), execute code/tool use (`Code`),
+    observe the outcome (`Observation`), then refine until the task is solved.
+2. Self-Correction and Adaptive Reasoning: Analyze each `Observation`. If an error occurs, diagnose and adapt.
+    Never repeat failed attempts without modification.
+3. State Tracking and Task Progression: Maintain awareness of completed sub-tasks.
+    Before writing new `Code`, explicitly refer to prior results and reuse available computations.
+4. Loop Avoidance and Optimal Execution: Ensure each iteration meaningfully advances the task.
+    Avoid redundant execution of already completed thought/code and move forward.
+    Never call the same tool with the same arguments twice.
+5. Innate Visual Intelligence: If a task involves an image, use your inherent visual capabilities to analyze it. 
+    Do not use a tool for image analysis unless a specific, complex, non-standard operation is required.
+</core_principles>
+
+<task>
+<task_description>{task}</task_description>
+<input_files>{task_files}</input_files>
+</task>
+
+<tools>
+The following *specialized* tools are available for your use:
+<tool_list>
+{tool_names}
+</tool_list>
+
+You are responsible for writing Python code to use these tools and only the following standard libraries:
+<authorized_imports>
+{authorized_imports}
+</authorized_imports>
+Do NOT import the provided tool names.
+</tools>
+
+<plan>
+Optionally, here's a TODO list of items -- general plan to follow to solve the task (ignore if unavailable).
+Align your `Thought` and `Code` with the steps from the plan, marking achieved steps mentally.
+Completed tasks are marked with `[x]`; pending tasks as `[ ]`.
+<todo_list>
+{plan}
+</todo_list>
+</plan>
+
+<output_format>
+Adhere strictly to the following `Thought`-`Code`-`Observation` cycle.
+
+<mental_check>
+Before writing any `Thought`, perform a mental check:
+1. Have I completed all the sub-tasks in the plan?
+2. Do I have all the necessary information to provide the final answer without any further tool calls?
+If both are true, skip directly to the `Thought` for the final `Answer`.
+</mental_check>
+
+<example_cycle>
+Thought: Based on the current task status, what is the next logical step to take?
+Code: ```py
+# Write your Python code here
+print(useful_result_information_found)
+```
+</example_cycle>
+
+In `Thought`, based on the current task status and the `Observation` from the previous step, 
+describe precisely your next action (code) and explaining why this specific `Code` block is necessary now. 
+If you see a loop, explain how you will break it.
+
+Use `print()` for any result/useful information you want to observe based on code execution. 
+When necessary, you can apply your innate capabilities (e.g., summarization, translation, 
+static code analysis, image analysis, and so on) on what you see under `Observation`. 
+Avoid printing trivial text.
+
+Every iteration of the cycle must move you closer to completing the task.
+Keep track of the steps already completed and pending. 
+Your `Thought` for each turn must focus on what needs to be done next to *advance* the task.
+
+Repeat this cycle until you have enough information to provide a final answer. 
+For the final answer, use one of these formats:
+
+<final_answer>
+Thought: I have enough information to answer. I will use the user's language.
+Answer: [Your answer in the user's language]
+Successful: True
+</final_answer>
+
+<failure_state>
+Thought: I cannot answer the question with the provided tools/information.
+Answer: [Your explanation in the user's language]
+Successful: False
+</failure_state>
+
+The Successful:  flag should only be `True` for a completed task.
+Craft your final answer by carefully reading the instructions from the task.
+</output_format>
+
+<examples>
+<example>
+What color is the sky in this picture? (Image: sky.jpg)
+
+
+Thought: The user has provided an image file as input and wants to know the color of the sky. I can analyze the image directly using my innate vision capabilities. The image shows a sky. I can see its color is blue.
+Answer: The sky in the picture is blue.
+Successful: True
+</example>
+
+<example>
+Which city has the highest population: Guangzhou or Shanghai?
+
+Thought: The current language of the user is: English. I need to get the populations for both cities and compare them: I will use the tool `search` for this purpose. Since search results are important for this task, I'll print them.
+Code: ```py
+for city in ['Guangzhou', 'Shanghai']:
+print(f'Population {{city}}:', search(f'{{city}} population'))
+```
+Observation: Population Guangzhou: ['Guangzhou has a population of 15 million inhabitants as of 2021.']
+Population Shanghai: 26 million (2019)
+
+Thought: Based on the search results in the `Observation` from the previous step, I know that Shanghai has the highest population.
+Answer: Based on the search results, Shanghai has the highest population.
+Successful: True
+</example>
+
+<example>
+Generate a video of the moon.]
+
+Thought: The user has asked to generate a video of the moon. Unfortunately, I do not have any tool that can generate a video. So, I can't solve this task.
+Answer: Unfortunately, I lack the ability to solve this task at this moment. May I help you with something else?
+Successful: False
+</example>
+
+<example>
+Translate the content of 'article.txt' into Bengali
+
+Thought: The user wants a translation of 'article.txt'. I will first read the contents of the file. Since no specific tool for translation is available, I'll print the contents so that it becomes available to me (the LLM) for translation.
+Code: ```py
+with open('article.txt', 'r', encoding='utf-8') as file:
+    print(file.read())
+```
+Observation: Hello, how are you?
+
+Thought: In the previous step, I have already read the 'article.txt' file and printed its contents: 'Hello, how are you?'. I can translate this text into Bengali (output language) myself without using any further tools and provide the final answer.
+Answer: হ্যালো, কেমন আছো?
+Successful: True
+</example>
+</examples>
+
+<guidelines>
+- Always generate a `Thought` and `Code` sequence unless you are providing a final `Answer`.
+- Do not name new variables with the same name as a tool.
+- Smartly decide when to use specialized tools vs. write simple Python code vs. use your innate capabilities.
+- Use tools only when needed and only those listed. Prefer tools over writing complex custom code.
+- Always use the correct arguments for tools (e.g., tool(arg='value'), not tool({{'arg': 'value'}})).
+- Remember to import allowed Python modules before using them within a `Code` block.
+- Do NOT print secrets (API keys, passwords).
+- Your `Thought` MUST reason whether to print file contents.
+  ONLY print if necessary and explicitly justified in your `Thought`.
+</guidelines>
+
+<current_interaction>
+{history}
+</current_interaction>
+</prompt>
+'''
+
+CODE_ACT_AGENT_CONTEXTUAL_PROMPT = '''
 You are an expert, helpful agent designed to solve complex tasks iteratively using available tools & Python code.
 
 Your core operating principles are:
@@ -220,10 +519,11 @@ Do NOT import the provided tool names.
 
 ## Task Plan
 
-Optionally, here's a general plan (ignore if unavailable). 
+Optionally, here's a TODO list of items (general plan to follow to solve the task) -- ignore if unavailable. 
 Align your `Thought` with the steps from the plan, marking achieved steps mentally.
+<todo_list>
 {plan}
-
+</todo_list>
 
 # Output Format
 
@@ -242,7 +542,7 @@ If you see a loop, explain how you will break it.
 
 Use `print()` for any result/useful information you want to observe based on code execution.
 When necessary, you can apply your innate capabilities (e.g., summarization, translation, static
-code analysis, and so on) on what you see under `Observation`.
+code analysis, image analysis, and so on) on what you see under `Observation`.
 Avoid printing trivial text (e.g., printing to say that you will do something).
 
 Every iteration of the Thought-Code-Observation cycle must move you closer to completing the task.
@@ -378,20 +678,16 @@ print(download_file(url='https://example.com/article.txt'))
   ONLY print if necessary and explicitly justified in your Thought.
 
 
-# Current Interaction
+# Context of Current Interaction
 
-{history}
+Below is a summary of what has been done so far for the current task.
+It includes what was successful, what failed, and what is pending.
+Based on this context, you should plan your next step to solve the task without repeating past actions.
+DO NOT repeat steps that have already been completed successfully. If a step failed, analyze the error and try a different approach.
+
+{history_summary}
 
 
-# State Tracking & Task Progression
-
-## Steps already completed
-
-{steps_completed}
-
-## Steps pending
-
-{steps_to_take}
 '''
 
 RELEVANT_TOOLS_PROMPT = '''
@@ -428,17 +724,29 @@ You're agent type: {agent_type}
 (Optional) input file paths/URLs associated with this task are as follows:
 {task_files}
 
-## Tools
+Your output should be a numbered list of step-by-step plan.
+Each step listing only one sub-task in plain English, without any code.
+'''
 
-Here are a few tools that you can use to solve the task:
-{tool_names}
+UPDATE_PLAN_PROMPT = '''
+You are an expert plan progress tracker.
+Given the current plan, the last thought of an agent, and the observation from the last action, update the plan.
+- Mark completed tasks with `[x]`.
+- Keep pending tasks as `[ ]`.
+- If necessary, add new tasks.
+- If necessary, modify existing tasks.
+- Return ONLY the updated plan in markdown checklist format.
 
-Now make a plan to solve the task using one or more tools.
-  - ONLY if you're CodeActAgent type, you can also write Python code to solve some problems.
-  - You can also use the LLM to solve something if there is no appropriate tool available.
-  - Do not use the same tool twice to do the same thing.
-Your output should be a numbered list of step-by-step plan. Each step listing only one sub-task
-in plain English, without any code, but can refer to a tool name.
+Current Plan:
+{plan}
+
+Last Thought:
+{thought}
+
+Last Observation:
+{observation}
+
+Updated Plan:
 '''
 
 SUPERVISOR_TASK_PROMPT = '''
@@ -569,6 +877,23 @@ agent's previous attempts or tool's previous outputs.
 
 '''
 
+CONTEXTUAL_SUMMARY_PROMPT = '''
+You are an expert summarizer. Given a task and a history of interactions between an AI agent and tools, create a concise summary.
+The summary should highlight:
+1. What has been attempted.
+2. What succeeded.
+3. What failed (including errors).
+4. What information has been gathered.
+5. What is the next logical step to move forward and solve the task.
+
+The summary should not be a list, but a concise paragraph.
+
+Task: {task}
+
+Interaction History:
+{history}
+'''
+
 
 def tool(func: Callable) -> Callable:
     """
@@ -665,10 +990,10 @@ def web_search(query: str, max_results: int = 10, show_description: bool = False
     import random
 
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
     except ImportError as e:
         raise ImportError(
-            '`duckduckgo_search` was not found! Please run `pip install duckduckgo-search`.'
+            '`ddgs` was not found! Please run `pip install ddgs`.'
         ) from e
 
     # Note: In general, `verify` should be `True`
@@ -820,18 +1145,21 @@ def get_youtube_transcript(video_id: str) -> str:
     Returns:
         The transcript/subtitle of the video, if available.
     """
-    import youtube_transcript_api
-    from youtube_transcript_api import YouTubeTranscriptApi
+    from youtube_transcript_api import YouTubeTranscriptApi, _errors as yt_errors
 
     transcript_text = ''
     try:
         transcript = YouTubeTranscriptApi().fetch(video_id)
         transcript_text = ' '.join([item.text for item in transcript.snippets])
-    except youtube_transcript_api._errors.TranscriptsDisabled:
+    except yt_errors.TranscriptsDisabled:
         transcript_text = (
             '*** ERROR: Could not retrieve a transcript for the video -- subtitles appear to be'
             ' disabled for this video, so this tool cannot help, unfortunately.'
         )
+    except yt_errors.NoTranscriptFound:
+        return '*** ERROR: No transcript found for this video.'
+    except Exception as e:
+        return f'*** ERROR: YouTube transcript retrieval failed: {e}'
 
     return transcript_text
 
@@ -934,12 +1262,6 @@ class CodeChatMessage(ChatMessage):
     answer: Optional[str] = pyd.Field(
         description='Final answer for the task; set only in the final step', default=None
     )
-    steps_completed: str = pyd.Field(
-        description='A list of steps related to the task successfully completed so far'
-    )
-    steps_to_take: str = pyd.Field(
-        description='A list of steps related to the task that are yet to be performed'
-    )
     successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
 
 
@@ -1014,7 +1336,7 @@ class Agent(ABC):
             tools: Optional[list[Callable]] = None,
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
-            filter_tools_for_task: bool = False,
+            filter_tools_for_task: bool = False
     ):
         """
         Initialize an agent.
@@ -1047,11 +1369,69 @@ class Agent(ABC):
         self.messages: list[ChatMessage] = []
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
+        self.plan = ''
 
     def __str__(self):
         return (
             f'Agent: {self.name} ({self.id}); LLM: {self.model_name}; Tools: {self.tools}'
         )
+
+    def _format_plan_as_todo(self, plan: str) -> str:
+        """
+        Convert a numbered list plan into a markdown checklist.
+        """
+        lines = plan.strip().split('\n')
+        todo_list = []
+        for line in lines:
+            line = line.strip()
+            # Preserve existing checklist items
+            if re.match(r'^\s*-\s*\[\s*[xX ]\s*\]\s+', line):
+                todo_list.append(line)
+            elif re.match(r'^\d+\.\s*', line):
+                # Remove the number and dot
+                task = re.sub(r'^\d+\.\s*', '', line)
+                todo_list.append(f'- [ ] {task}')
+            elif line:
+                todo_list.append(f'- [ ] {line}')
+        return '\n'.join(todo_list)
+
+    async def _update_plan_progress(self):
+        """
+        Update the plan based on the last thought and observation.
+        """
+        last_thought = ''
+        last_observation = ''
+        if len(self.messages) > 1:
+            if isinstance(self.messages[-2], (ReActChatMessage, CodeChatMessage)):
+                last_thought = self.messages[-2].thought
+            if self.messages[-1].role == 'tool':
+                last_observation = self.messages[-1].content
+
+        prompt = UPDATE_PLAN_PROMPT.format(
+            plan=self.plan,
+            thought=last_thought,
+            observation=last_observation
+        )
+        updated_plan = await self._call_llm(ku.make_user_message(prompt), trace_id=self.task.id)
+        self.plan = updated_plan
+
+    async def get_history_summary(self) -> str:
+        """
+        Generate a summary of the conversation history.
+        """
+        history = self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task)
+        if not history.strip():
+            return "No activities yet."
+
+        prompt = CONTEXTUAL_SUMMARY_PROMPT.format(
+            task=self.task.description,
+            history=history
+        )
+        summary = await self._call_llm(
+            ku.make_user_message(prompt),
+            trace_id=self.task.id if self.task else None
+        )
+        return summary
 
     async def get_relevant_tools(
             self,
@@ -1278,6 +1658,8 @@ class ReActAgent(Agent):
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
+            contextual: bool = False,
+            use_planning: bool = False,
     ):
         """
         Instantiate a ReAct agent.
@@ -1301,6 +1683,9 @@ class ReActAgent(Agent):
             filter_tools_for_task=filter_tools_for_task,
         )
 
+        self.contextual = contextual
+        self.use_planning = use_planning
+        self.plan: Optional[str] = None
         self.final_answer_found: bool = False
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
@@ -1329,16 +1714,20 @@ class ReActAgent(Agent):
             value=f'Solving task: `{self.task.description}`',
             channel='run'
         )
-        # messages = ku.make_user_message(
-        #     text_content=AGENT_PLAN_PROMPT.format(
-        #         agent_type=self.__class__.__name__,
-        #         task=self.task.description,
-        #         task_files='\n'.join(self.task.files) if self.task.files else '',
-        #         tool_names=self.get_tools_description(),
-        #     ),
-        #     files=self.task.files,
-        # )
-        # plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
+
+        if self.use_planning:
+            messages = ku.make_user_message(
+                text_content=AGENT_PLAN_PROMPT.format(
+                    agent_type=self.__class__.__name__,
+                    task=self.task.description,
+                    task_files='\n'.join(self.task.files) if self.task.files else '[None]',
+                    # tool_names=self.get_tools_description(),
+                ),
+                files=self.task.files,
+            )
+            plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
+            self.plan = self._format_plan_as_todo(plan)
+            yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
 
         for idx in range(self.max_iterations):
             if self.final_answer_found:
@@ -1346,10 +1735,13 @@ class ReActAgent(Agent):
 
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
             # The thought & observation will get appended to the list of messages
-            async for update in self._think(plan=None):
+            async for update in self._think(plan=self.plan):
                 yield update
             async for update in self._act():
                 yield update
+
+            if self.use_planning and self.plan:
+                await self._update_plan_progress()
             print('-' * 30)
 
         if not self.final_answer_found:
@@ -1384,12 +1776,22 @@ class ReActAgent(Agent):
         else:
             relevant_tools = self.tools
 
-        message = REACT_PROMPT.format(
+        if self.contextual:
+            history_summary = await self.get_history_summary()
+            prompt_template = REACT_CONTEXTUAL_PROMPT
+            history_kwargs = {'history_summary': history_summary}
+        else:
+            prompt_template = REACT_PROMPT
+            history_kwargs = {
+                'history': self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task)
+            }
+
+        message = prompt_template.format(
             task=self.task.description,
-            task_files='\n'.join(self.task.files) if self.task.files else '',
-            history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
+            task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
             plan=plan or '<No plan provided; please plan yourself>',
+            **history_kwargs,
         )
         msg = await self._record_thought(message, ReActChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
@@ -1409,8 +1811,9 @@ class ReActAgent(Agent):
         Returns:
             A message of the `response_format_class` type.
         """
+        prompt = ku.make_user_message(text_content=message, files=self.task.files)
         response = await self._call_llm(
-            messages=ku.make_user_message(text_content=message, files=self.task.files),
+            messages=prompt,
             response_format=response_format_class,
             trace_id=self.task.id,
         )
@@ -1722,6 +2125,8 @@ class CodeActAgent(ReActAgent):
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
             filter_tools_for_task: bool = False,
+            contextual: bool = False,
+            use_planning: bool = False,
     ):
         """
         Instantiate a CodeActAgent.
@@ -1750,7 +2155,9 @@ class CodeActAgent(ReActAgent):
             max_iterations=max_iterations,
             description=description,
             filter_tools_for_task=filter_tools_for_task,
+            use_planning=use_planning,
         )
+        self.contextual = contextual
 
         # Combine the source code of all tools into one place
         # TODO Somehow dynamically identify and include the modules used by the tools
@@ -1814,19 +2221,6 @@ class CodeActAgent(ReActAgent):
         Yields:
             Update from the thing step.
         """
-        prev_code_msg = None
-        for m in self.messages[:self.msg_idx_of_new_task:-1]:
-            if isinstance(m, CodeChatMessage):
-                prev_code_msg = m
-                break
-
-        steps_completed = prev_code_msg.steps_completed if (
-            hasattr(prev_code_msg, 'steps_completed')
-        ) else '<None>'
-        steps_to_take = prev_code_msg.steps_to_take if (
-            hasattr(prev_code_msg, 'steps_to_take')
-        ) else ''
-
         if self.filter_tools_for_task:
             relevant_tools = await self.get_relevant_tools(
                 task_description=self.task.description, task_files=self.task.files
@@ -1834,15 +2228,23 @@ class CodeActAgent(ReActAgent):
         else:
             relevant_tools = self.tools
 
-        message = CODE_ACT_AGENT_PROMPT.format(
+        if self.contextual:
+            history_summary = await self.get_history_summary()
+            prompt_template = CODE_ACT_AGENT_CONTEXTUAL_PROMPT
+            history_kwargs = {'history_summary': history_summary}
+        else:
+            prompt_template = CODE_ACT_AGENT_PROMPT
+            history_kwargs = {
+                'history': self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task)
+            }
+
+        message = prompt_template.format(
             task=self.task.description,
-            task_files='\n'.join(self.task.files) if self.task.files else '',
-            history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
+            task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
             authorized_imports=','.join(self.allowed_imports),
-            plan=plan or '<No plan provided; please plan yourself>',
-            steps_completed=steps_completed,
-            steps_to_take=steps_to_take,
+            plan=plan or '[No plan provided; please plan yourself]',
+            **history_kwargs,
         )
         msg = await self._record_thought(message, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
@@ -2134,7 +2536,7 @@ async def main():
     Demonstrate the use of ReActAgent and CodeActAgent.
     """
     litellm_params = {'temperature': 0}
-    model_name = 'gemini/gemini-2.0-flash-lite'
+    model_name = 'gemini/gemini-2.5-flash-lite'
     # model_name = 'vertex_ai/gemini-2.0-flash'
     # model_name = 'azure/gpt-4.1-mini'
     # model_name = 'azure/gpt-4o-mini'
@@ -2152,14 +2554,16 @@ async def main():
         model_name=model_name,
         tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
         run_env='host',
-        max_iterations=7,
+        max_iterations=6,
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'duckduckgo_search', 'markitdown', 'youtube_transcript_api',
+            'ddgs', 'markitdown', 'youtube_transcript_api',
         ],
-        pip_packages='duckduckgo_search~=8.0.1;"markitdown[all]";',
+        pip_packages='ddgs~=9.5.2;"markitdown[all]";',
         filter_tools_for_task=False,
+        contextual=False,
+        use_planning=True
     )
 
     the_tasks = [
