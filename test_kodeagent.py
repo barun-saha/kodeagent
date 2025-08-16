@@ -11,7 +11,7 @@ from kodeagent import (
     ReActChatMessage,
     calculator,
     web_search,
-    file_download, CodeActAgent
+    file_download, CodeActAgent, AgentPlan, PlanStep
 )
 
 
@@ -240,24 +240,20 @@ async def test_create_plan(planning_react_agent):
     planning_react_agent._run_init('Solve 2+2')
     await planning_react_agent.create_plan()
     assert planning_react_agent.plan is not None
-    assert len(planning_react_agent.plan) > 0
-    assert '- [ ]' in planning_react_agent.plan
+    assert isinstance(planning_react_agent.plan, AgentPlan)
+    assert len(planning_react_agent.plan.steps) > 0
+    assert '- [ ]' in planning_react_agent.current_plan
 
 
 def test_format_plan_as_todo(react_agent):
     """Test formatting of plan into a markdown checklist."""
-    react_agent.plan = '1. First step.\n2. Second step.'
+    react_agent.plan = AgentPlan(steps=[
+        PlanStep(description='First step.', is_done=False),
+        PlanStep(description='Second step.', is_done=True)
+    ])
     formatted_plan = react_agent._format_plan_as_todo()
-    expected = '- [ ] First step.\n- [ ] Second step.'
+    expected = '- [ ] First step.\n- [x] Second step.'
     assert formatted_plan == expected
-
-
-def test_sanitize_checklist(react_agent):
-    """Test sanitization of markdown checklist."""
-    dirty_checklist = '- [ ] one\n- [x] two\n- [X] three\nThis is not a checklist item.\n- [ ] four'
-    sanitized = react_agent._sanitize_checklist(dirty_checklist)
-    expected = '- [ ] one\n- [x] two\n- [x] three\n- [ ] four'
-    assert sanitized == expected
 
 
 @pytest.mark.asyncio
@@ -265,7 +261,10 @@ async def test_update_plan_progress(planning_react_agent):
     """Test plan progress update."""
     agent = planning_react_agent
     agent._run_init('What is 2+2?')
-    agent.plan = '- [ ] Use calculator to find 2+2.\n- [ ] Provide the final answer.'
+    agent.plan = AgentPlan(steps=[
+        PlanStep(description='Use calculator to find 2+2.', is_done=False),
+        PlanStep(description='Provide the final answer.', is_done=False)
+    ])
 
     # Simulate a thought-action-observation cycle
     thought_msg = ReActChatMessage(
@@ -282,13 +281,13 @@ async def test_update_plan_progress(planning_react_agent):
     obs_msg = ChatMessage(role='tool', content='4')
     agent.add_to_history(obs_msg)
 
-    original_plan = agent.plan
+    original_plan = agent.current_plan
     await agent._update_plan_progress()
 
     assert agent.plan is not None
-    assert original_plan != agent.plan
+    assert original_plan != agent.current_plan
     # A reasonable expectation is that the first item is checked off
-    assert '- [x]' in agent.plan
+    assert agent.plan.steps[0].is_done is True
 
 
 @pytest.mark.asyncio

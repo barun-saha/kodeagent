@@ -547,7 +547,7 @@ class Agent(ABC):
         self.messages: list[ChatMessage] = []
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
-        self.plan = ''
+        self.plan: Optional[AgentPlan] = None
 
     def __str__(self):
         return (
@@ -569,34 +569,36 @@ class Agent(ABC):
             ),
             files=self.task.files,
         )
-        plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
-        self.plan = plan
-        self.plan = self._format_plan_as_todo()
+        plan_str: str = await self._call_llm(messages=messages, trace_id=self.task.id)
+
+        steps = []
+        for line in plan_str.strip().split('\n'):
+            line = line.strip()
+            if re.match(r'^\d+\.\s*', line):
+                task_desc = re.sub(r'^\d+\.\s*', '', line)
+                steps.append(PlanStep(description=task_desc))
+            elif line:
+                steps.append(PlanStep(description=line))
+        self.plan = AgentPlan(steps=steps)
 
     @property
     def current_plan(self) -> Optional[str]:
         """Returns the current plan for the task."""
-        return self.plan
+        if not self.plan:
+            return None
+        return self._format_plan_as_todo()
 
     def _format_plan_as_todo(self) -> str:
         """
-        Convert a numbered list plan into a markdown checklist.
+        Convert the agent's plan into a markdown checklist.
         """
-        if not self.plan:
+        if not self.plan or not self.plan.steps:
             return ''
-        lines = self.plan.strip().split('\n')
+
         todo_list = []
-        for line in lines:
-            line = line.strip()
-            # Preserve existing checklist items
-            if re.match(r'^\s*-\s*\[\s*[xX ]\s*\]\s+', line):
-                todo_list.append(line)
-            elif re.match(r'^\d+\.\s*', line):
-                # Remove the number and dot
-                task = re.sub(r'^\d+\.\s*', '', line)
-                todo_list.append(f'- [ ] {task}')
-            elif line:
-                todo_list.append(f'- [ ] {line}')
+        for step in self.plan.steps:
+            status = 'x' if step.is_done else ' '
+            todo_list.append(f'- [{status}] {step.description}')
         return '\n'.join(todo_list)
 
     async def _update_plan_progress(self):
@@ -612,25 +614,16 @@ class Agent(ABC):
                 last_observation = self.messages[-1].content
 
         prompt = UPDATE_PLAN_PROMPT.format(
-            plan=self.plan,
+            plan=self.plan.model_dump_json(indent=2),
             thought=last_thought,
             observation=last_observation
         )
-        updated_plan = await self._call_llm(ku.make_user_message(prompt), trace_id=self.task.id)
-        self.plan = self._sanitize_checklist(updated_plan)
-
-    def _sanitize_checklist(self, text: str) -> str:
-        """
-        Sanitize a string to only contain markdown checklist items.
-        """
-        lines = []
-        for line in text.splitlines():
-            s = line.strip()
-            if s.startswith(('- [ ]', '- [x]', '- [X]')):
-                # Normalize checked box to lowercase 'x'
-                s = s.replace('- [X]', '- [x]')
-                lines.append(s)
-        return '\n'.join(lines).strip()
+        response = await self._call_llm(
+            ku.make_user_message(prompt),
+            response_format=AgentPlan,
+            trace_id=self.task.id
+        )
+        self.plan = AgentPlan.model_validate_json(response)
 
     async def get_history_summary(self) -> str:
         """
@@ -727,7 +720,7 @@ class Agent(ABC):
             self,
             messages: list[dict],
             response_format: Optional[
-                Type[ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus]
+                Type[ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus | AgentPlan]
             ] = None,
             trace_id: Optional[str]=None,
     ) -> str:
@@ -949,7 +942,7 @@ class ReActAgent(Agent):
 
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
             # The thought & observation will get appended to the list of messages
-            async for update in self._think(plan=self.plan):
+            async for update in self._think(plan=self.current_plan):
                 yield update
             async for update in self._act():
                 yield update
