@@ -617,7 +617,20 @@ class Agent(ABC):
             observation=last_observation
         )
         updated_plan = await self._call_llm(ku.make_user_message(prompt), trace_id=self.task.id)
-        self.plan = updated_plan
+        self.plan = self._sanitize_checklist(updated_plan)
+
+    def _sanitize_checklist(self, text: str) -> str:
+        """
+        Sanitize a string to only contain markdown checklist items.
+        """
+        lines = []
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith(('- [ ]', '- [x]', '- [X]')):
+                # Normalize checked box to lowercase 'x'
+                s = s.replace('- [X]', '- [x]')
+                lines.append(s)
+        return '\n'.join(lines).strip()
 
     async def get_history_summary(self) -> str:
         """
