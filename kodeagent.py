@@ -554,6 +554,29 @@ class Agent(ABC):
             f'Agent: {self.name} ({self.id}); LLM: {self.model_name}; Tools: {self.tools}'
         )
 
+    async def create_plan(self) -> str:
+        """
+        Create a plan to solve the current task.
+        """
+        if not self.task:
+            raise ValueError('A task must be set before creating a plan.')
+
+        messages = ku.make_user_message(
+            text_content=AGENT_PLAN_PROMPT.format(
+                agent_type=self.__class__.__name__,
+                task=self.task.description,
+                task_files='\n'.join(self.task.files) if self.task.files else '[None]',
+            ),
+            files=self.task.files,
+        )
+        plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
+        return self._format_plan_as_todo(plan)
+
+    @property
+    def current_plan(self) -> Optional[str]:
+        """Returns the current plan for the task."""
+        return self.plan
+
     def _format_plan_as_todo(self, plan: str) -> str:
         """
         Convert a numbered list plan into a markdown checklist.
@@ -863,8 +886,6 @@ class ReActAgent(Agent):
 
         self.contextual = contextual
         self.use_planning = use_planning
-        self.plan: Optional[str] = None
-        self.final_answer_found: bool = False
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
 
@@ -894,17 +915,7 @@ class ReActAgent(Agent):
         )
 
         if self.use_planning:
-            messages = ku.make_user_message(
-                text_content=AGENT_PLAN_PROMPT.format(
-                    agent_type=self.__class__.__name__,
-                    task=self.task.description,
-                    task_files='\n'.join(self.task.files) if self.task.files else '[None]',
-                    # tool_names=self.get_tools_description(),
-                ),
-                files=self.task.files,
-            )
-            plan: str = await self._call_llm(messages=messages, trace_id=self.task.id)
-            self.plan = self._format_plan_as_todo(plan)
+            self.plan = await self.create_plan()
             yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
 
         for idx in range(self.max_iterations):
