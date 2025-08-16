@@ -375,6 +375,10 @@ Align your `Thought` with the steps from the plan, marking achieved steps mental
 </plan_description>
 </plan>
 
+<todo_list>
+{todo_list_content}
+</todo_list>
+
 <output_format>
 Adhere strictly to the following `Thought`-`Code`-`Observation` cycle.
 
@@ -490,11 +494,6 @@ Successful: True
 <current_interaction>
 {history}
 </current_interaction>
-
-<state_tracking>
-<steps_completed>{steps_completed}</steps_completed>
-<steps_pending>{steps_to_take}</steps_pending>
-</state_tracking>
 </prompt>
 '''
 
@@ -537,6 +536,9 @@ Optionally, here's a general plan (ignore if unavailable).
 Align your `Thought` with the steps from the plan, marking achieved steps mentally.
 {plan}
 
+<todo_list>
+{todo_list_content}
+</todo_list>
 
 # Output Format
 
@@ -701,15 +703,6 @@ DO NOT repeat steps that have already been completed successfully. If a step fai
 {history_summary}
 
 
-# State Tracking & Task Progression
-
-## Steps already completed
-
-{steps_completed}
-
-## Steps pending
-
-{steps_to_take}
 '''
 
 RELEVANT_TOOLS_PROMPT = '''
@@ -1269,11 +1262,8 @@ class CodeChatMessage(ChatMessage):
     answer: Optional[str] = pyd.Field(
         description='Final answer for the task; set only in the final step', default=None
     )
-    steps_completed: str = pyd.Field(
-        description='A list of steps related to the task successfully completed so far'
-    )
-    steps_to_take: str = pyd.Field(
-        description='A list of steps related to the task that are yet to be performed'
+    todo_list_content: str = pyd.Field(
+        description='A markdown checklist of tasks to do, with completed tasks marked with [x]'
     )
     successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
 
@@ -2188,12 +2178,9 @@ class CodeActAgent(ReActAgent):
                 prev_code_msg = m
                 break
 
-        steps_completed = prev_code_msg.steps_completed if (
-            hasattr(prev_code_msg, 'steps_completed')
-        ) else '[None]'
-        steps_to_take = prev_code_msg.steps_to_take if (
-            hasattr(prev_code_msg, 'steps_to_take')
-        ) else ''
+        todo_list_content = prev_code_msg.todo_list_content if (
+            prev_code_msg and hasattr(prev_code_msg, 'todo_list_content')
+        ) else 'The todo list is empty. Please start by creating a todo list in markdown format.'
 
         if self.filter_tools_for_task:
             relevant_tools = await self.get_relevant_tools(
@@ -2218,8 +2205,7 @@ class CodeActAgent(ReActAgent):
             tool_names=self.get_tools_description(relevant_tools),
             authorized_imports=','.join(self.allowed_imports),
             plan=plan or '<No plan provided; please plan yourself>',
-            steps_completed=steps_completed,
-            steps_to_take=steps_to_take,
+            todo_list_content=todo_list_content,
             **history_kwargs,
         )
         msg = await self._record_thought(message, CodeChatMessage)
