@@ -14,6 +14,7 @@ import subprocess as sp
 import sys
 import tempfile
 import textwrap
+import time
 import uuid
 import warnings
 from abc import ABC, abstractmethod
@@ -1729,12 +1730,15 @@ def llm_vision_support(model_names: list[str]) -> list[bool]:
     return status
 
 
-def print_response(response: AgentResponse):
+def print_response(response: AgentResponse, only_final: bool = True):
     """
     A utility function to print agent's response in a terminal, optionally with colors.
 
     Args:
         response: A response obtained from an agent.
+        only_final: If `True`, only print the final response from the agent. Otherwise, print
+         all responses, including intermediate steps and logs.
+         
     """
 
     if response['type'] == 'final':
@@ -1743,10 +1747,12 @@ def print_response(response: AgentResponse):
             if isinstance(response['value'], ChatMessage) else response['value']
         )
         rich.print(f'[blue][bold]Agent[/bold]: {msg}[/blue]\n')
-    elif response['type'] == 'log':
-        rich.print(f'[white]{response}[/white]')
-    else:
-        rich.print(f'{response}')
+
+    if not only_final:
+        if response['type'] == 'log':
+            rich.print(f'[white]{response}[/white]')
+        else:
+            rich.print(f'{response}')
 
 
 async def main():
@@ -1785,33 +1791,51 @@ async def main():
     )
 
     the_tasks = [
-        ('What is ten plus 15, raised to 2, expressed in words?', None),
-        ('What is the date today? Express it in words.', None),
+        # ('What is ten plus 15, raised to 2, expressed in words?', None),
+        # ('What is the date today? Express it in words.', None),
         (
-            'Which image has a purple background?',
+            f'Which image has a purple background? {time.time()}',
             [
                 'https://www.slideteam.net/media/catalog/product/cache/1280x720/p/r/process_of_natural_language_processing_training_ppt_slide01.jpg',
                 'https://cdn.prod.website-files.com/61a05ff14c09ecacc06eec05/66e8522cbe3d357b8434826a_ai-agents.jpg',
             ]
         ),
-        (
-            'What is four plus seven? Also, what are the festivals in Paris?'
-            ' How they differ from Kolkata?',
-            None
-        ),
-        (
-            'Summarize the notes',
-            ['https://web.stanford.edu/class/cs102/lectureslides/ClassificationSlides.pdf',]
-        ),
+        # (
+        #     'What is four plus seven? Also, what are the festivals in Paris?'
+        #     ' How they differ from Kolkata?',
+        #     None
+        # ),
+        # (
+        #     'Summarize the notes',
+        #     ['https://web.stanford.edu/class/cs102/lectureslides/ClassificationSlides.pdf',]
+        # ),
     ]
 
     print('ContextualAgent demo\n')
     for task, img_urls in the_tasks:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         # await code_agent.get_relevant_tools(task_description=task, task_files=img_urls)
-        async for response in code_agent.run(task, files=img_urls):
-            print_response(response)
-        print(code_agent.current_plan)
+        for _ in range(10):
+            code_agent = CodeActAgent(
+                name='Web agent',
+                model_name=model_name,
+                tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
+                run_env='host',
+                max_iterations=6,
+                litellm_params=litellm_params,
+                allowed_imports=[
+                    'os', 're', 'time', 'random', 'requests', 'tempfile',
+                    'ddgs', 'markitdown', 'youtube_transcript_api',
+                ],
+                pip_packages='ddgs~=9.5.2;"markitdown[all]";',
+                filter_tools_for_task=False,
+                contextual=False,
+                use_planning=True
+            )
+            async for response in code_agent.run(task, files=img_urls):
+                print_response(response)
+            print(code_agent.current_plan)
+            time.sleep(2)
         print('\n\n')
 
 
