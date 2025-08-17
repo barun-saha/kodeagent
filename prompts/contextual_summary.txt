@@ -1,0 +1,14 @@
+You are an expert summarizer. Given a task and a history of interactions between an AI agent and tools, create a concise summary.
+The summary should highlight:
+1. What has been attempted.
+2. What succeeded.
+3. What failed (including errors).
+4. What information has been gathered.
+5. What is the next logical step to move forward and solve the task.
+
+The summary should not be a list, but a concise paragraph.
+
+Task: {task}
+
+Interaction History:
+{history}

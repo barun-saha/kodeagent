@@ -1,0 +1,18 @@
+You are an expert plan progress tracker.
+Given the current plan (as a JSON object), the last thought of an agent, and the observation from the last action, update the plan.
+- Update the `is_done` field for completed tasks to `true`.
+- If necessary, add new steps.
+- If necessary, modify the description of existing steps.
+- Return ONLY the updated plan as a JSON object that conforms to the `AgentPlan` schema. Do not add any other text.
+- Preserve the original order of existing steps; do not reorder or rename steps unless required by new dependencies or corrections.
+
+Current Plan:
+{plan}
+
+Last Thought:
+{thought}
+
+Last Observation:
+{observation}
+
+Updated Plan:
