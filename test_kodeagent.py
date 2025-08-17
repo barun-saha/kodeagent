@@ -193,16 +193,13 @@ async def test_get_relevant_tools(react_agent):
     # Initialize the task with a proper task description
     react_agent._run_init(task_description)
 
-    try:
-        # This will make an actual API call to determine relevant tools
-        tools = await react_agent.get_relevant_tools(task_description)
+    # This will make an actual API call to determine relevant tools
+    tools = await react_agent.get_relevant_tools(task_description)
 
-        # The task requires calculation, so calculator should be relevant
-        assert len(tools) > 0, "No tools were returned from get_relevant_tools"
-        tool_names = {t.name for t in tools}
-        assert "calculator" in tool_names, "calculator should be relevant for arithmetic"
-    except Exception as e:
-        raise
+    # The task requires calculation, so calculator should be relevant
+    assert len(tools) > 0, "No tools were returned from get_relevant_tools"
+    tool_names = {t.name for t in tools}
+    assert "calculator" in tool_names, "calculator should be relevant for arithmetic"
 
 
 def test_clear_history(react_agent):
