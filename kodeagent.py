@@ -756,6 +756,13 @@ class Agent(ABC):
         Raises:
             ValueError: If the LLM returns an empty or invalid response body.
         """
+        if response_format:
+            schema_prompt = "You must generate a response based on the given output schema."
+            if messages and messages[0].get('role') == 'system':
+                messages[0]['content'] += f'\n{schema_prompt}'
+            else:
+                messages.insert(0, {'role': 'system', 'content': schema_prompt})
+
         params = {
             'model': self.model_name,
             'messages': messages,
