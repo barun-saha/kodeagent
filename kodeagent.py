@@ -56,8 +56,19 @@ litellm.failure_callback = ['langfuse']
 
 def _read_prompt(filename: str) -> str:
     """Reads a prompt from the prompts directory."""
-    with open(os.path.join(os.path.dirname(__file__), 'prompts', filename), 'r', encoding='utf-8') as f:
-        return f.read()
+    prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', filename)
+
+    try:
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError as fnfe:
+        raise FileNotFoundError(
+            f'Prompt file `{filename}` not found in the prompts directory: {prompt_path}'
+        ) from fnfe
+    except Exception as e:
+        raise RuntimeError(
+            f'Error reading prompt file `{filename}`: {e}'
+        ) from e
 
 
 REACT_PROMPT = _read_prompt('react.txt')
