@@ -110,7 +110,7 @@ Successful: True
 Thought: The current language of the user is: English. I need to get the populations for both cities and compare them: I will use the tool `search` for this purpose. Since search results are important for this task, I'll print them.
 Code: ```py
 for city in ['Guangzhou', 'Shanghai']:
-print(f'Population {{city}}:', search(f'{{city}} population'))
+    print(f'Population {{city}}:', search(f'{{city}} population'))
 ```
 Observation: Population Guangzhou: ['Guangzhou has a population of 15 million inhabitants as of 2021.']
 Population Shanghai: 26 million (2019)

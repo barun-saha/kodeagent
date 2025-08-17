@@ -90,7 +90,7 @@ Answer: [Your explanation in the user's language]
 Successful: False
 </failure_state>
 
-The Successful:  flag should only be `True` for a completed task.
+The `Successful` flag should only be `True` for a completed task.
 Craft your final answer by carefully reading the instructions from the task.
 
 Your response **MUST** be a single, valid JSON object adhering to the given schema.
@@ -114,7 +114,7 @@ Which city has the highest population: Guangzhou or Shanghai?
 Thought: The current language of the user is: English. I need to get the populations for both cities and compare them: I will use the tool `search` for this purpose. Since search results are important for this task, I'll print them.
 Code: ```py
 for city in ['Guangzhou', 'Shanghai']:
-print(f'Population {{city}}:', search(f'{{city}} population'))
+    print(f'Population {{city}}:', search(f'{{city}} population'))
 ```
 Observation: Population Guangzhou: ['Guangzhou has a population of 15 million inhabitants as of 2021.']
 Population Shanghai: 26 million (2019)
@@ -125,7 +125,7 @@ Successful: True
 </example>
 
 <example>
-Generate a video of the moon.]
+Generate a video of the moon.
 
 Thought: The user has asked to generate a video of the moon. Unfortunately, I do not have any tool that can generate a video. So, I can't solve this task.
 Answer: Unfortunately, I lack the ability to solve this task at this moment. May I help you with something else?
