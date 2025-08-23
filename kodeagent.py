@@ -732,6 +732,26 @@ class Agent(ABC):
         self.plan = None
         self.plan_stalled = False
 
+    async def _salvage_response(self) -> AsyncIterator[AgentResponse]:
+        """
+        When an agent fails to find an answer in the stipulated number of steps, this method
+        can be called to salvage what little information could be gathered.
+        """
+        prompt = SALVATION_PROMPT.format(
+            task=self.task.description,
+            task_files=self.task.files,
+            history=self.get_history(start_idx=self.msg_idx_of_new_task)
+        )
+        response = await self._call_llm(
+            ku.make_user_message(prompt), trace_id=self.task.id
+        )
+        yield self.response(
+            type='final',
+            channel=self.__class__.__name__,
+            value=response,
+            metadata={'salvage': True}
+        )
+
     @abstractmethod
     async def run(
             self,
@@ -996,14 +1016,15 @@ class ReActAgent(Agent):
             print('-' * 30)
 
         if not self.final_answer_found:
-            yield self.response(
-                rtype='final',
-                value=(
-                    f'Sorry, I failed to get a complete answer'
-                    f' even after {self.max_iterations} steps!'
-                ),
-                channel='run'
+            failure_msg = (
+                f'Sorry, I failed to get a complete answer'
+                f' even after {self.max_iterations} steps!'
             )
+            self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
+            async for update in self._salvage_response():
+                self.messages[-1].content += f"\n\nHere's a summary of my progress:\n{update['value']}"
+                update['value'] = self.messages[-1].content
+                yield update
         else:
             # Update the plan one last time after the final answer is found
             if self.use_planning and self.plan:
@@ -1203,6 +1224,36 @@ class ReActAgent(Agent):
                 history += f'Observation: {msg.content}\n\n'
 
         return history
+
+    def trace(self) -> str:
+        """
+        Provide a trace of the agent's activities for the current task.
+        The trace can be used for debugging.
+        """
+        trace_log = []
+        for msg in self.messages[self.msg_idx_of_new_task:]:
+            if isinstance(msg, CodeChatMessage):
+                trace_log.append(f"Thought: {msg.thought}")
+                if msg.code:
+                    trace_log.append(f"Code:\n{msg.code}")
+            elif msg.role == 'tool':
+                trace_log.append(f"Observation: {msg.content}")
+        return "\n".join(trace_log)
+
+    def trace(self) -> str:
+        """
+        Provide a trace of the agent's activities for the current task.
+        The trace can be used for debugging.
+        """
+        trace_log = []
+        for msg in self.messages[self.msg_idx_of_new_task:]:
+            if isinstance(msg, ReActChatMessage):
+                trace_log.append(f"Thought: {msg.thought}")
+                if msg.action:
+                    trace_log.append(f"Action: {msg.action}({msg.args})")
+            elif msg.role == 'tool':
+                trace_log.append(f"Observation: {msg.content}")
+        return "\n".join(trace_log)
 
 
 # The environments where LLM-generated code can be executed
@@ -1732,24 +1783,6 @@ class SupervisorAgent(Agent):
         )
 
         return DelegatedTaskStatus.model_validate_json(response)
-
-    async def _salvage_response(self):
-        """
-        The supervisor has failed to return an answer in stipulated number of steps. This is
-        a final result to save face and try salvage what little information could be!
-        """
-        prompt = SALVATION_PROMPT.format(
-            task=self.task,
-            task_files=self.task.files,
-            history=self.get_history()
-        )
-        response = await self._call_llm(ku.make_user_message(prompt), trace_id=self.task.id)
-        yield AgentResponse(
-            type='final',
-            channel='supervisor',
-            value=response,
-            metadata={'salvage': True}
-        )
 
 
 def llm_vision_support(model_names: list[str]) -> list[bool]:
