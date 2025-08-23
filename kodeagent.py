@@ -733,25 +733,21 @@ class Agent(ABC):
         self.plan = None
         self.plan_stalled = False
 
-    async def salvage_response(self) -> AsyncIterator[AgentResponse]:
+    async def salvage_response(self) -> str:
         """
         When an agent fails to find an answer in the stipulated number of steps, this method
         can be called to salvage what little information could be gathered.
+
+        Returns:
+            A response from the LLM based on the task and the history.
         """
         prompt = SALVAGE_RESPONSE_PROMPT.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             history=self.get_history(start_idx=self.msg_idx_of_new_task)
         )
-        response = await self._call_llm(
-            ku.make_user_message(prompt), trace_id=self.task.id
-        )
-        yield self.response(
-            rtype='final',
-            channel=self.__class__.__name__,
-            value=response,
-            metadata={'salvage': True}
-        )
+        response = await self._call_llm(ku.make_user_message(prompt), trace_id=self.task.id)
+        return response
 
     def trace(self) -> str:
         """
@@ -1045,12 +1041,8 @@ class ReActAgent(Agent):
                 failure_msg += f"\n\nHere's a trace of my activities:\n{trace_info}"
 
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
-            async for update in self.salvage_response():
-                self.messages[-1].content += (
-                    f"\n\nHere's a summary of my progress for this task:\n{update['value']}"
-                )
-                update['value'] = self.messages[-1].content
-                yield update
+            print("\n\nHere's a summary of my progress for this task:\n")
+            print(await self.salvage_response())
         else:
             # Update the plan one last time after the final answer is found
             if self.use_planning and self.plan:
