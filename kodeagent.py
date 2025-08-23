@@ -1004,6 +1004,7 @@ class ReActAgent(Agent):
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
             plan=self.current_plan or '<No plan provided; please plan yourself>',
+            visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
         msg = await self._record_thought(message, ReActChatMessage)
