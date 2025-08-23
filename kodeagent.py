@@ -78,10 +78,10 @@ CODE_ACT_AGENT_PROMPT = _read_prompt('code_act_agent.txt')
 RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
 AGENT_PLAN_PROMPT = _read_prompt('agent_plan.txt')
 UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')
+SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
+# Unused currently
 SUPERVISOR_TASK_PROMPT = _read_prompt('supervisor_task.txt')
 SUPERVISOR_TASK_CHECK_PROMPT = _read_prompt('supervisor_task_check.txt')
-SALVATION_PROMPT = _read_prompt('salvation.txt')
-SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
 CONTEXTUAL_SUMMARY_PROMPT = _read_prompt('contextual_summary.txt')
 
 VISUAL_CAPABILITY = '''
@@ -733,7 +733,7 @@ class Agent(ABC):
         self.plan = None
         self.plan_stalled = False
 
-    async def _salvage_response(self) -> AsyncIterator[AgentResponse]:
+    async def salvage_response(self) -> AsyncIterator[AgentResponse]:
         """
         When an agent fails to find an answer in the stipulated number of steps, this method
         can be called to salvage what little information could be gathered.
@@ -1045,8 +1045,10 @@ class ReActAgent(Agent):
                 failure_msg += f"\n\nHere's a trace of my activities:\n{trace_info}"
 
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
-            async for update in self._salvage_response():
-                self.messages[-1].content += f"\n\nHere's a summary of my progress:\n{update['value']}"
+            async for update in self.salvage_response():
+                self.messages[-1].content += (
+                    f"\n\nHere's a summary of my progress for this task:\n{update['value']}"
+                )
                 update['value'] = self.messages[-1].content
                 yield update
         else:
@@ -1755,7 +1757,7 @@ class SupervisorAgent(Agent):
                 )
         # END of supervisor loop
         # The supervisor has exhausted all attempts, but a final answer was not found/returned
-        async for update in self._salvage_response():
+        async for update in self.salvage_response():
             yield update
 
     async def _check_if_task_done(self, task: str, evidence: str) -> DelegatedTaskStatus:
