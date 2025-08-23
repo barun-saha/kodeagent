@@ -1049,7 +1049,7 @@ class ReActAgent(Agent):
                 self.add_to_history(msg)
                 return msg
 
-            except pydantic_core._pydantic_core.ValidationError:
+            except (pyd.ValidationError, pydantic_core.ValidationError):
                 # This can happen if the LLM response is not valid JSON
                 logger.error('LLM response validation error in _record_thought(). Retrying...')
                 await asyncio.sleep(random.uniform(0.5, 1.5))
