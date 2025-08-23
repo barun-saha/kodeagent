@@ -90,6 +90,13 @@ VISUAL_CAPABILITY = '''
     (e.g., OCR, analyzing a video, image editing, or comparing thousands of images)
     OR if your own visual capabilities fail.
 '''
+PLAN_STALLED_WARNING = (
+    '⚠️ CRITICAL WARNING: The agent plan appears to be stalled! The task seems to have made'
+    ' no progress. You must immediately perform a self-correction. Your next thought must diagnose'
+    ' the reason for the stall and propose a significantly different approach.'
+    ' DO NOT REPEAT THE PREVIOUS ATTEMPTS.'
+)
+PLAN_STALLED_THRESHOLD = 3
 
 
 def tool(func: Callable) -> Callable:
@@ -577,6 +584,7 @@ class Agent(ABC):
         self.plan: Optional[AgentPlan] = None
 
         self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
+        self.plan_stalled = False
 
     def __str__(self):
         return (
@@ -945,7 +953,6 @@ class ReActAgent(Agent):
             An update from the agent.
         """
         self._run_init(task, files, task_id)
-        self.plan_stalled = False
 
         yield self.response(
             rtype='log',
@@ -978,8 +985,9 @@ class ReActAgent(Agent):
                     plan_stalled_counter += 1
                 else:
                     plan_stalled_counter = 0
+                    self.plan_stalled = False
 
-                if plan_stalled_counter > 3:
+                if plan_stalled_counter > PLAN_STALLED_THRESHOLD:
                     self.plan_stalled = True
             print('-' * 30)
 
@@ -1025,10 +1033,8 @@ class ReActAgent(Agent):
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
         if self.plan_stalled:
-            message += (
-                '\n\nATTENTION: THE PLAN FOR THE TASK DID NOT PROGRESS IN THE LAST 3 ATTEMPTS!'
-                ' tAKE YOUR NEXT STEP VERY CAREFULLY, FOLLOWING THE PLAN.'
-            )
+            logger.debug('Plan appears to be stalled...adding warning to prompt')
+            message += f'\n\n{PLAN_STALLED_WARNING}'
         msg = await self._record_thought(message, ReActChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
@@ -1488,10 +1494,8 @@ class CodeActAgent(ReActAgent):
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
         if self.plan_stalled:
-            message += (
-                '\n\nATTENTION: THE PLAN FOR THE TASK DID NOT PROGRESS IN THE LAST 3 ATTEMPTS!'
-                ' tAKE YOUR NEXT STEP VERY CAREFULLY, FOLLOWING THE PLAN.'
-            )
+            logger.debug('Plan appears to be stalled...adding warning to prompt')
+            message += f'\n\n{PLAN_STALLED_WARNING}'
         msg = await self._record_thought(message, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
@@ -1847,7 +1851,10 @@ async def main():
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in code_agent.run(f'{time.time()} {task}', files=img_urls):
             print_response(response)
-        print(f'Plan:\n{code_agent.current_plan}')
+
+        if code_agent.current_plan:
+            print(f'Plan:\n{code_agent.current_plan}')
+
         await asyncio.sleep(random.uniform(0.15, 0.55))
         print('\n\n')
 
