@@ -81,6 +81,7 @@ UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')
 SUPERVISOR_TASK_PROMPT = _read_prompt('supervisor_task.txt')
 SUPERVISOR_TASK_CHECK_PROMPT = _read_prompt('supervisor_task_check.txt')
 SALVATION_PROMPT = _read_prompt('salvation.txt')
+SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
 CONTEXTUAL_SUMMARY_PROMPT = _read_prompt('contextual_summary.txt')
 
 VISUAL_CAPABILITY = '''
@@ -737,9 +738,9 @@ class Agent(ABC):
         When an agent fails to find an answer in the stipulated number of steps, this method
         can be called to salvage what little information could be gathered.
         """
-        prompt = SALVATION_PROMPT.format(
+        prompt = SALVAGE_RESPONSE_PROMPT.format(
             task=self.task.description,
-            task_files=self.task.files,
+            task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             history=self.get_history(start_idx=self.msg_idx_of_new_task)
         )
         response = await self._call_llm(
@@ -1225,20 +1226,6 @@ class ReActAgent(Agent):
 
         return history
 
-    def trace(self) -> str:
-        """
-        Provide a trace of the agent's activities for the current task.
-        The trace can be used for debugging.
-        """
-        trace_log = []
-        for msg in self.messages[self.msg_idx_of_new_task:]:
-            if isinstance(msg, CodeChatMessage):
-                trace_log.append(f"Thought: {msg.thought}")
-                if msg.code:
-                    trace_log.append(f"Code:\n{msg.code}")
-            elif msg.role == 'tool':
-                trace_log.append(f"Observation: {msg.content}")
-        return "\n".join(trace_log)
 
     def trace(self) -> str:
         """
@@ -1521,6 +1508,21 @@ class CodeActAgent(ReActAgent):
                 history += f'Observation: {msg.content}\n\n'
 
         return history
+
+    def trace(self) -> str:
+        """
+        Provide a trace of the agent's activities for the current task.
+        The trace can be used for debugging.
+        """
+        trace_log = []
+        for msg in self.messages[self.msg_idx_of_new_task:]:
+            if isinstance(msg, CodeChatMessage):
+                trace_log.append(f"Thought: {msg.thought}")
+                if msg.code:
+                    trace_log.append(f"Code:\n{msg.code}")
+            elif msg.role == 'tool':
+                trace_log.append(f"Observation: {msg.content}")
+        return "\n".join(trace_log)
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """

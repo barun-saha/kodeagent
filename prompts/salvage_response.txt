@@ -1,0 +1,14 @@
+You were assigned the following task but failed to complete it in the given number of steps.
+
+## Task
+{task}
+
+## Task Files
+{task_files}
+
+However, you have performed some steps and gathered some information. Based on the history of your attempts, provide a concise summary of what you have managed to accomplish. List any facts, data, or partial solutions you have found.
+
+Do not apologize or mention your failure. Your response should focus only on the useful information you have gathered that might help the user.
+
+## History
+{history}
