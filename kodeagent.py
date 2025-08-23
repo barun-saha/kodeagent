@@ -19,6 +19,7 @@ import time
 import uuid
 import warnings
 from abc import ABC, abstractmethod
+from datetime import datetime
 from functools import wraps
 from json import JSONDecodeError
 from typing import (
@@ -979,6 +980,10 @@ class ReActAgent(Agent):
                 ),
                 channel='run'
             )
+        else:
+            # Update the plan one last time after the final answer is found
+            if self.use_planning and self.plan:
+                await self._update_plan_progress()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """
@@ -1055,10 +1060,11 @@ class ReActAgent(Agent):
                 await asyncio.sleep(random.uniform(0.5, 1.5))
 
                 # Add an explicit observation to the prompt's message history
+                # Add timestamp to avoid potential cached responses
                 feedback_message = (
-                    'Attention: Parsing failed because you did not generate the response'
+                    'Error: Parsing failed because you did not generate the response'
                     ' following the given JSON schema!!! Please ensure your response is a valid'
-                    ' JSON object that follows the specified schema.'
+                    f' JSON object that follows the specified schema. [Timestamp={datetime.now()}]'
                 )
                 prompt.extend(ku.make_user_message(text_content=feedback_message))
                 continue
@@ -1774,7 +1780,8 @@ async def main():
         tools=[calculator, ],
         max_iterations=3,
         litellm_params=litellm_params,
-        filter_tools_for_task=True,
+        filter_tools_for_task=False,
+        use_planning=True
     )
     code_agent = CodeActAgent(
         name='Web agent',
@@ -1818,8 +1825,8 @@ async def main():
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in code_agent.run(f'{time.time()} {task}', files=img_urls):
             print_response(response)
-        print(code_agent.current_plan)
-        await asyncio.sleep(random.uniform(0.25, 0.5))
+        print(f'Plan:\n{code_agent.current_plan}')
+        await asyncio.sleep(random.uniform(0.15, 0.55))
         print('\n\n')
 
 
