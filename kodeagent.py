@@ -32,7 +32,6 @@ from typing import (
     TypedDict,
     Union,
 )
-
 import json_repair
 import litellm
 import pydantic as pyd
@@ -78,9 +77,8 @@ CODE_ACT_AGENT_PROMPT = _read_prompt('code_act_agent.txt')
 RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
 AGENT_PLAN_PROMPT = _read_prompt('agent_plan.txt')
 UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')
-SUPERVISOR_TASK_PROMPT = _read_prompt('supervisor_task.txt')
-SUPERVISOR_TASK_CHECK_PROMPT = _read_prompt('supervisor_task_check.txt')
-SALVATION_PROMPT = _read_prompt('salvation.txt')
+SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
+# Unused currently
 CONTEXTUAL_SUMMARY_PROMPT = _read_prompt('contextual_summary.txt')
 
 VISUAL_CAPABILITY = '''
@@ -732,6 +730,44 @@ class Agent(ABC):
         self.plan = None
         self.plan_stalled = False
 
+    async def salvage_response(self) -> str:
+        """
+        When an agent fails to find an answer in the stipulated number of steps, this method
+        can be called to salvage what little information could be gathered.
+
+        Returns:
+            A response from the LLM based on the task and the history.
+        """
+        prompt = SALVAGE_RESPONSE_PROMPT.format(
+            task=self.task.description,
+            task_files='\n'.join(self.task.files) if self.task.files else '[None]',
+            history=self.get_history(start_idx=self.msg_idx_of_new_task)
+        )
+        response = await self._call_llm(ku.make_user_message(prompt), trace_id=self.task.id)
+        return response
+
+    def trace(self) -> str:
+        """
+        Provide a trace of the agent's activities for the current task.
+        The trace can be used for debugging.
+
+        Returns:
+            A string trace of the agent's thoughts, actions, and observations.
+        """
+        trace_log = []
+        for msg in self.messages[self.msg_idx_of_new_task:]:
+            if isinstance(msg, ReActChatMessage):
+                trace_log.append(f"Thought: {msg.thought}")
+                if msg.action:
+                    trace_log.append(f"Action: {msg.action}({msg.args})")
+            elif isinstance(msg, CodeChatMessage):
+                trace_log.append(f"Thought: {msg.thought}")
+                if msg.code:
+                    trace_log.append(f"Code:\n{msg.code}")
+            elif msg.role == 'tool':
+                trace_log.append(f"Observation: {msg.content}")
+        return "\n".join(trace_log)
+
     @abstractmethod
     async def run(
             self,
@@ -895,6 +931,9 @@ class Agent(ABC):
         return '\n'.join([f'[{msg.role}]: {msg.content}' for msg in self.messages[start_idx:]])
 
     def clear_history(self):
+        """
+        Clear the agent's message history.
+        """
         self.messages = []
 
 
@@ -996,14 +1035,17 @@ class ReActAgent(Agent):
             print('-' * 30)
 
         if not self.final_answer_found:
-            yield self.response(
-                rtype='final',
-                value=(
-                    f'Sorry, I failed to get a complete answer'
-                    f' even after {self.max_iterations} steps!'
-                ),
-                channel='run'
+            failure_msg = (
+                f'Sorry, I failed to get a complete answer'
+                f' even after {self.max_iterations} steps!'
             )
+            trace_info = self.trace()
+            if trace_info:
+                failure_msg += f"\n\nHere's a trace of my activities:\n{trace_info}"
+
+            self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
+            print("\n\nHere's a summary of my progress for this task:\n")
+            print(await self.salvage_response())
         else:
             # Update the plan one last time after the final answer is found
             if self.use_planning and self.plan:
@@ -1526,7 +1568,6 @@ class CodeActAgent(ReActAgent):
                         '* Error: incorrect response generated. Must have values for the `answer`'
                         ' or the `action`, `args`, and `thought` fields. Please respond strictly'
                         ' following the CodeChatMessage schema.'
-                        
                     )
                 )
             )
@@ -1573,183 +1614,6 @@ class CodeActAgent(ReActAgent):
                     channel='_act',
                     metadata={'is_error': True}
                 )
-
-
-class SupervisorAgent(Agent):
-    """
-    A supervising agency, consisting of multiple agents, which can solve tasks via delegations.
-
-    WARNING: SupervisorAgent is an experimental feature and may not work as expected.
-    """
-    def __init__(self, model_name: str, agents: list[Agent], name: str, max_iterations: int = 20):
-        """
-        Create a supervisor who delegates tasks to a list of agents.
-
-        Args:
-            model_name: The name of the LLM to be used.
-            agents: A list of agents available to the supervisor.
-            name: The name of the supervisor agent.
-            max_iterations: The max no. of iterations/attempted delegations made by the supervisor.
-        """
-        super().__init__(name=name, model_name=model_name, max_iterations=max_iterations)
-        self.agents = agents
-
-    async def run(
-            self,
-            task: str,
-            files: Optional[list[str]] = None,
-            task_id: Optional[str] = None
-    ) -> AsyncIterator[AgentResponse]:
-        """
-        Solve a task using the supervisor agent/agency.
-
-        Args:
-            task: A description of the task.
-            files: An optional list of file paths or URLs.
-            task_id: (Optional) An ID for the task, if provided by the caller.
-
-        Yields:
-            An update from the agency.
-        """
-        self._run_init(task, files, task_id)
-
-        agents_desc = ''
-        for idx, agent in enumerate(self.agents):
-            agents_desc += f'Agent# {idx}\n{agent.purpose}\n'
-
-        for _ in range(self.max_iterations):
-            prompt = SUPERVISOR_TASK_PROMPT.format(
-                task=task,
-                task_files=files,
-                agents=agents_desc,
-                history=self.get_history(start_idx=self.msg_idx_of_new_task),
-            ).strip()
-            update = await self._call_llm(
-                ku.make_user_message(text_content=prompt, files=files),
-                SupervisorTaskMessage,
-                trace_id=self.task.id,
-            )
-            task_msg: SupervisorTaskMessage = SupervisorTaskMessage.model_validate_json(update)
-
-            if task_msg.task_complete:
-                # Currently, this is the ONLY way to stop the supervisor's loop
-                # In some cases, it is possible that `task_complete` is not set, and the supervisor
-                # keeps repeating the same task
-                yield AgentResponse(
-                    type='final',
-                    channel='supervisor',
-                    value=task_msg.final_answer,
-                    metadata=None
-                )
-                self.add_to_history(
-                    message=ChatMessage(role='assistant', content=task_msg.final_answer)
-                )
-                return
-
-            content = (
-                f'Delegating to Agent# {task_msg.agent_id} //'
-                f' Sub-task: {task_msg.task} //'
-                f' Files: {task_msg.image_files} //'
-                f' Facts collected: {task_msg.facts_available}'
-            )
-            yield AgentResponse(type='log', channel='sup:run', value=content, metadata=None)
-            self.add_to_history(message=ChatMessage(role='assistant', content=content))
-
-            updates: list[str] = []
-            tools_evidence: list[tuple[str, dict]] = []
-
-            async for update in self.agents[task_msg.agent_id].run(  # type: AgentResponse
-                    task=task_msg.task,
-                    files=task_msg.image_files
-            ):
-                yield update
-
-                if update['type'] == 'final':
-                    yield AgentResponse(
-                        type='step',
-                        channel='supervisor',
-                        value=update['value'],
-                        metadata=None
-                    )
-                    updates = [update['value']]
-                elif update['type'] == 'step':
-                    updates.append(update['value'])
-                    metadata = update['metadata']
-                    if metadata:
-                        tools_evidence.append(
-                            (metadata.get('tool', None), metadata.get('args', None))
-                        )
-
-            updates = [
-                f'Agent\'s attempt {idx}: {v.content if isinstance(v, ChatMessage) else v}'
-                for idx, v in enumerate(updates, start=1)
-            ]
-            evidence = '\n'.join(updates)
-            tools_evidence: list[tuple[str, dict]] = [(t, a) for (t, a) in tools_evidence if t]
-            evidence += '\n\nTool usage evidence by the agent:\n'
-            evidence += '\n'.join([f'Tool: {t} // args: {a}' for (t, a) in tools_evidence])
-            status = await self._check_if_task_done(task_msg.task, evidence)
-            if status.status:
-                self.add_to_history(
-                    message=ChatMessage(
-                        role='user',
-                        content=(
-                            f'I can accept the result: `{status.final_answer}`'
-                            '\nYou can proceed to the next subtask, if any.'
-                        )
-                    )
-                )
-            else:
-                feedback = (
-                    f'\nThe result does not look good: {status.final_answer}'
-                    f'## Why the task result is incomplete:\n{status.reason}'
-                    f'\n## Here\'s what can be done to fix it:\n{status.how_to_fix}'
-                )
-                self.add_to_history(
-                    message=ChatMessage(role='user', content='\n'.join(updates) + feedback)
-                )
-        # END of supervisor loop
-        # The supervisor has exhausted all attempts, but a final answer was not found/returned
-        async for update in self._salvage_response():
-            yield update
-
-    async def _check_if_task_done(self, task: str, evidence: str) -> DelegatedTaskStatus:
-        """
-        Check if a task delegated to an agent has reached completion.
-
-        Args:
-            task: Delegated task description.
-            evidence: Evidence (the steps performed so far).
-
-        Return:
-             The delegated task status.
-        """
-        prompt = SUPERVISOR_TASK_CHECK_PROMPT.format(task=task, response=evidence)
-        response = await self._call_llm(
-            ku.make_user_message(prompt),
-            DelegatedTaskStatus,
-            trace_id=self.task.id,
-        )
-
-        return DelegatedTaskStatus.model_validate_json(response)
-
-    async def _salvage_response(self):
-        """
-        The supervisor has failed to return an answer in stipulated number of steps. This is
-        a final result to save face and try salvage what little information could be!
-        """
-        prompt = SALVATION_PROMPT.format(
-            task=self.task,
-            task_files=self.task.files,
-            history=self.get_history()
-        )
-        response = await self._call_llm(ku.make_user_message(prompt), trace_id=self.task.id)
-        yield AgentResponse(
-            type='final',
-            channel='supervisor',
-            value=response,
-            metadata={'salvage': True}
-        )
 
 
 def llm_vision_support(model_names: list[str]) -> list[bool]:
@@ -1800,19 +1664,16 @@ async def main():
     """
     litellm_params = {'temperature': 0}
     model_name = 'gemini/gemini-2.0-flash-lite'
-    # model_name = 'vertex_ai/gemini-2.0-flash'
-    # model_name = 'azure/gpt-4.1-mini'
-    # model_name = 'azure/gpt-4o-mini'
 
-    react_agent = ReActAgent(
-        name='Maths agent',
-        model_name=model_name,
-        tools=[calculator, ],
-        max_iterations=3,
-        litellm_params=litellm_params,
-        filter_tools_for_task=False,
-        use_planning=True
-    )
+    # react_agent = ReActAgent(
+    #     name='Maths agent',
+    #     model_name=model_name,
+    #     tools=[calculator, ],
+    #     max_iterations=3,
+    #     litellm_params=litellm_params,
+    #     filter_tools_for_task=False,
+    #     use_planning=True
+    # )
     code_agent = CodeActAgent(
         name='Web agent',
         model_name=model_name,
