@@ -945,6 +945,7 @@ class ReActAgent(Agent):
             An update from the agent.
         """
         self._run_init(task, files, task_id)
+        self.plan_stalled = False
 
         yield self.response(
             rtype='log',
@@ -956,6 +957,7 @@ class ReActAgent(Agent):
             await self.create_plan()
             yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
 
+        plan_stalled_counter = 0
         for idx in range(self.max_iterations):
             if self.final_answer_found:
                 break
@@ -968,7 +970,17 @@ class ReActAgent(Agent):
                 yield update
 
             if self.use_planning and self.plan:
+                plan_before_update = self.plan.model_dump_json()
                 await self._update_plan_progress()
+                plan_after_update = self.plan.model_dump_json()
+
+                if plan_before_update == plan_after_update:
+                    plan_stalled_counter += 1
+                else:
+                    plan_stalled_counter = 0
+
+                if plan_stalled_counter > 3:
+                    self.plan_stalled = True
             print('-' * 30)
 
         if not self.final_answer_found:
@@ -1012,6 +1024,11 @@ class ReActAgent(Agent):
             visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
+        if self.plan_stalled:
+            message += (
+                '\n\nATTENTION: THE PLAN FOR THE TASK DID NOT PROGRESS IN THE LAST 3 ATTEMPTS!'
+                ' tAKE YOUR NEXT STEP VERY CAREFULLY, FOLLOWING THE PLAN.'
+            )
         msg = await self._record_thought(message, ReActChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
@@ -1470,6 +1487,11 @@ class CodeActAgent(ReActAgent):
             visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
+        if self.plan_stalled:
+            message += (
+                '\n\nATTENTION: THE PLAN FOR THE TASK DID NOT PROGRESS IN THE LAST 3 ATTEMPTS!'
+                ' tAKE YOUR NEXT STEP VERY CAREFULLY, FOLLOWING THE PLAN.'
+            )
         msg = await self._record_thought(message, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
