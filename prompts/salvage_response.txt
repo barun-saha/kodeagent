@@ -1,4 +1,4 @@
-You were assigned the following task but failed to complete it in the given number of steps.
+You attempted the following task and reached the step limit. Provide a concise, progress-focused recap.
 
 ## Task
 {task}

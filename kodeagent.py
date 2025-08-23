@@ -753,6 +753,9 @@ class Agent(ABC):
         """
         Provide a trace of the agent's activities for the current task.
         The trace can be used for debugging.
+
+        Returns:
+            A string trace of the agent's thoughts, actions, and observations.
         """
         trace_log = []
         for msg in self.messages[self.msg_idx_of_new_task:]:
