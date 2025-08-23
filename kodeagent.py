@@ -8,6 +8,7 @@ import inspect
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import subprocess as sp
@@ -34,6 +35,7 @@ from typing import (
 import json_repair
 import litellm
 import pydantic as pyd
+import pydantic_core
 import rich
 from dotenv import load_dotenv
 
@@ -47,10 +49,8 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-# Get a logger for the current module
 logger = logging.getLogger('KodeAgent')
 
-# litellm._turn_on_debug()
 litellm.success_callback = ['langfuse']
 litellm.failure_callback = ['langfuse']
 
@@ -83,6 +83,14 @@ SUPERVISOR_TASK_PROMPT = _read_prompt('supervisor_task.txt')
 SUPERVISOR_TASK_CHECK_PROMPT = _read_prompt('supervisor_task_check.txt')
 SALVATION_PROMPT = _read_prompt('salvation.txt')
 CONTEXTUAL_SUMMARY_PROMPT = _read_prompt('contextual_summary.txt')
+
+VISUAL_CAPABILITY = '''
+5. **Innate Visual Intelligence**: Use your in-built capabilities to answer to basic visual tasks
+    with images files or URLs, such as image analysis and objects counting. You can process multiple
+    image files/URLs together. Use a tool or write code ONLY when the visual task is complex
+    (e.g., OCR, analyzing a video, image editing, or comparing thousands of images)
+    OR if your own visual capabilities fail.
+'''
 
 
 def tool(func: Callable) -> Callable:
@@ -533,7 +541,6 @@ class Agent(ABC):
             name: str,
             model_name: str,
             description: Optional[str] = None,
-            vision_model_name: Optional[str] = None,
             tools: Optional[list[Callable]] = None,
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
@@ -546,7 +553,6 @@ class Agent(ABC):
             name: The name of the agent.
             description: Description of the agent's capabilities or scope. Recommended to have.
             model_name: The name of the LLM to be used.
-            vision_model_name: (Optional) vision model to use; None by default.
             tools: A list of tools available to the agent.
             litellm_params: Optional parameters for LiteLLM.
             max_iterations: Maximum number of iterations for task solving.
@@ -556,7 +562,6 @@ class Agent(ABC):
         self.name: str = name
         self.description = description
         self.model_name: str = model_name
-        self.vision_model_name = vision_model_name or model_name
 
         self.tools = tools or []
         self.filter_tools_for_task = filter_tools_for_task
@@ -571,6 +576,8 @@ class Agent(ABC):
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
         self.plan: Optional[AgentPlan] = None
+
+        self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
 
     def __str__(self):
         return (
@@ -756,13 +763,6 @@ class Agent(ABC):
         Raises:
             ValueError: If the LLM returns an empty or invalid response body.
         """
-        if response_format:
-            schema_prompt = "You must generate a response based on the given output schema."
-            if messages and messages[0].get('role') == 'system':
-                messages[0]['content'] += f'\n{schema_prompt}'
-            else:
-                messages.insert(0, {'role': 'system', 'content': schema_prompt})
-
         params = {
             'model': self.model_name,
             'messages': messages,
@@ -898,7 +898,6 @@ class ReActAgent(Agent):
             model_name: str,
             tools: list,
             description: Optional[str] = None,
-            vision_model_name: Optional[str] = None,
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
@@ -920,7 +919,6 @@ class ReActAgent(Agent):
             name=name,
             model_name=model_name,
             tools=tools,
-            vision_model_name=vision_model_name,
             litellm_params=litellm_params,
             description=description,
             max_iterations=max_iterations,
@@ -1029,7 +1027,7 @@ class ReActAgent(Agent):
             self,
             message: str,
             response_format_class: Type[ChatMessage]
-    ):
+    ) -> Optional[ChatMessage]:
         """
         Utility method covering the common aspects of the "think" step of the T*O loop.
 
@@ -1041,24 +1039,44 @@ class ReActAgent(Agent):
             A message of the `response_format_class` type.
         """
         prompt = ku.make_user_message(text_content=message, files=self.task.files)
-        response = await self._call_llm(
-            messages=prompt,
-            response_format=response_format_class,
-            trace_id=self.task.id,
-        )
-        # Sometimes parsing errors are noticed when the JSON appears to have long text, e.g.,
-        # contents of files
+
+        # Sometimes the LLM does not generate a valid JSON response based on the given format
+        # class. It returns a plain text response instead, which leads to a validation error.
+        # To handle this, we will retry the LLM call up to 3 times,
+        # attempting to parse the response as JSON each time.
         for _ in range(3):
             try:
-                json.loads(response)
-                break
-            except JSONDecodeError:
-                response = json_repair.repair_json(response)
+                # Call the LLM with the prompt and response format class
+                response = await self._call_llm(
+                    messages=prompt,
+                    response_format=response_format_class,
+                    trace_id=self.task.id,
+                )
+                try:
+                    json.loads(response)
+                except JSONDecodeError:
+                    response = json_repair.repair_json(response)
 
-        msg: response_format_class = response_format_class.model_validate_json(response)
-        msg.role = 'assistant'
-        self.add_to_history(msg)
-        return msg
+                msg: response_format_class = response_format_class.model_validate_json(response)
+                msg.role = 'assistant'
+                self.add_to_history(msg)
+                return msg
+
+            except pydantic_core._pydantic_core.ValidationError:
+                # This can happen if the LLM response is not valid JSON
+                logger.error('LLM response validation error in _record_thought(). Retrying...')
+                await asyncio.sleep(random.uniform(0.5, 1.5))
+
+                # Add an explicit observation to the prompt's message history
+                feedback_message = (
+                    'Attention: Parsing failed because you did not generate the response'
+                    ' following the given JSON schema!!! Please ensure your response is a valid'
+                    ' JSON object that follows the specified schema.'
+                )
+                prompt.extend(ku.make_user_message(text_content=feedback_message))
+                continue
+
+        return None
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
         """
@@ -1072,7 +1090,7 @@ class ReActAgent(Agent):
         """
         prev_msg: ReActChatMessage = self.messages[-1]  # type: ignore
         if (
-                prev_msg.answer == ''
+                hasattr(prev_msg, 'answer') and prev_msg.answer == ''
                 and (prev_msg.action == '' or prev_msg.args == '' or prev_msg.thought == '')
         ):
             self.add_to_history(
@@ -1080,13 +1098,14 @@ class ReActAgent(Agent):
                     role='tool',
                     content=(
                         '* Error: incorrect response generated. Must have values for the `answer`'
-                        ' or the `action`, `args`, and `thought` fields.'
+                        ' or the `action`, `args`, and `thought` fields. Please respond strictly'
+                        ' following the ReActChatMessage schema.'
                     )
                 )
             )
             return
 
-        if prev_msg.answer:
+        if hasattr(prev_msg, 'answer') and prev_msg.answer:
             # The final answer has been found!
             self.final_answer_found = True
             self.task.is_finished = True
@@ -1346,7 +1365,6 @@ class CodeActAgent(ReActAgent):
             run_env: CODE_ENV_NAMES,
             tools: Optional[list[Callable]] = None,
             description: Optional[str] = None,
-            vision_model_name: Optional[str] = None,
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
             allowed_imports: Optional[list[str]] = None,
@@ -1379,7 +1397,6 @@ class CodeActAgent(ReActAgent):
             name=name,
             model_name=model_name,
             tools=tools,
-            vision_model_name=vision_model_name,
             litellm_params=litellm_params,
             max_iterations=max_iterations,
             description=description,
@@ -1470,6 +1487,7 @@ class CodeActAgent(ReActAgent):
             tool_names=self.get_tools_description(relevant_tools),
             authorized_imports=','.join(self.allowed_imports),
             plan=self.current_plan or '[No plan provided; please plan yourself]',
+            visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             **history_kwargs,
         )
         msg = await self._record_thought(message, CodeChatMessage)
@@ -1487,20 +1505,24 @@ class CodeActAgent(ReActAgent):
         prev_msg: CodeChatMessage = self.messages[-1]  # type: ignore
 
         if (
-                not prev_msg.answer and (not prev_msg.code or not prev_msg.thought)
+                not hasattr(prev_msg, 'answer') or (
+                    not prev_msg.answer and (not prev_msg.code or not prev_msg.thought)
+                )
         ):
             self.add_to_history(
                 ChatMessage(
                     role='tool',
                     content=(
                         '* Error: incorrect response generated. Must have values for the `answer`'
-                        ' or the `action`, `args`, and `thought` fields.'
+                        ' or the `action`, `args`, and `thought` fields. Please respond strictly'
+                        ' following the CodeChatMessage schema.'
+                        
                     )
                 )
             )
             return
 
-        if prev_msg.answer:
+        if hasattr(prev_msg, 'answer') and prev_msg.answer:
             # The final answer has been found!
             self.final_answer_found = True
             self.task.is_finished = True
@@ -1767,7 +1789,7 @@ async def main():
     Demonstrate the use of ReActAgent and CodeActAgent.
     """
     litellm_params = {'temperature': 0}
-    model_name = 'gemini/gemini-2.5-flash-lite'
+    model_name = 'gemini/gemini-2.0-flash-lite'
     # model_name = 'vertex_ai/gemini-2.0-flash'
     # model_name = 'azure/gpt-4.1-mini'
     # model_name = 'azure/gpt-4o-mini'
@@ -1798,51 +1820,33 @@ async def main():
     )
 
     the_tasks = [
-        # ('What is ten plus 15, raised to 2, expressed in words?', None),
-        # ('What is the date today? Express it in words.', None),
+        ('What is ten plus 15, raised to 2, expressed in words?', None),
+        ('What is the date today? Express it in words.', None),
         (
-            f'Which image has a purple background? {time.time()}',
+            'Which image has a purple background?',
             [
                 'https://www.slideteam.net/media/catalog/product/cache/1280x720/p/r/process_of_natural_language_processing_training_ppt_slide01.jpg',
                 'https://cdn.prod.website-files.com/61a05ff14c09ecacc06eec05/66e8522cbe3d357b8434826a_ai-agents.jpg',
             ]
         ),
-        # (
-        #     'What is four plus seven? Also, what are the festivals in Paris?'
-        #     ' How they differ from Kolkata?',
-        #     None
-        # ),
-        # (
-        #     'Summarize the notes',
-        #     ['https://web.stanford.edu/class/cs102/lectureslides/ClassificationSlides.pdf',]
-        # ),
+        (
+            'What is four plus seven? Also, what are the festivals in Paris?'
+            ' How they differ from Kolkata?',
+            None
+        ),
+        (
+            'Summarize the notes',
+            ['https://web.stanford.edu/class/cs102/lectureslides/ClassificationSlides.pdf',]
+        ),
     ]
 
-    print('ContextualAgent demo\n')
+    print('CodeAct agent demo\n')
     for task, img_urls in the_tasks:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
-        # await code_agent.get_relevant_tools(task_description=task, task_files=img_urls)
-        for _ in range(10):
-            code_agent = CodeActAgent(
-                name='Web agent',
-                model_name=model_name,
-                tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
-                run_env='host',
-                max_iterations=6,
-                litellm_params=litellm_params,
-                allowed_imports=[
-                    'os', 're', 'time', 'random', 'requests', 'tempfile',
-                    'ddgs', 'markitdown', 'youtube_transcript_api',
-                ],
-                pip_packages='ddgs~=9.5.2;"markitdown[all]";',
-                filter_tools_for_task=False,
-                contextual=False,
-                use_planning=True
-            )
-            async for response in code_agent.run(task, files=img_urls):
-                print_response(response)
-            print(code_agent.current_plan)
-            time.sleep(2)
+        async for response in code_agent.run(f'{time.time()} {task}', files=img_urls):
+            print_response(response)
+        print(code_agent.current_plan)
+        await asyncio.sleep(random.uniform(0.25, 0.5))
         print('\n\n')
 
 
