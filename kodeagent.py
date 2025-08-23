@@ -1117,7 +1117,7 @@ class ReActAgent(Agent):
                 try:
                     tool_args = json.loads(tool_args)
                 except JSONDecodeError:
-                    tool_args = json_repair.json_repair.loads(tool_args)
+                    tool_args = json_repair.loads(tool_args)
 
                 if tool_name in self.tool_names:
                     result = self.tool_name_to_func[tool_name](**tool_args)
