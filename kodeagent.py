@@ -32,7 +32,6 @@ from typing import (
     TypedDict,
     Union,
 )
-
 import json_repair
 import litellm
 import pydantic as pyd
@@ -932,6 +931,9 @@ class Agent(ABC):
         return '\n'.join([f'[{msg.role}]: {msg.content}' for msg in self.messages[start_idx:]])
 
     def clear_history(self):
+        """
+        Clear the agent's message history.
+        """
         self.messages = []
 
 
@@ -1566,7 +1568,6 @@ class CodeActAgent(ReActAgent):
                         '* Error: incorrect response generated. Must have values for the `answer`'
                         ' or the `action`, `args`, and `thought` fields. Please respond strictly'
                         ' following the CodeChatMessage schema.'
-                        
                     )
                 )
             )
@@ -1663,19 +1664,16 @@ async def main():
     """
     litellm_params = {'temperature': 0}
     model_name = 'gemini/gemini-2.0-flash-lite'
-    # model_name = 'vertex_ai/gemini-2.0-flash'
-    # model_name = 'azure/gpt-4.1-mini'
-    # model_name = 'azure/gpt-4o-mini'
 
-    react_agent = ReActAgent(
-        name='Maths agent',
-        model_name=model_name,
-        tools=[calculator, ],
-        max_iterations=3,
-        litellm_params=litellm_params,
-        filter_tools_for_task=False,
-        use_planning=True
-    )
+    # react_agent = ReActAgent(
+    #     name='Maths agent',
+    #     model_name=model_name,
+    #     tools=[calculator, ],
+    #     max_iterations=3,
+    #     litellm_params=litellm_params,
+    #     filter_tools_for_task=False,
+    #     use_planning=True
+    # )
     code_agent = CodeActAgent(
         name='Web agent',
         model_name=model_name,
