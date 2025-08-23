@@ -747,7 +747,7 @@ class Agent(ABC):
             ku.make_user_message(prompt), trace_id=self.task.id
         )
         yield self.response(
-            type='final',
+            rtype='final',
             channel=self.__class__.__name__,
             value=response,
             metadata={'salvage': True}
