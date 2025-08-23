@@ -73,9 +73,7 @@ def _read_prompt(filename: str) -> str:
 
 
 REACT_PROMPT = _read_prompt('react.txt')
-REACT_CONTEXTUAL_PROMPT = _read_prompt('react_contextual.txt')
 CODE_ACT_AGENT_PROMPT = _read_prompt('code_act_agent.txt')
-CODE_ACT_AGENT_CONTEXTUAL_PROMPT = _read_prompt('code_act_agent_contextual.txt')
 RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
 AGENT_PLAN_PROMPT = _read_prompt('agent_plan.txt')
 UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')
@@ -901,7 +899,6 @@ class ReActAgent(Agent):
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
-            contextual: bool = False,
             use_planning: bool = False,
     ):
         """
@@ -925,7 +922,6 @@ class ReActAgent(Agent):
             filter_tools_for_task=filter_tools_for_task,
         )
 
-        self.contextual = contextual
         self.use_planning = use_planning
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
@@ -1003,22 +999,12 @@ class ReActAgent(Agent):
         else:
             relevant_tools = self.tools
 
-        if self.contextual:
-            history_summary = await self.get_history_summary()
-            prompt_template = REACT_CONTEXTUAL_PROMPT
-            history_kwargs = {'history_summary': history_summary}
-        else:
-            prompt_template = REACT_PROMPT
-            history_kwargs = {
-                'history': self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task)
-            }
-
-        message = prompt_template.format(
+        message = REACT_PROMPT.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
             plan=self.current_plan or '<No plan provided; please plan yourself>',
-            **history_kwargs,
+            history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
         msg = await self._record_thought(message, ReActChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
@@ -1372,7 +1358,6 @@ class CodeActAgent(ReActAgent):
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
             filter_tools_for_task: bool = False,
-            contextual: bool = False,
             use_planning: bool = False,
     ):
         """
@@ -1403,8 +1388,6 @@ class CodeActAgent(ReActAgent):
             filter_tools_for_task=filter_tools_for_task,
             use_planning=use_planning,
         )
-        self.contextual = contextual
-
         # Combine the source code of all tools into one place
         # TODO Somehow dynamically identify and include the modules used by the tools
         self.tools_source_code: str = 'from typing import *\n\nimport kutils as ku\n\n'
@@ -1471,24 +1454,14 @@ class CodeActAgent(ReActAgent):
         else:
             relevant_tools = self.tools
 
-        if self.contextual:
-            history_summary = await self.get_history_summary()
-            prompt_template = CODE_ACT_AGENT_CONTEXTUAL_PROMPT
-            history_kwargs = {'history_summary': history_summary}
-        else:
-            prompt_template = CODE_ACT_AGENT_PROMPT
-            history_kwargs = {
-                'history': self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task)
-            }
-
-        message = prompt_template.format(
+        message = CODE_ACT_AGENT_PROMPT.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
             authorized_imports=','.join(self.allowed_imports),
             plan=self.current_plan or '[No plan provided; please plan yourself]',
             visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
-            **history_kwargs,
+            history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
         msg = await self._record_thought(message, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
@@ -1815,7 +1788,6 @@ async def main():
         ],
         pip_packages='ddgs~=9.5.2;"markitdown[all]";',
         filter_tools_for_task=False,
-        contextual=False,
         use_planning=True
     )
 
