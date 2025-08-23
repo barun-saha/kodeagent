@@ -96,7 +96,7 @@ PLAN_STALLED_WARNING = (
     ' the reason for the stall and propose a significantly different approach.'
     ' DO NOT REPEAT THE PREVIOUS ATTEMPTS.'
 )
-PLAN_STALLED_THRESHOLD = 3
+PLAN_STALLED_THRESHOLD = 4
 
 
 def tool(func: Callable) -> Callable:
@@ -728,6 +728,9 @@ class Agent(ABC):
             self.task.id = task_id
         self.msg_idx_of_new_task = len(self.messages)
         self.final_answer_found = False  # Reset from any previous task
+        # Reset planning state for new tasks
+        self.plan = None
+        self.plan_stalled = False
 
     @abstractmethod
     async def run(
@@ -977,9 +980,10 @@ class ReActAgent(Agent):
                 yield update
 
             if self.use_planning and self.plan:
-                plan_before_update = self.plan.model_dump_json()
+                # Compare a stable progress signature instead of JSON strings
+                plan_before_update = [(s.description, s.is_done) for s in self.plan.steps]
                 await self._update_plan_progress()
-                plan_after_update = self.plan.model_dump_json()
+                plan_after_update = [(s.description, s.is_done) for s in self.plan.steps]
 
                 if plan_before_update == plan_after_update:
                     plan_stalled_counter += 1
@@ -987,7 +991,7 @@ class ReActAgent(Agent):
                     plan_stalled_counter = 0
                     self.plan_stalled = False
 
-                if plan_stalled_counter > PLAN_STALLED_THRESHOLD:
+                if plan_stalled_counter >= PLAN_STALLED_THRESHOLD:
                     self.plan_stalled = True
             print('-' * 30)
 
