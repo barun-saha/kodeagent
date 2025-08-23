@@ -753,6 +753,25 @@ class Agent(ABC):
             metadata={'salvage': True}
         )
 
+    def trace(self) -> str:
+        """
+        Provide a trace of the agent's activities for the current task.
+        The trace can be used for debugging.
+        """
+        trace_log = []
+        for msg in self.messages[self.msg_idx_of_new_task:]:
+            if isinstance(msg, ReActChatMessage):
+                trace_log.append(f"Thought: {msg.thought}")
+                if msg.action:
+                    trace_log.append(f"Action: {msg.action}({msg.args})")
+            elif isinstance(msg, CodeChatMessage):
+                trace_log.append(f"Thought: {msg.thought}")
+                if msg.code:
+                    trace_log.append(f"Code:\n{msg.code}")
+            elif msg.role == 'tool':
+                trace_log.append(f"Observation: {msg.content}")
+        return "\n".join(trace_log)
+
     @abstractmethod
     async def run(
             self,
@@ -1021,6 +1040,10 @@ class ReActAgent(Agent):
                 f'Sorry, I failed to get a complete answer'
                 f' even after {self.max_iterations} steps!'
             )
+            trace_info = self.trace()
+            if trace_info:
+                failure_msg += f"\n\nHere's a trace of my activities:\n{trace_info}"
+
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
             async for update in self._salvage_response():
                 self.messages[-1].content += f"\n\nHere's a summary of my progress:\n{update['value']}"
@@ -1225,22 +1248,6 @@ class ReActAgent(Agent):
                 history += f'Observation: {msg.content}\n\n'
 
         return history
-
-
-    def trace(self) -> str:
-        """
-        Provide a trace of the agent's activities for the current task.
-        The trace can be used for debugging.
-        """
-        trace_log = []
-        for msg in self.messages[self.msg_idx_of_new_task:]:
-            if isinstance(msg, ReActChatMessage):
-                trace_log.append(f"Thought: {msg.thought}")
-                if msg.action:
-                    trace_log.append(f"Action: {msg.action}({msg.args})")
-            elif msg.role == 'tool':
-                trace_log.append(f"Observation: {msg.content}")
-        return "\n".join(trace_log)
 
 
 # The environments where LLM-generated code can be executed
@@ -1508,21 +1515,6 @@ class CodeActAgent(ReActAgent):
                 history += f'Observation: {msg.content}\n\n'
 
         return history
-
-    def trace(self) -> str:
-        """
-        Provide a trace of the agent's activities for the current task.
-        The trace can be used for debugging.
-        """
-        trace_log = []
-        for msg in self.messages[self.msg_idx_of_new_task:]:
-            if isinstance(msg, CodeChatMessage):
-                trace_log.append(f"Thought: {msg.thought}")
-                if msg.code:
-                    trace_log.append(f"Code:\n{msg.code}")
-            elif msg.role == 'tool':
-                trace_log.append(f"Observation: {msg.content}")
-        return "\n".join(trace_log)
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """
