@@ -77,10 +77,12 @@ def get_code_act_agent(model_name: str) -> ka.Agent:
         ],
         pip_packages=(
             'ddgs~=9.5.2;"markitdown[all]";'
-            'youtube-transcript-api~=1.0.3;wikipedia~=1.4.0'
+            'youtube-transcript-api~=1.2.2;wikipedia~=1.4.0'
         ),
         env_vars_to_set={'FIREWORKS_API_KEY': os.environ.get('FIREWORKS_API_KEY', '')},
         timeout=35,
+        filter_tools_for_task=False,
+        use_planning=True
     )
 
     return agent
@@ -192,10 +194,7 @@ async def main():
                         if isinstance(response['value'], ka.ChatMessage) else response['value']
                     )
                     rich.print(f'[blue][bold]Agent[/bold]: {answer}[/blue]\n')
-                elif response['type'] == 'log':
-                    rich.print(f'[white]{response}[/white]')
-                else:
-                    rich.print(f'{response}')
+            print(agent.current_plan)
             answers_payload.append({'task_id': task_id, 'submitted_answer': answer})
 
             time.sleep(random.uniform(2, 5))

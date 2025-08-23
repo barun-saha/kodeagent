@@ -19,6 +19,7 @@ import time
 import uuid
 import warnings
 from abc import ABC, abstractmethod
+from datetime import datetime
 from functools import wraps
 from json import JSONDecodeError
 from typing import (
@@ -89,6 +90,13 @@ VISUAL_CAPABILITY = '''
     (e.g., OCR, analyzing a video, image editing, or comparing thousands of images)
     OR if your own visual capabilities fail.
 '''
+PLAN_STALLED_WARNING = (
+    '⚠️ CRITICAL WARNING: The agent plan appears to be stalled! The task seems to have made'
+    ' no progress. You must immediately perform a self-correction. Your next thought must diagnose'
+    ' the reason for the stall and propose a significantly different approach.'
+    ' DO NOT REPEAT THE PREVIOUS ATTEMPTS.'
+)
+PLAN_STALLED_THRESHOLD = 4
 
 
 def tool(func: Callable) -> Callable:
@@ -576,6 +584,7 @@ class Agent(ABC):
         self.plan: Optional[AgentPlan] = None
 
         self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
+        self.plan_stalled = False
 
     def __str__(self):
         return (
@@ -719,6 +728,9 @@ class Agent(ABC):
             self.task.id = task_id
         self.msg_idx_of_new_task = len(self.messages)
         self.final_answer_found = False  # Reset from any previous task
+        # Reset planning state for new tasks
+        self.plan = None
+        self.plan_stalled = False
 
     @abstractmethod
     async def run(
@@ -955,6 +967,7 @@ class ReActAgent(Agent):
             await self.create_plan()
             yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
 
+        plan_stalled_counter = 0
         for idx in range(self.max_iterations):
             if self.final_answer_found:
                 break
@@ -967,7 +980,19 @@ class ReActAgent(Agent):
                 yield update
 
             if self.use_planning and self.plan:
+                # Compare a stable progress signature instead of JSON strings
+                plan_before_update = [(s.description, s.is_done) for s in self.plan.steps]
                 await self._update_plan_progress()
+                plan_after_update = [(s.description, s.is_done) for s in self.plan.steps]
+
+                if plan_before_update == plan_after_update:
+                    plan_stalled_counter += 1
+                else:
+                    plan_stalled_counter = 0
+                    self.plan_stalled = False
+
+                if plan_stalled_counter >= PLAN_STALLED_THRESHOLD:
+                    self.plan_stalled = True
             print('-' * 30)
 
         if not self.final_answer_found:
@@ -979,6 +1004,10 @@ class ReActAgent(Agent):
                 ),
                 channel='run'
             )
+        else:
+            # Update the plan one last time after the final answer is found
+            if self.use_planning and self.plan:
+                await self._update_plan_progress()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """
@@ -1007,6 +1036,9 @@ class ReActAgent(Agent):
             visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
+        if self.plan_stalled:
+            logger.debug('Plan appears to be stalled...adding warning to prompt')
+            message += f'\n\n{PLAN_STALLED_WARNING}'
         msg = await self._record_thought(message, ReActChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
@@ -1055,10 +1087,11 @@ class ReActAgent(Agent):
                 await asyncio.sleep(random.uniform(0.5, 1.5))
 
                 # Add an explicit observation to the prompt's message history
+                # Add timestamp to avoid potential cached responses
                 feedback_message = (
-                    'Attention: Parsing failed because you did not generate the response'
+                    'Error: Parsing failed because you did not generate the response'
                     ' following the given JSON schema!!! Please ensure your response is a valid'
-                    ' JSON object that follows the specified schema.'
+                    f' JSON object that follows the specified schema. [Timestamp={datetime.now()}]'
                 )
                 prompt.extend(ku.make_user_message(text_content=feedback_message))
                 continue
@@ -1464,6 +1497,9 @@ class CodeActAgent(ReActAgent):
             visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
+        if self.plan_stalled:
+            logger.debug('Plan appears to be stalled...adding warning to prompt')
+            message += f'\n\n{PLAN_STALLED_WARNING}'
         msg = await self._record_thought(message, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
@@ -1774,7 +1810,8 @@ async def main():
         tools=[calculator, ],
         max_iterations=3,
         litellm_params=litellm_params,
-        filter_tools_for_task=True,
+        filter_tools_for_task=False,
+        use_planning=True
     )
     code_agent = CodeActAgent(
         name='Web agent',
@@ -1818,8 +1855,11 @@ async def main():
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in code_agent.run(f'{time.time()} {task}', files=img_urls):
             print_response(response)
-        print(code_agent.current_plan)
-        await asyncio.sleep(random.uniform(0.25, 0.5))
+
+        if code_agent.current_plan:
+            print(f'Plan:\n{code_agent.current_plan}')
+
+        await asyncio.sleep(random.uniform(0.15, 0.55))
         print('\n\n')
 
 
