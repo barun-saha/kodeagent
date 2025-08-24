@@ -12,5 +12,5 @@ You're agent type: {agent_type}
 (Optional) input file paths/URLs associated with this task are as follows:
 {task_files}
 
-Your output should be a list of step-by-step plan.
+Your output should be a to-do list of step-by-step plan.
 Each step should list only one sub-task in plain English, without any code.

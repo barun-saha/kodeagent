@@ -3,6 +3,7 @@ Given the current plan (as a JSON object), the last thought of an agent, and the
 - Update the `is_done` field for completed tasks to `true`.
 - If necessary, add new steps.
 - If necessary, modify the description of existing steps.
+- The plan should always capture what to do; avoid saying failed or unable to do something.
 - Return ONLY the updated plan as a JSON object that conforms to the `AgentPlan` schema. Do not add any other text.
 - Preserve the original order of existing steps; do not reorder or rename steps unless required by new dependencies or corrections.
 
