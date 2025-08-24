@@ -3,6 +3,7 @@ Unit tests for the KodeAgent ReActAgent class.
 """
 import datetime
 import pytest
+from unittest.mock import AsyncMock, patch
 
 from kodeagent import (
     ReActAgent,
@@ -305,76 +306,65 @@ async def test_planner_update_plan(planner):
 @pytest.fixture
 def observer():
     """Fixture to create an Observer instance for testing."""
-    return Observer(plan_stalled_threshold=2, loop_detection_threshold=2)
+    return Observer(model_name=MODEL_NAME, threshold=3)
 
 
-def test_observer_no_issues(observer, react_agent):
+@pytest.mark.asyncio
+async def test_observer_threshold(observer):
+    """Test that observer does not trigger before threshold."""
+    task = Task(description="test task")
+    history = "some history"
+    plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
+
+    # Iteration 1, should not trigger
+    correction = await observer.observe(1, task, history, plan, plan)
+    assert correction is None
+    assert observer.last_correction_iteration == 0
+
+    # Iteration 2 (threshold=3), should not trigger
+    correction = await observer.observe(2, task, history, plan, plan)
+    assert correction is None
+    assert observer.last_correction_iteration == 0
+
+
+@pytest.mark.asyncio
+@patch('kodeagent.call_llm', new_callable=AsyncMock)
+async def test_observer_no_issues(mock_call_llm, observer):
     """Test that observer returns None when there are no issues."""
-    react_agent.add_to_history(ReActChatMessage(
-        role='assistant', thought='T1', action='A1', args='{}', content='', successful=False, answer=None
-    ))
-    react_agent.add_to_history(ChatMessage(role='tool', content='O1'))
-    react_agent.add_to_history(ReActChatMessage(
-        role='assistant', thought='T2', action='A2', args='{}', content='', successful=False, answer=None
-    ))
-    react_agent.add_to_history(ChatMessage(role='tool', content='O2'))
-    assert observer.observe(react_agent.messages, None, None) is None
+    mock_call_llm.return_value = '{"is_progressing": true, "is_in_loop": false, "reasoning": "all good"}'
+    task = Task(description="test task")
+    history = "some history"
+    plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
 
-
-def test_observer_detects_action_loop(observer, react_agent):
-    """Test observer detects a loop of repeated actions."""
-    for _ in range(3):
-        react_agent.add_to_history(ReActChatMessage(
-            role='assistant', thought='T', action='A', args='{}', content='', successful=False, answer=None
-        ))
-        react_agent.add_to_history(ChatMessage(role='tool', content='O'))
-
-    correction = observer.observe(react_agent.messages, None, None)
-    assert correction is not None
-    assert "You have repeated the same action" in correction
-
-
-def test_observer_detects_observation_loop(observer, react_agent):
-    """Test observer detects a loop of repeated observations."""
-    for i in range(3):
-        react_agent.add_to_history(ReActChatMessage(
-            role='assistant', thought=f'T{i}', action=f'A{i}', args='{}', content='', successful=False, answer=None
-        ))
-        react_agent.add_to_history(ChatMessage(role='tool', content='Same Observation'))
-
-    correction = observer.observe(react_agent.messages, None, None)
-    assert correction is not None
-    assert "resulted in the exact same observation" in correction
-
-
-def test_observer_detects_stalled_plan(observer, react_agent):
-    """Test observer detects a stalled plan."""
-    plan_before = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
-    plan_after = plan_before.model_copy(deep=True)
-
-    # First observation: no progress
-    correction = observer.observe(react_agent.messages, plan_before, plan_after)
+    correction = await observer.observe(4, task, history, plan, plan)
     assert correction is None
-    assert observer.plan_stalled_counter == 1
+    mock_call_llm.assert_called_once()
 
-    # Second observation: still no progress, threshold is 2
-    correction = observer.observe(react_agent.messages, plan_before, plan_after)
+
+@pytest.mark.asyncio
+@patch('kodeagent.call_llm', new_callable=AsyncMock)
+async def test_observer_detects_loop(mock_call_llm, observer):
+    """Test observer returns a correction when a loop is detected."""
+    mock_call_llm.return_value = (
+        '{"is_progressing": false, "is_in_loop": true, "reasoning": "stuck in a loop",'
+        ' "correction_message": "try something else"}'
+    )
+    task = Task(description="test task")
+    history = "some history"
+    plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
+
+    correction = await observer.observe(4, task, history, plan, plan)
     assert correction is not None
-    assert "plan has not progressed" in correction
-    assert observer.plan_stalled_counter == 2
-
-    # Third observation: progress is made
-    plan_after.steps[0].is_done = True
-    correction = observer.observe(react_agent.messages, plan_before, plan_after)
-    assert correction is None
-    assert observer.plan_stalled_counter == 0
+    assert "try something else" in correction
+    assert observer.last_correction_iteration == 4
+    mock_call_llm.assert_called_once()
 
 
 def test_observer_reset(observer):
     """Test that observer state is reset."""
-    observer.plan_stalled_counter = 5
+    observer.last_correction_iteration = 5
     observer.reset()
-    assert observer.plan_stalled_counter == 0
+    assert observer.last_correction_iteration == 0
 
 
 async def _codeact_agent_date_(code_agent) -> tuple[bool, str]:
