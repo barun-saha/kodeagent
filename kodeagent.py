@@ -537,6 +537,108 @@ class AgentResponse(TypedDict):
     metadata: Optional[dict[str, Any]]
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_random_exponential(multiplier=1, max=10))
+async def call_llm(
+        model_name: str,
+        litellm_params: dict,
+        messages: list[dict],
+        response_format: Optional[
+            Type[ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus | AgentPlan]
+        ] = None,
+        trace_id: Optional[str] = None,
+) -> str:
+    """
+    Invoke the LLM to generate a response based on a given list of messages.
+
+    Args:
+        model_name: The name of the LLM to be used.
+        litellm_params: Optional parameters for LiteLLM.
+        messages: A list of messages (and optional images) to be sent to the LLM.
+        response_format: Optional type of message the LLM should respond with.
+        trace_id: (Optional) Langfuse trace ID.
+
+    Returns:
+        The LLM response as string.
+
+    Raises:
+        ValueError: If the LLM returns an empty or invalid response body.
+    """
+    params = {
+        'model': model_name,
+        'messages': messages,
+    }
+    if response_format:
+        params['response_format'] = response_format
+    params.update(litellm_params)
+
+    response = litellm.completion(**params, metadata={'trace_id': str(trace_id)})
+
+    # Check for empty content
+    response_content = response.choices[0].message.get('content')
+    if not response_content or not response_content.strip():
+        raise ValueError('LLM returned an empty or invalid response body.')
+
+    token_usage = {
+        'cost': response._hidden_params['response_cost'],
+        'prompt_tokens': response.usage.get('prompt_tokens'),
+        'completion_tokens': response.usage.get('completion_tokens'),
+        'total_tokens': response.usage.get('total_tokens'),
+    }
+    logger.info(token_usage)
+    return response_content
+
+
+class Planner:
+    """
+    Given a task, generate a step-by-step plan to solve it.
+    This class is stateless, except for the LLM model configuration.
+    """
+    def __init__(self, model_name: str, litellm_params: Optional[dict] = None):
+        self.model_name = model_name
+        self.litellm_params = litellm_params or {}
+
+    async def create_plan(self, task: Task, agent_type: str) -> AgentPlan:
+        """
+        Create a plan to solve the given task.
+        """
+        messages = ku.make_user_message(
+            text_content=AGENT_PLAN_PROMPT.format(
+                agent_type=agent_type,
+                task=task.description,
+                task_files='\n'.join(task.files) if task.files else '[None]',
+            ),
+            files=task.files,
+        )
+        response = await call_llm(
+            model_name=self.model_name,
+            litellm_params=self.litellm_params,
+            messages=messages,
+            response_format=AgentPlan,
+            trace_id=task.id
+        )
+        return AgentPlan.model_validate_json(response)
+
+    async def update_plan(
+            self, plan: AgentPlan, thought: str, observation: str, task_id: str
+    ) -> AgentPlan:
+        """
+        Update the plan based on the last thought and observation.
+        """
+        prompt = UPDATE_PLAN_PROMPT.format(
+            plan=plan.model_dump_json(indent=2),
+            thought=thought,
+            observation=observation
+        )
+        response = await call_llm(
+            model_name=self.model_name,
+            litellm_params=self.litellm_params,
+            messages=ku.make_user_message(prompt),
+            response_format=AgentPlan,
+            trace_id=task_id
+        )
+        return AgentPlan.model_validate_json(response)
+
+
 class Agent(ABC):
     """
     An abstract agent. This should serve as the base class for all types of agents.
@@ -591,27 +693,6 @@ class Agent(ABC):
             f'Agent: {self.name} ({self.id}); LLM: {self.model_name}; Tools: {self.tools}'
         )
 
-    async def create_plan(self):
-        """
-        Create a plan to solve the current task.
-        """
-        if not self.task:
-            raise ValueError('A task must be set before creating a plan.')
-
-        messages = ku.make_user_message(
-            text_content=AGENT_PLAN_PROMPT.format(
-                agent_type=self.__class__.__name__,
-                task=self.task.description,
-                task_files='\n'.join(self.task.files) if self.task.files else '[None]',
-            ),
-            files=self.task.files,
-        )
-        response = await self._call_llm(
-            messages=messages,
-            response_format=AgentPlan,
-            trace_id=self.task.id
-        )
-        self.plan = AgentPlan.model_validate_json(response)
 
     @property
     def current_plan(self) -> Optional[str]:
@@ -633,29 +714,6 @@ class Agent(ABC):
             todo_list.append(f'- [{status}] {step.description}')
         return '\n'.join(todo_list)
 
-    async def _update_plan_progress(self):
-        """
-        Update the plan based on the last thought and observation.
-        """
-        last_thought = ''
-        last_observation = ''
-        if len(self.messages) > 1:
-            if isinstance(self.messages[-2], (ReActChatMessage, CodeChatMessage)):
-                last_thought = self.messages[-2].thought
-            if self.messages[-1].role == 'tool':
-                last_observation = self.messages[-1].content
-
-        prompt = UPDATE_PLAN_PROMPT.format(
-            plan=self.plan.model_dump_json(indent=2),
-            thought=last_thought,
-            observation=last_observation
-        )
-        response = await self._call_llm(
-            ku.make_user_message(prompt),
-            response_format=AgentPlan,
-            trace_id=self.task.id
-        )
-        self.plan = AgentPlan.model_validate_json(response)
 
     async def get_history_summary(self) -> str:
         """
@@ -669,8 +727,10 @@ class Agent(ABC):
             task=self.task.description,
             history=history
         )
-        summary = await self._call_llm(
-            ku.make_user_message(prompt),
+        summary = await call_llm(
+            model_name=self.model_name,
+            litellm_params=self.litellm_params,
+            messages=ku.make_user_message(prompt),
             trace_id=self.task.id if self.task else None
         )
         return summary
@@ -698,8 +758,10 @@ class Agent(ABC):
         )
 
         try:
-            response = await self._call_llm(
-                ku.make_user_message(prompt),
+            response = await call_llm(
+                model_name=self.model_name,
+                litellm_params=self.litellm_params,
+                messages=ku.make_user_message(prompt),
                 trace_id=self.task.id if self.task else None
             )
             relevant_tool_names = response.split(',') if response.strip() else []
@@ -745,7 +807,12 @@ class Agent(ABC):
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             history=self.get_history(start_idx=self.msg_idx_of_new_task)
         )
-        response = await self._call_llm(ku.make_user_message(prompt), trace_id=self.task.id)
+        response = await call_llm(
+            model_name=self.model_name,
+            litellm_params=self.litellm_params,
+            messages=ku.make_user_message(prompt),
+            trace_id=self.task.id
+        )
         return response
 
     def trace(self) -> str:
@@ -789,52 +856,6 @@ class Agent(ABC):
             An update from the agent.
         """
 
-    @retry(stop=stop_after_attempt(3), wait=wait_random_exponential(multiplier=1, max=10))
-    async def _call_llm(
-            self,
-            messages: list[dict],
-            response_format: Optional[
-                Type[ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus | AgentPlan]
-            ] = None,
-            trace_id: Optional[str]=None,
-    ) -> str:
-        """
-        Invoke the LLM to generate a response based on a given list of messages.
-
-        Args:
-            messages: A list of messages (and optional images) to be sent to the LLM.
-            response_format: Optional type of message the LLM should respond with.
-            trace_id: (Optional) Langfuse trace ID.
-
-        Returns:
-            The LLM response as string.
-
-        Raises:
-            ValueError: If the LLM returns an empty or invalid response body.
-        """
-        params = {
-            'model': self.model_name,
-            'messages': messages,
-        }
-        if response_format:
-            params['response_format'] = response_format
-        params.update(self.litellm_params)
-
-        response = litellm.completion(**params, metadata={'trace_id': str(trace_id)})
-
-        # Check for empty content
-        response_content = response.choices[0].message.get('content')
-        if not response_content or not response_content.strip():
-            raise ValueError('LLM returned an empty or invalid response body.')
-
-        token_usage = {
-            'cost': response._hidden_params['response_cost'],
-            'prompt_tokens': response.usage.get('prompt_tokens'),
-            'completion_tokens': response.usage.get('completion_tokens'),
-            'total_tokens': response.usage.get('total_tokens'),
-        }
-        logger.info(token_usage)
-        return response_content
 
     def response(
             self,
@@ -977,6 +998,7 @@ class ReActAgent(Agent):
         )
 
         self.use_planning = use_planning
+        self.planner = Planner(model_name, litellm_params) if use_planning else None
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
 
@@ -1005,8 +1027,8 @@ class ReActAgent(Agent):
             channel='run'
         )
 
-        if self.use_planning:
-            await self.create_plan()
+        if self.use_planning and self.planner:
+            self.plan = await self.planner.create_plan(self.task, self.__class__.__name__)
             yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
 
         plan_stalled_counter = 0
@@ -1021,10 +1043,22 @@ class ReActAgent(Agent):
             async for update in self._act():
                 yield update
 
-            if self.use_planning and self.plan:
+            if self.use_planning and self.plan and self.planner:
                 # Compare a stable progress signature instead of JSON strings
                 plan_before_update = [(s.description, s.is_done) for s in self.plan.steps]
-                await self._update_plan_progress()
+                last_thought = ''
+                last_observation = ''
+                if len(self.messages) > 1:
+                    if isinstance(self.messages[-2], (ReActChatMessage, CodeChatMessage)):
+                        last_thought = self.messages[-2].thought
+                    if self.messages[-1].role == 'tool':
+                        last_observation = self.messages[-1].content
+                self.plan = await self.planner.update_plan(
+                    plan=self.plan,
+                    thought=last_thought,
+                    observation=last_observation,
+                    task_id=self.task.id,
+                )
                 plan_after_update = [(s.description, s.is_done) for s in self.plan.steps]
 
                 if plan_before_update == plan_after_update:
@@ -1057,8 +1091,20 @@ class ReActAgent(Agent):
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
         else:
             # Update the plan one last time after the final answer is found
-            if self.use_planning and self.plan:
-                await self._update_plan_progress()
+            if self.use_planning and self.plan and self.planner:
+                last_thought = ''
+                last_observation = ''
+                if len(self.messages) > 1:
+                    if isinstance(self.messages[-2], (ReActChatMessage, CodeChatMessage)):
+                        last_thought = self.messages[-2].thought
+                    if self.messages[-1].role == 'tool':
+                        last_observation = self.messages[-1].content
+                self.plan = await self.planner.update_plan(
+                    plan=self.plan,
+                    thought=last_thought,
+                    observation=last_observation,
+                    task_id=self.task.id,
+                )
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """
@@ -1117,7 +1163,9 @@ class ReActAgent(Agent):
         for _ in range(3):
             try:
                 # Call the LLM with the prompt and response format class
-                response = await self._call_llm(
+                response = await call_llm(
+                    model_name=self.model_name,
+                    litellm_params=self.litellm_params,
                     messages=prompt,
                     response_format=response_format_class,
                     trace_id=self.task.id,
