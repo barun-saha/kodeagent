@@ -86,12 +86,13 @@ def download_gaia_dataset():
             sys.exit(1)
 
 
-async def main(split: str, max_tasks: int = 30):
+async def main(split: str, model_name, max_tasks: int = 30):
     """
     Iterates through the GAIA dataset metadata, printing questions, answers, and associated files.
 
     Args:
         split (str): The dataset split to use, either 'test' or 'validation'.
+        model_name (str): The LLM model to use.
         max_tasks (int): Maximum number of tasks to process for demo purposes.
     """
     if split not in {'test', 'validation'}:
@@ -107,7 +108,6 @@ async def main(split: str, max_tasks: int = 30):
     with open(metadata_file, 'r', encoding='utf-8') as _:
         gaia_data = [json.loads(line) for line in _]
 
-    model_name = 'gemini/gemini-2.5-flash-lite'
     agent = get_code_act_agent(model_name=model_name)
     evals = []
     n_questions = min(max_tasks, len(gaia_data))
@@ -130,7 +130,11 @@ async def main(split: str, max_tasks: int = 30):
         print(f'\n#{idx}\nQuestion: {question}\nFile: {file_path if file_name else "N/A"}')
         question += f'\n\n{special_instructions}'
 
-        async for response in agent.run(task=question, files=[file_path] if file_name else None):
+        async for response in agent.run(
+                task=question,
+                files=[file_path] if file_name else None,
+                summarize_progress_on_failure=False,
+        ):
             if response['type'] == 'final':
                 answer = (
                     response['value'].content
@@ -141,7 +145,7 @@ async def main(split: str, max_tasks: int = 30):
                     n_correct += 1
 
                 # Somehow the last update to the plan is not captured, so adding a delay
-                time.sleep(random.uniform(1.25, 2))
+                await asyncio.sleep(random.uniform(1.25, 2))
                 evals.append(
                     (
                         task_id,
@@ -158,7 +162,7 @@ async def main(split: str, max_tasks: int = 30):
         if idx >= max_tasks:
             break
 
-        time.sleep(random.uniform(1, 2))
+        await asyncio.sleep(random.uniform(1, 2))
 
     table = tabulate(
         evals,
@@ -186,7 +190,13 @@ if __name__ == '__main__':
         help='The dataset split to process ("test" or "validation").',
         default='validation',
     )
+    parser.add_argument(
+        '--model',
+        type=str,
+        help='The LLM model to use.',
+        default='gemini/gemini-2.5-flash-lite',
+    )
     args = parser.parse_args()
     download_gaia_dataset()
 
-    asyncio.run(main(args.split))
+    asyncio.run(main(args.split, args.model, max_tasks=2))
