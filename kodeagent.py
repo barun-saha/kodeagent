@@ -38,6 +38,7 @@ import pydantic as pyd
 import pydantic_core
 import rich
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_random_exponential
 
 import kutils as ku
 
@@ -787,6 +788,7 @@ class Agent(ABC):
             An update from the agent.
         """
 
+    @retry(stop=stop_after_attempt(3), wait=wait_random_exponential(multiplier=1, max=10))
     async def _call_llm(
             self,
             messages: list[dict],

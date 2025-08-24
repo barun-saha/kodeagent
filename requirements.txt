@@ -4,6 +4,7 @@ python-dotenv~=1.1.0
 e2b-code-interpreter~=1.5.2
 requests~=2.32.3
 json_repair~=0.49.0
+tenacity~=8.3.0
 
 # Dependency for colored display on terminals
 rich~=14.1.0
