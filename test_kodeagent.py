@@ -11,7 +11,7 @@ from kodeagent import (
     ReActChatMessage,
     calculator,
     web_search,
-    file_download, CodeActAgent, AgentPlan, PlanStep, Planner, call_llm, Task
+    file_download, CodeActAgent, AgentPlan, PlanStep, Planner, call_llm, Task, Observer
 )
 
 
@@ -300,6 +300,81 @@ async def test_planner_update_plan(planner):
     assert updated_plan is not None
     assert isinstance(updated_plan, AgentPlan)
     assert updated_plan.steps[0].is_done is True
+
+
+@pytest.fixture
+def observer():
+    """Fixture to create an Observer instance for testing."""
+    return Observer(plan_stalled_threshold=2, loop_detection_threshold=2)
+
+
+def test_observer_no_issues(observer, react_agent):
+    """Test that observer returns None when there are no issues."""
+    react_agent.add_to_history(ReActChatMessage(
+        role='assistant', thought='T1', action='A1', args='{}', content='', successful=False, answer=None
+    ))
+    react_agent.add_to_history(ChatMessage(role='tool', content='O1'))
+    react_agent.add_to_history(ReActChatMessage(
+        role='assistant', thought='T2', action='A2', args='{}', content='', successful=False, answer=None
+    ))
+    react_agent.add_to_history(ChatMessage(role='tool', content='O2'))
+    assert observer.observe(react_agent) is None
+
+
+def test_observer_detects_action_loop(observer, react_agent):
+    """Test observer detects a loop of repeated actions."""
+    for _ in range(3):
+        react_agent.add_to_history(ReActChatMessage(
+            role='assistant', thought='T', action='A', args='{}', content='', successful=False, answer=None
+        ))
+        react_agent.add_to_history(ChatMessage(role='tool', content='O'))
+
+    correction = observer.observe(react_agent)
+    assert correction is not None
+    assert "You have repeated the same action" in correction
+
+
+def test_observer_detects_observation_loop(observer, react_agent):
+    """Test observer detects a loop of repeated observations."""
+    for i in range(3):
+        react_agent.add_to_history(ReActChatMessage(
+            role='assistant', thought=f'T{i}', action=f'A{i}', args='{}', content='', successful=False, answer=None
+        ))
+        react_agent.add_to_history(ChatMessage(role='tool', content='Same Observation'))
+
+    correction = observer.observe(react_agent)
+    assert correction is not None
+    assert "resulted in the exact same observation" in correction
+
+
+def test_observer_detects_stalled_plan(observer, react_agent):
+    """Test observer detects a stalled plan."""
+    react_agent.plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
+    react_agent.plan_before_update = [s.model_copy() for s in react_agent.plan.steps]
+
+    # First observation: no progress
+    correction = observer.observe(react_agent)
+    assert correction is None
+    assert observer.plan_stalled_counter == 1
+
+    # Second observation: still no progress, threshold is 2
+    correction = observer.observe(react_agent)
+    assert correction is not None
+    assert "plan has not progressed" in correction
+    assert observer.plan_stalled_counter == 2
+
+    # Third observation: progress is made
+    react_agent.plan.steps[0].is_done = True
+    correction = observer.observe(react_agent)
+    assert correction is None
+    assert observer.plan_stalled_counter == 0
+
+
+def test_observer_reset(observer):
+    """Test that observer state is reset."""
+    observer.plan_stalled_counter = 5
+    observer.reset()
+    assert observer.plan_stalled_counter == 0
 
 
 async def _codeact_agent_date_(code_agent) -> tuple[bool, str]:

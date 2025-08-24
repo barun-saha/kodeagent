@@ -90,13 +90,6 @@ VISUAL_CAPABILITY = '''
     (e.g., OCR, analyzing a video, image editing, or comparing thousands of images)
     OR if your own visual capabilities fail.
 '''
-PLAN_STALLED_WARNING = (
-    '⚠️ CRITICAL WARNING: The agent plan appears to be stalled! The task seems to have made'
-    ' no progress. You must immediately perform a self-correction. Your next thought must diagnose'
-    ' the reason for the stall and propose a significantly different approach.'
-    ' DO NOT REPEAT THE PREVIOUS ATTEMPTS.'
-)
-PLAN_STALLED_THRESHOLD = 4
 
 
 def tool(func: Callable) -> Callable:
@@ -639,6 +632,119 @@ class Planner:
         return AgentPlan.model_validate_json(response)
 
 
+class Observer:
+    """
+    Monitors an agent's behavior to detect issues like loops or stalled plans.
+    If a problem is detected, it can generate a corrective message to be injected
+    into the agent's history to prompt a change in behavior.
+    """
+    def __init__(self, plan_stalled_threshold: int = 3, loop_detection_threshold: int = 3):
+        self.plan_stalled_threshold = plan_stalled_threshold
+        self.loop_detection_threshold = loop_detection_threshold
+        self.plan_stalled_counter = 0
+
+    def observe(self, agent: 'Agent') -> Optional[str]:
+        """
+        Observe the agent's state and return a corrective message if a problem is detected.
+        """
+        # Check for stalled plan
+        correction = self._check_for_stalled_plan(agent)
+        if correction:
+            return correction
+
+        # Check for loops in thoughts, actions, or observations
+        correction = self._check_for_loops(agent)
+        if correction:
+            return correction
+
+        return None
+
+    def _check_for_stalled_plan(self, agent: 'Agent') -> Optional[str]:
+        """
+        Check if the agent's plan is making progress.
+        A plan is considered stalled if no new steps are completed over several iterations.
+        """
+        if not agent.plan or not agent.plan_before_update:
+            return None
+
+        num_completed_before = sum(1 for s in agent.plan_before_update if s.is_done)
+        num_completed_after = sum(1 for s in agent.plan.steps if s.is_done)
+
+        # If progress is made, reset the counter
+        if num_completed_after > num_completed_before:
+            self.plan_stalled_counter = 0
+            return None
+
+        # No new steps completed. If the plan structure is similar, it might be stalled.
+        if len(agent.plan_before_update) == len(agent.plan.steps):
+            self.plan_stalled_counter += 1
+        else:
+            # Plan was likely rewritten (e.g., steps added/removed), so reset counter
+            self.plan_stalled_counter = 0
+
+        if self.plan_stalled_counter >= self.plan_stalled_threshold:
+            return (
+                'Correction: The plan has not progressed for the last few steps. '
+                'Please re-evaluate your approach, think of a different strategy, '
+                'or ask for help if you are stuck.'
+            )
+        return None
+
+    def _check_for_loops(self, agent: 'Agent') -> Optional[str]:
+        """
+        Check for repetitive behavior in the agent's history.
+        """
+        if len(agent.messages) < self.loop_detection_threshold * 2:  # Need enough history
+            return None
+
+        recent_messages = agent.messages[-(self.loop_detection_threshold * 2):]
+
+        # Check for repeated observations from tools
+        tool_messages = [m.content for m in recent_messages if m.role == 'tool']
+        if len(tool_messages) >= self.loop_detection_threshold:
+            last_n_observations = tool_messages[-self.loop_detection_threshold:]
+            # Simple string comparison for observations
+            if len(set(str(o) for o in last_n_observations)) == 1:
+                return (
+                    f'Correction: The last {self.loop_detection_threshold} actions resulted '
+                    f'in the exact same observation: "{last_n_observations[0]}". '
+                    'You are likely in a loop. Try a different action or tool.'
+                )
+
+        # Check for repeated thoughts/actions
+        assistant_messages = [
+            m for m in recent_messages
+            if m.role == 'assistant' and isinstance(m, (ReActChatMessage, CodeChatMessage))
+        ]
+        if len(assistant_messages) >= self.loop_detection_threshold:
+            last_n_assistant_msgs = assistant_messages[-self.loop_detection_threshold:]
+            if isinstance(last_n_assistant_msgs[0], ReActChatMessage):
+                last_n_actions = [
+                    f'{m.action}({m.args})' for m in last_n_assistant_msgs
+                ]
+                if len(set(last_n_actions)) == 1:
+                    return (
+                        f'Correction: You have repeated the same action '
+                        f'{self.loop_detection_threshold} times: `{last_n_actions[0]}`. '
+                        'This is not productive. Propose a new, different action.'
+                    )
+            elif isinstance(last_n_assistant_msgs[0], CodeChatMessage):
+                last_n_codes = [m.code for m in last_n_assistant_msgs]
+                if len(set(last_n_codes)) == 1:
+                    return (
+                        f'Correction: You have executed the same code '
+                        f'{self.loop_detection_threshold} times. This is not productive. '
+                        'Write new code to try a different approach.'
+                    )
+        return None
+
+    def reset(self):
+        """
+        Reset the observer's internal state.
+        """
+        self.plan_stalled_counter = 0
+
+
 class Agent(ABC):
     """
     An abstract agent. This should serve as the base class for all types of agents.
@@ -684,9 +790,10 @@ class Agent(ABC):
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
         self.plan: Optional[AgentPlan] = None
+        self.plan_before_update: Optional[list[PlanStep]] = None
+        self.observer = Observer()
 
         self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
-        self.plan_stalled = False
 
     def __str__(self):
         return (
@@ -792,7 +899,8 @@ class Agent(ABC):
         self.final_answer_found = False  # Reset from any previous task
         # Reset planning state for new tasks
         self.plan = None
-        self.plan_stalled = False
+        self.plan_before_update = None
+        self.observer.reset()
 
     async def salvage_response(self) -> str:
         """
@@ -1046,7 +1154,6 @@ class ReActAgent(Agent):
         self.plan = await self.planner.create_plan(self.task, self.__class__.__name__)
         yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
 
-        plan_stalled_counter = 0
         for idx in range(self.max_iterations):
             if self.final_answer_found:
                 break
@@ -1059,19 +1166,14 @@ class ReActAgent(Agent):
                 yield update
 
             if self.plan:
-                # Compare a stable progress signature instead of JSON strings
-                plan_before_update = [(s.description, s.is_done) for s in self.plan.steps]
+                self.plan_before_update = [s.model_copy() for s in self.plan.steps]
                 await self._update_plan()
-                plan_after_update = [(s.description, s.is_done) for s in self.plan.steps]
 
-                if plan_before_update == plan_after_update:
-                    plan_stalled_counter += 1
-                else:
-                    plan_stalled_counter = 0
-                    self.plan_stalled = False
-
-                if plan_stalled_counter >= PLAN_STALLED_THRESHOLD:
-                    self.plan_stalled = True
+            # The observer checks for issues and suggests corrections
+            correction_msg = self.observer.observe(self)
+            if correction_msg:
+                self.add_to_history(ChatMessage(role='tool', content=correction_msg))
+                yield self.response(rtype='log', value=correction_msg, channel='observer')
             print('-' * 30)
 
         if not self.final_answer_found:
@@ -1124,9 +1226,6 @@ class ReActAgent(Agent):
             visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
-        if self.plan_stalled:
-            logger.debug('Plan appears to be stalled...adding warning to prompt')
-            message += f'\n\n{PLAN_STALLED_WARNING}'
         msg = await self._record_thought(message, ReActChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
@@ -1585,9 +1684,6 @@ class CodeActAgent(ReActAgent):
             visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
-        if self.plan_stalled:
-            logger.debug('Plan appears to be stalled...adding warning to prompt')
-            message += f'\n\n{PLAN_STALLED_WARNING}'
         msg = await self._record_thought(message, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
