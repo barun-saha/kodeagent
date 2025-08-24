@@ -141,7 +141,7 @@ async def main(split: str, max_tasks: int = 30):
                     n_correct += 1
 
                 # Somehow the last update to the plan is not captured, so adding a delay
-                await asyncio.sleep(random.uniform(1.25, 2))
+                time.sleep(random.uniform(1.25, 2))
                 evals.append(
                     (
                         task_id,
@@ -158,7 +158,7 @@ async def main(split: str, max_tasks: int = 30):
         if idx >= max_tasks:
             break
 
-        await asyncio.sleep(random.uniform(1, 2))
+        time.sleep(random.uniform(1, 2))
 
     table = tabulate(
         evals,
@@ -189,4 +189,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     download_gaia_dataset()
 
-    asyncio.run(main(args.split, max_tasks=165))
+    asyncio.run(main(args.split))

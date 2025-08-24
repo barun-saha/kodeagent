@@ -79,6 +79,7 @@ CODE_ACT_AGENT_PROMPT = _read_prompt('code_act_agent.txt')
 RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
 AGENT_PLAN_PROMPT = _read_prompt('agent_plan.txt')
 UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')
+OBSERVATION_PROMPT = _read_prompt('observation.txt')
 SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
 # Unused currently
 CONTEXTUAL_SUMMARY_PROMPT = _read_prompt('contextual_summary.txt')
@@ -333,7 +334,7 @@ def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
 def get_youtube_transcript(video_id: str) -> str:
     """
     Retrieve the transcript/subtitles for a given YouTube video. It also works for automatically
-    generated subtitles, supports translating subtitles. The input should be a valid Youtube
+    generated subtitles, supports translating subtitles. The input should be a valid YouTube
     video ID. E.g., the URL https://www.youtube.com/watch?v=aBc4E has the video ID `aBc4E`.
 
     Args:
@@ -344,7 +345,6 @@ def get_youtube_transcript(video_id: str) -> str:
     """
     from youtube_transcript_api import YouTubeTranscriptApi, _errors as yt_errors
 
-    transcript_text = ''
     try:
         transcript = YouTubeTranscriptApi().fetch(video_id)
         transcript_text = ' '.join([item.text for item in transcript.snippets])
@@ -428,6 +428,22 @@ class PlanStep(pyd.BaseModel):
 class AgentPlan(pyd.BaseModel):
     """A structured plan for an agent to follow."""
     steps: list[PlanStep] = pyd.Field(description='List of steps to accomplish the task')
+
+
+class ObserverResponse(pyd.BaseModel):
+    """
+    The response from the observer after analyzing the agent's behavior.
+    """
+    is_progressing: bool = pyd.Field(
+        description='True if the agent is making meaningful progress on the plan'
+    )
+    is_in_loop: bool = pyd.Field(
+        description='True if the agent is stuck in a repetitive loop'
+    )
+    reasoning: str = pyd.Field(description='A short reason for the assessment')
+    correction_message: Optional[str] = pyd.Field(
+        description='A specific, actionable feedback to help the agent self-correct'
+    )
 
 
 class ChatMessage(pyd.BaseModel):
@@ -536,7 +552,10 @@ async def call_llm(
         litellm_params: dict,
         messages: list[dict],
         response_format: Optional[
-            Type[ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus | AgentPlan]
+            Type[
+                ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus
+                | AgentPlan | ObserverResponse
+            ]
         ] = None,
         trace_id: Optional[str] = None,
 ) -> str:
@@ -638,120 +657,59 @@ class Observer:
     If a problem is detected, it can generate a corrective message to be injected
     into the agent's history to prompt a change in behavior.
     """
-    def __init__(self, plan_stalled_threshold: int = 3, loop_detection_threshold: int = 3):
-        self.plan_stalled_threshold = plan_stalled_threshold
-        self.loop_detection_threshold = loop_detection_threshold
-        self.plan_stalled_counter = 0
+    def __init__(self, model_name: str, litellm_params: Optional[dict] = None, threshold: int = 3):
+        self.threshold = threshold
+        self.model_name = model_name
+        self.litellm_params = litellm_params or {}
+        self.last_correction_iteration: int = 0
 
-    def observe(
+    async def observe(
             self,
-            messages: list,
+            iteration: int,
+            task: Task,
+            history: str,
             plan_before: Optional[AgentPlan],
-            plan_after: Optional[AgentPlan]
+            plan_after: Optional[AgentPlan],
     ) -> Optional[str]:
         """
         Observe the agent's state and return a corrective message if a problem is detected.
         """
-        # Check for stalled plan
-        correction = self._check_for_stalled_plan(plan_before, plan_after)
-        if correction:
-            return correction
-
-        # Check for loops in thoughts, actions, or observations
-        correction = self._check_for_loops(messages)
-        if correction:
-            return correction
-
-        return None
-
-    def _check_for_stalled_plan(
-            self,
-            plan_before: Optional[AgentPlan],
-            plan_after: Optional[AgentPlan]
-    ) -> Optional[str]:
-        """
-        Check if the agent's plan is making progress.
-        A plan is considered stalled if no new steps are completed over several iterations.
-        """
-        if not plan_after or not plan_before:
+        if (iteration <= 1) or (iteration - self.last_correction_iteration < self.threshold):
             return None
 
-        num_completed_before = sum(1 for s in plan_before.steps if s.is_done)
-        num_completed_after = sum(1 for s in plan_after.steps if s.is_done)
-
-        # If progress is made, reset the counter
-        if num_completed_after > num_completed_before:
-            self.plan_stalled_counter = 0
-            return None
-
-        # No new steps completed. If the plan structure is similar, it might be stalled.
-        if len(plan_before.steps) == len(plan_after.steps):
-            self.plan_stalled_counter += 1
-        else:
-            # Plan was likely rewritten (e.g., steps added/removed), so reset counter
-            self.plan_stalled_counter = 0
-
-        if self.plan_stalled_counter >= self.plan_stalled_threshold:
-            return (
-                'Correction: The plan has not progressed for the last few steps. '
-                'Please re-evaluate your approach, think of a different strategy, '
-                'or ask for help if you are stuck.'
+        try:
+            # Use the LLM to analyze the state and provide feedback
+            prompt = OBSERVATION_PROMPT.format(
+                task=task.description,
+                plan_before=plan_before,
+                plan_after=plan_after,
+                history=history
             )
-        return None
+            response = await call_llm(
+                model_name=self.model_name,
+                litellm_params=self.litellm_params,
+                messages=[{'role': 'user', 'content': prompt}],
+                response_format=ObserverResponse,
+            )
+            # Parse the structured response
+            observer_output = ObserverResponse.model_validate_json(response)
+            print(f'Observer (iteration {iteration}): {observer_output.model_dump_json()}')
 
-    def _check_for_loops(self, messages: list) -> Optional[str]:
-        """
-        Check for repetitive behavior in the agent's history.
-        """
-        if len(messages) < self.loop_detection_threshold * 2:  # Need enough history
-            return None
-
-        recent_messages = messages[-(self.loop_detection_threshold * 2):]
-
-        # Check for repeated thoughts/actions
-        assistant_messages = [
-            m for m in recent_messages
-            if m.role == 'assistant' and isinstance(m, (ReActChatMessage, CodeChatMessage))
-        ]
-        if len(assistant_messages) >= self.loop_detection_threshold:
-            last_n_assistant_msgs = assistant_messages[-self.loop_detection_threshold:]
-            if isinstance(last_n_assistant_msgs[0], ReActChatMessage):
-                last_n_actions = [
-                    f'{m.action}({m.args})' for m in last_n_assistant_msgs
-                ]
-                if len(set(last_n_actions)) == 1:
-                    return (
-                        f'Correction: You have repeated the same action '
-                        f'{self.loop_detection_threshold} times: `{last_n_actions[0]}`. '
-                        'This is not productive. Propose a new, different action.'
-                    )
-            elif isinstance(last_n_assistant_msgs[0], CodeChatMessage):
-                last_n_codes = [m.code for m in last_n_assistant_msgs]
-                if len(set(last_n_codes)) == 1:
-                    return (
-                        f'Correction: You have executed the same code '
-                        f'{self.loop_detection_threshold} times. This is not productive. '
-                        'Write new code to try a different approach.'
-                    )
-
-        # Check for repeated observations from tools
-        tool_messages = [m.content for m in recent_messages if m.role == 'tool']
-        if len(tool_messages) >= self.loop_detection_threshold:
-            last_n_observations = tool_messages[-self.loop_detection_threshold:]
-            # Simple string comparison for observations
-            if len(set(str(o) for o in last_n_observations)) == 1:
-                return (
-                    f'Correction: The last {self.loop_detection_threshold} actions resulted '
-                    f'in the exact same observation: "{last_n_observations[0]}". '
-                    'You are likely in a loop. Try a different action or tool.'
+            # Return the correction message if a problem is detected
+            if not observer_output.is_progressing or observer_output.is_in_loop:
+                self.last_correction_iteration = iteration
+                correction = (
+                    f'!!!CRITICAL FOR COURSE CORRECTION: {observer_output.correction_message}\n\n'
+                    'For TOOL call, use the EXACT TOOL NAMES and ARGS specified earlier.'
                 )
-        return None
+                return correction
 
-    def reset(self):
-        """
-        Reset the observer's internal state.
-        """
-        self.plan_stalled_counter = 0
+        except Exception as e:
+            # Fallback for LLM or parsing errors
+            print(f'LLM Observer failed: {e}')
+            return None  # Or a generic fallback message
+
+        return None
 
 
 class Agent(ABC):
@@ -799,7 +757,7 @@ class Agent(ABC):
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
         self.plan: Optional[AgentPlan] = None
-        self.observer = Observer()
+        self.observer = Observer(model_name=model_name, litellm_params=litellm_params)
 
         self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
 
@@ -904,10 +862,8 @@ class Agent(ABC):
         if task_id:
             self.task.id = task_id
         self.msg_idx_of_new_task = len(self.messages)
-        self.final_answer_found = False  # Reset from any previous task
-        # Reset planning state for new tasks
+        self.final_answer_found = False
         self.plan = None
-        self.observer.reset()
 
     async def salvage_response(self) -> str:
         """
@@ -1174,14 +1130,16 @@ class ReActAgent(Agent):
 
             plan_before_update = None
             if self.plan:
-                plan_before_update = self.plan.model_copy(deep=True)
+                plan_before_update = self.current_plan
                 await self._update_plan()
 
             # The observer checks for issues and suggests corrections
-            correction_msg = self.observer.observe(
-                messages=self.messages,
+            correction_msg = await self.observer.observe(
+                task=self.task,
+                history=self.get_history(start_idx=self.msg_idx_of_new_task),
                 plan_before=plan_before_update,
-                plan_after=self.plan
+                plan_after=self.current_plan,
+                iteration=idx + 1
             )
             if correction_msg:
                 self.add_to_history(ChatMessage(role='tool', content=correction_msg))
@@ -1191,7 +1149,7 @@ class ReActAgent(Agent):
         if not self.final_answer_found:
             progress_summary = await self.salvage_response()
             failure_msg = (
-                f'Sorry, I failed to get a complete answer even after {self.max_iterations} steps!'
+                f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
                 f'\n\nHere\'s a summary of my progress for this task:\n{progress_summary}'
             )
             yield self.response(
@@ -1872,7 +1830,7 @@ async def main():
         if code_agent.current_plan:
             print(f'Plan:\n{code_agent.current_plan}')
 
-        await asyncio.sleep(random.uniform(0.15, 0.55))
+        time.sleep(random.uniform(0.15, 0.55))
         print('\n\n')
 
 
