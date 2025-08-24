@@ -32,6 +32,7 @@ from typing import (
     TypedDict,
     Union,
 )
+
 import json_repair
 import litellm
 import pydantic as pyd
@@ -1037,17 +1038,23 @@ class ReActAgent(Agent):
             print('-' * 30)
 
         if not self.final_answer_found:
+            progress_summary = await self.salvage_response()
             failure_msg = (
-                f'Sorry, I failed to get a complete answer'
-                f' even after {self.max_iterations} steps!'
+                f'Sorry, I failed to get a complete answer even after {self.max_iterations} steps!'
+                f'\n\nHere\'s a summary of my progress for this task:\n{progress_summary}'
+            )
+            yield self.response(
+                rtype='final',
+                value=failure_msg,
+                channel='run',
+                metadata={'final_answer_found': False}
             )
             trace_info = self.trace()
             if trace_info:
                 failure_msg += f"\n\nHere's a trace of my activities:\n{trace_info}"
+                print(trace_info)
 
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
-            print("\n\nHere's a summary of my progress for this task:\n")
-            print(await self.salvage_response())
         else:
             # Update the plan one last time after the final answer is found
             if self.use_planning and self.plan:
