@@ -17,6 +17,7 @@ Here is the agent's recent history of thoughts and actions/code executions:
 
 Carefully assess the agent's progress based on the logs (history) and the plan.
 If the latest update of the plan shows any new steps marked with "x" (done), that indicates progress.
-If you detect a loop (e.g., same actions/observations/errors appearing repeatedly in the logs)
-or a stall (no progress in the plan from before), provide a concise and direct corrective instruction to get the agent back on track.
-If the agent is making good progress, only respond with "No issues detected."
+If you detect a loop (e.g., same actions/observations/errors appearing repeatedly in the logs) or a stall (no progress in the plan from before),
+provide a concise and direct corrective instruction in the `correction_message` field to get the agent back on track.
+If the agent is making good progress, you can set `correction_message` to null.
+The `correction_message`, when not empty, should always be in second-person, e.g., "You should...", "Avoid...", "Focus on...".

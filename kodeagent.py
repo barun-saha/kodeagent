@@ -711,6 +711,10 @@ class Observer:
 
         return None
 
+    def reset(self):
+        """Reset the observer state."""
+        self.last_correction_iteration = 0
+
 
 class Agent(ABC):
     """
@@ -786,7 +790,6 @@ class Agent(ABC):
             status = 'x' if step.is_done else ' '
             todo_list.append(f'- [{status}] {step.description}')
         return '\n'.join(todo_list)
-
 
     async def get_history_summary(self) -> str:
         """
@@ -864,6 +867,7 @@ class Agent(ABC):
         self.msg_idx_of_new_task = len(self.messages)
         self.final_answer_found = False
         self.plan = None
+        self.observer.reset()
 
     async def salvage_response(self) -> str:
         """
@@ -1830,7 +1834,7 @@ async def main():
         if code_agent.current_plan:
             print(f'Plan:\n{code_agent.current_plan}')
 
-        time.sleep(random.uniform(0.15, 0.55))
+        await asyncio.sleep(random.uniform(0.15, 0.55))
         print('\n\n')
 
 
