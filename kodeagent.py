@@ -643,32 +643,41 @@ class Observer:
         self.loop_detection_threshold = loop_detection_threshold
         self.plan_stalled_counter = 0
 
-    def observe(self, agent: 'Agent') -> Optional[str]:
+    def observe(
+            self,
+            messages: list,
+            plan_before: Optional[AgentPlan],
+            plan_after: Optional[AgentPlan]
+    ) -> Optional[str]:
         """
         Observe the agent's state and return a corrective message if a problem is detected.
         """
         # Check for stalled plan
-        correction = self._check_for_stalled_plan(agent)
+        correction = self._check_for_stalled_plan(plan_before, plan_after)
         if correction:
             return correction
 
         # Check for loops in thoughts, actions, or observations
-        correction = self._check_for_loops(agent)
+        correction = self._check_for_loops(messages)
         if correction:
             return correction
 
         return None
 
-    def _check_for_stalled_plan(self, agent: 'Agent') -> Optional[str]:
+    def _check_for_stalled_plan(
+            self,
+            plan_before: Optional[AgentPlan],
+            plan_after: Optional[AgentPlan]
+    ) -> Optional[str]:
         """
         Check if the agent's plan is making progress.
         A plan is considered stalled if no new steps are completed over several iterations.
         """
-        if not agent.plan or not agent.plan_before_update:
+        if not plan_after or not plan_before:
             return None
 
-        num_completed_before = sum(1 for s in agent.plan_before_update if s.is_done)
-        num_completed_after = sum(1 for s in agent.plan.steps if s.is_done)
+        num_completed_before = sum(1 for s in plan_before.steps if s.is_done)
+        num_completed_after = sum(1 for s in plan_after.steps if s.is_done)
 
         # If progress is made, reset the counter
         if num_completed_after > num_completed_before:
@@ -676,7 +685,7 @@ class Observer:
             return None
 
         # No new steps completed. If the plan structure is similar, it might be stalled.
-        if len(agent.plan_before_update) == len(agent.plan.steps):
+        if len(plan_before.steps) == len(plan_after.steps):
             self.plan_stalled_counter += 1
         else:
             # Plan was likely rewritten (e.g., steps added/removed), so reset counter
@@ -690,26 +699,14 @@ class Observer:
             )
         return None
 
-    def _check_for_loops(self, agent: 'Agent') -> Optional[str]:
+    def _check_for_loops(self, messages: list) -> Optional[str]:
         """
         Check for repetitive behavior in the agent's history.
         """
-        if len(agent.messages) < self.loop_detection_threshold * 2:  # Need enough history
+        if len(messages) < self.loop_detection_threshold * 2:  # Need enough history
             return None
 
-        recent_messages = agent.messages[-(self.loop_detection_threshold * 2):]
-
-        # Check for repeated observations from tools
-        tool_messages = [m.content for m in recent_messages if m.role == 'tool']
-        if len(tool_messages) >= self.loop_detection_threshold:
-            last_n_observations = tool_messages[-self.loop_detection_threshold:]
-            # Simple string comparison for observations
-            if len(set(str(o) for o in last_n_observations)) == 1:
-                return (
-                    f'Correction: The last {self.loop_detection_threshold} actions resulted '
-                    f'in the exact same observation: "{last_n_observations[0]}". '
-                    'You are likely in a loop. Try a different action or tool.'
-                )
+        recent_messages = messages[-(self.loop_detection_threshold * 2):]
 
         # Check for repeated thoughts/actions
         assistant_messages = [
@@ -736,6 +733,18 @@ class Observer:
                         f'{self.loop_detection_threshold} times. This is not productive. '
                         'Write new code to try a different approach.'
                     )
+
+        # Check for repeated observations from tools
+        tool_messages = [m.content for m in recent_messages if m.role == 'tool']
+        if len(tool_messages) >= self.loop_detection_threshold:
+            last_n_observations = tool_messages[-self.loop_detection_threshold:]
+            # Simple string comparison for observations
+            if len(set(str(o) for o in last_n_observations)) == 1:
+                return (
+                    f'Correction: The last {self.loop_detection_threshold} actions resulted '
+                    f'in the exact same observation: "{last_n_observations[0]}". '
+                    'You are likely in a loop. Try a different action or tool.'
+                )
         return None
 
     def reset(self):
@@ -790,7 +799,6 @@ class Agent(ABC):
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
         self.plan: Optional[AgentPlan] = None
-        self.plan_before_update: Optional[list[PlanStep]] = None
         self.observer = Observer()
 
         self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
@@ -899,7 +907,6 @@ class Agent(ABC):
         self.final_answer_found = False  # Reset from any previous task
         # Reset planning state for new tasks
         self.plan = None
-        self.plan_before_update = None
         self.observer.reset()
 
     async def salvage_response(self) -> str:
@@ -1165,12 +1172,17 @@ class ReActAgent(Agent):
             async for update in self._act():
                 yield update
 
+            plan_before_update = None
             if self.plan:
-                self.plan_before_update = [s.model_copy() for s in self.plan.steps]
+                plan_before_update = self.plan.model_copy(deep=True)
                 await self._update_plan()
 
             # The observer checks for issues and suggests corrections
-            correction_msg = self.observer.observe(self)
+            correction_msg = self.observer.observe(
+                messages=self.messages,
+                plan_before=plan_before_update,
+                plan_after=self.plan
+            )
             if correction_msg:
                 self.add_to_history(ChatMessage(role='tool', content=correction_msg))
                 yield self.response(rtype='log', value=correction_msg, channel='observer')

@@ -318,7 +318,7 @@ def test_observer_no_issues(observer, react_agent):
         role='assistant', thought='T2', action='A2', args='{}', content='', successful=False, answer=None
     ))
     react_agent.add_to_history(ChatMessage(role='tool', content='O2'))
-    assert observer.observe(react_agent) is None
+    assert observer.observe(react_agent.messages, None, None) is None
 
 
 def test_observer_detects_action_loop(observer, react_agent):
@@ -329,7 +329,7 @@ def test_observer_detects_action_loop(observer, react_agent):
         ))
         react_agent.add_to_history(ChatMessage(role='tool', content='O'))
 
-    correction = observer.observe(react_agent)
+    correction = observer.observe(react_agent.messages, None, None)
     assert correction is not None
     assert "You have repeated the same action" in correction
 
@@ -342,30 +342,30 @@ def test_observer_detects_observation_loop(observer, react_agent):
         ))
         react_agent.add_to_history(ChatMessage(role='tool', content='Same Observation'))
 
-    correction = observer.observe(react_agent)
+    correction = observer.observe(react_agent.messages, None, None)
     assert correction is not None
     assert "resulted in the exact same observation" in correction
 
 
 def test_observer_detects_stalled_plan(observer, react_agent):
     """Test observer detects a stalled plan."""
-    react_agent.plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
-    react_agent.plan_before_update = [s.model_copy() for s in react_agent.plan.steps]
+    plan_before = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
+    plan_after = plan_before.model_copy(deep=True)
 
     # First observation: no progress
-    correction = observer.observe(react_agent)
+    correction = observer.observe(react_agent.messages, plan_before, plan_after)
     assert correction is None
     assert observer.plan_stalled_counter == 1
 
     # Second observation: still no progress, threshold is 2
-    correction = observer.observe(react_agent)
+    correction = observer.observe(react_agent.messages, plan_before, plan_after)
     assert correction is not None
     assert "plan has not progressed" in correction
     assert observer.plan_stalled_counter == 2
 
     # Third observation: progress is made
-    react_agent.plan.steps[0].is_done = True
-    correction = observer.observe(react_agent)
+    plan_after.steps[0].is_done = True
+    correction = observer.observe(react_agent.messages, plan_before, plan_after)
     assert correction is None
     assert observer.plan_stalled_counter == 0
 
