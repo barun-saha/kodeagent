@@ -312,8 +312,8 @@ def observer():
 @pytest.mark.asyncio
 async def test_observer_threshold(observer):
     """Test that observer does not trigger before threshold."""
-    task = Task(description="test task")
-    history = "some history"
+    task = Task(description='test task', files=None)
+    history = 'some history'
     plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
 
     # Iteration 1, should not trigger
@@ -332,8 +332,8 @@ async def test_observer_threshold(observer):
 async def test_observer_no_issues(mock_call_llm, observer):
     """Test that observer returns None when there are no issues."""
     mock_call_llm.return_value = '{"is_progressing": true, "is_in_loop": false, "reasoning": "all good"}'
-    task = Task(description="test task")
-    history = "some history"
+    task = Task(description='test task', files=None)
+    history = 'some history'
     plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
 
     correction = await observer.observe(4, task, history, plan, plan)
@@ -349,13 +349,13 @@ async def test_observer_detects_loop(mock_call_llm, observer):
         '{"is_progressing": false, "is_in_loop": true, "reasoning": "stuck in a loop",'
         ' "correction_message": "try something else"}'
     )
-    task = Task(description="test task")
-    history = "some history"
+    task = Task(description='test task', files=None)
+    history = 'some history'
     plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
 
     correction = await observer.observe(4, task, history, plan, plan)
     assert correction is not None
-    assert "try something else" in correction
+    assert 'try something else' in correction
     assert observer.last_correction_iteration == 4
     mock_call_llm.assert_called_once()
 
