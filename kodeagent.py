@@ -1097,7 +1097,8 @@ class ReActAgent(Agent):
             self,
             task: str,
             files: Optional[list[str]] = None,
-            task_id: Optional[str] = None
+            task_id: Optional[str] = None,
+            summarize_progress_on_failure: bool = True,
     ) -> AsyncIterator[AgentResponse]:
         """
         Solve a task using ReAct's TAO loop.
@@ -1106,6 +1107,7 @@ class ReActAgent(Agent):
             task: A description of the task.
             files: An optional list of file paths or URLs.
             task_id: (Optional) An ID for the task, if provided by the caller.
+            summarize_progress_on_failure: Whether to summarize the progress made on task failure.
 
         Yields:
             An update from the agent.
@@ -1151,21 +1153,23 @@ class ReActAgent(Agent):
             print('-' * 30)
 
         if not self.final_answer_found:
-            progress_summary = await self.salvage_response()
-            failure_msg = (
-                f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
-                f'\n\nHere\'s a summary of my progress for this task:\n{progress_summary}'
-            )
+            failure_msg = f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
+
+            if summarize_progress_on_failure:
+                progress_summary = await self.salvage_response()
+                failure_msg += (
+                    f'\n\nHere\'s a summary of my progress for this task:\n{progress_summary}'
+                )
+
             yield self.response(
                 rtype='final',
                 value=failure_msg,
                 channel='run',
                 metadata={'final_answer_found': False}
             )
-            trace_info = self.trace()
-            if trace_info:
-                failure_msg += f"\n\nHere's a trace of my activities:\n{trace_info}"
-                print(trace_info)
+            # trace_info = self.trace()
+            # if trace_info:
+            #     print(trace_info)
 
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
         else:
