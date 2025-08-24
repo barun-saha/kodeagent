@@ -52,8 +52,7 @@ def get_code_act_agent(model_name: str) -> ka.Agent:
         ),
         env_vars_to_set={'FIREWORKS_API_KEY': os.environ.get('FIREWORKS_API_KEY', '')},
         timeout=35,
-        filter_tools_for_task=False,
-        use_planning=True
+        filter_tools_for_task=False
     )
 
     return agent

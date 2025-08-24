@@ -45,8 +45,7 @@ def planning_react_agent():
         model_name=MODEL_NAME,
         tools=[dummy_tool_one, calculator, web_search, file_download],
         description='Test ReAct agent with planning for unit tests',
-        max_iterations=3,
-        use_planning=True
+        max_iterations=3
     )
     return agent
 

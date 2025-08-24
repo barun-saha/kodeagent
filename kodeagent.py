@@ -974,7 +974,6 @@ class ReActAgent(Agent):
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
-            use_planning: bool = False,
     ):
         """
         Instantiate a ReAct agent.
@@ -997,8 +996,7 @@ class ReActAgent(Agent):
             filter_tools_for_task=filter_tools_for_task,
         )
 
-        self.use_planning = use_planning
-        self.planner = Planner(model_name, litellm_params) if use_planning else None
+        self.planner = Planner(model_name, litellm_params)
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
 
@@ -1045,9 +1043,8 @@ class ReActAgent(Agent):
             channel='run'
         )
 
-        if self.use_planning and self.planner:
-            self.plan = await self.planner.create_plan(self.task, self.__class__.__name__)
-            yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
+        self.plan = await self.planner.create_plan(self.task, self.__class__.__name__)
+        yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
 
         plan_stalled_counter = 0
         for idx in range(self.max_iterations):
@@ -1061,7 +1058,7 @@ class ReActAgent(Agent):
             async for update in self._act():
                 yield update
 
-            if self.use_planning and self.plan and self.planner:
+            if self.plan:
                 # Compare a stable progress signature instead of JSON strings
                 plan_before_update = [(s.description, s.is_done) for s in self.plan.steps]
                 await self._update_plan()
@@ -1097,7 +1094,7 @@ class ReActAgent(Agent):
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
         else:
             # Update the plan one last time after the final answer is found
-            if self.use_planning and self.plan and self.planner:
+            if self.plan:
                 await self._update_plan()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
@@ -1485,7 +1482,6 @@ class CodeActAgent(ReActAgent):
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
             filter_tools_for_task: bool = False,
-            use_planning: bool = False,
     ):
         """
         Instantiate a CodeActAgent.
@@ -1513,7 +1509,6 @@ class CodeActAgent(ReActAgent):
             max_iterations=max_iterations,
             description=description,
             filter_tools_for_task=filter_tools_for_task,
-            use_planning=use_planning,
         )
         # Combine the source code of all tools into one place
         # TODO Somehow dynamically identify and include the modules used by the tools
@@ -1722,8 +1717,7 @@ async def main():
     #     tools=[calculator, ],
     #     max_iterations=3,
     #     litellm_params=litellm_params,
-    #     filter_tools_for_task=False,
-    #     use_planning=True
+    #     filter_tools_for_task=False
     # )
     code_agent = CodeActAgent(
         name='Web agent',
@@ -1737,8 +1731,7 @@ async def main():
             'ddgs', 'markitdown', 'youtube_transcript_api',
         ],
         pip_packages='ddgs~=9.5.2;"markitdown[all]";',
-        filter_tools_for_task=False,
-        use_planning=True
+        filter_tools_for_task=False
     )
 
     the_tasks = [
