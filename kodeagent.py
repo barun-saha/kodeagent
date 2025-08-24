@@ -1002,6 +1002,24 @@ class ReActAgent(Agent):
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
 
+    async def _update_plan(self):
+        """
+        Update the plan based on the last thought and observation.
+        """
+        last_thought = ''
+        last_observation = ''
+        if len(self.messages) > 1:
+            if isinstance(self.messages[-2], (ReActChatMessage, CodeChatMessage)):
+                last_thought = self.messages[-2].thought
+            if self.messages[-1].role == 'tool':
+                last_observation = self.messages[-1].content
+        self.plan = await self.planner.update_plan(
+            plan=self.plan,
+            thought=last_thought,
+            observation=last_observation,
+            task_id=self.task.id,
+        )
+
     async def run(
             self,
             task: str,
@@ -1046,19 +1064,7 @@ class ReActAgent(Agent):
             if self.use_planning and self.plan and self.planner:
                 # Compare a stable progress signature instead of JSON strings
                 plan_before_update = [(s.description, s.is_done) for s in self.plan.steps]
-                last_thought = ''
-                last_observation = ''
-                if len(self.messages) > 1:
-                    if isinstance(self.messages[-2], (ReActChatMessage, CodeChatMessage)):
-                        last_thought = self.messages[-2].thought
-                    if self.messages[-1].role == 'tool':
-                        last_observation = self.messages[-1].content
-                self.plan = await self.planner.update_plan(
-                    plan=self.plan,
-                    thought=last_thought,
-                    observation=last_observation,
-                    task_id=self.task.id,
-                )
+                await self._update_plan()
                 plan_after_update = [(s.description, s.is_done) for s in self.plan.steps]
 
                 if plan_before_update == plan_after_update:
@@ -1092,19 +1098,7 @@ class ReActAgent(Agent):
         else:
             # Update the plan one last time after the final answer is found
             if self.use_planning and self.plan and self.planner:
-                last_thought = ''
-                last_observation = ''
-                if len(self.messages) > 1:
-                    if isinstance(self.messages[-2], (ReActChatMessage, CodeChatMessage)):
-                        last_thought = self.messages[-2].thought
-                    if self.messages[-1].role == 'tool':
-                        last_observation = self.messages[-1].content
-                self.plan = await self.planner.update_plan(
-                    plan=self.plan,
-                    thought=last_thought,
-                    observation=last_observation,
-                    task_id=self.task.id,
-                )
+                await self._update_plan()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """
