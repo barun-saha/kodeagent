@@ -79,6 +79,7 @@ CODE_ACT_AGENT_PROMPT = _read_prompt('code_act_agent.txt')
 RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
 AGENT_PLAN_PROMPT = _read_prompt('agent_plan.txt')
 UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')
+OBSERVATION_PROMPT = _read_prompt('observation.txt')
 SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
 # Unused currently
 CONTEXTUAL_SUMMARY_PROMPT = _read_prompt('contextual_summary.txt')
@@ -90,13 +91,6 @@ VISUAL_CAPABILITY = '''
     (e.g., OCR, analyzing a video, image editing, or comparing thousands of images)
     OR if your own visual capabilities fail.
 '''
-PLAN_STALLED_WARNING = (
-    '⚠️ CRITICAL WARNING: The agent plan appears to be stalled! The task seems to have made'
-    ' no progress. You must immediately perform a self-correction. Your next thought must diagnose'
-    ' the reason for the stall and propose a significantly different approach.'
-    ' DO NOT REPEAT THE PREVIOUS ATTEMPTS.'
-)
-PLAN_STALLED_THRESHOLD = 4
 
 
 def tool(func: Callable) -> Callable:
@@ -340,7 +334,7 @@ def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
 def get_youtube_transcript(video_id: str) -> str:
     """
     Retrieve the transcript/subtitles for a given YouTube video. It also works for automatically
-    generated subtitles, supports translating subtitles. The input should be a valid Youtube
+    generated subtitles, supports translating subtitles. The input should be a valid YouTube
     video ID. E.g., the URL https://www.youtube.com/watch?v=aBc4E has the video ID `aBc4E`.
 
     Args:
@@ -351,7 +345,6 @@ def get_youtube_transcript(video_id: str) -> str:
     """
     from youtube_transcript_api import YouTubeTranscriptApi, _errors as yt_errors
 
-    transcript_text = ''
     try:
         transcript = YouTubeTranscriptApi().fetch(video_id)
         transcript_text = ' '.join([item.text for item in transcript.snippets])
@@ -435,6 +428,22 @@ class PlanStep(pyd.BaseModel):
 class AgentPlan(pyd.BaseModel):
     """A structured plan for an agent to follow."""
     steps: list[PlanStep] = pyd.Field(description='List of steps to accomplish the task')
+
+
+class ObserverResponse(pyd.BaseModel):
+    """
+    The response from the observer after analyzing the agent's behavior.
+    """
+    is_progressing: bool = pyd.Field(
+        description='True if the agent is making meaningful progress on the plan'
+    )
+    is_in_loop: bool = pyd.Field(
+        description='True if the agent is stuck in a repetitive loop'
+    )
+    reasoning: str = pyd.Field(description='A short reason for the assessment')
+    correction_message: Optional[str] = pyd.Field(
+        description='A specific, actionable feedback to help the agent self-correct'
+    )
 
 
 class ChatMessage(pyd.BaseModel):
@@ -537,6 +546,176 @@ class AgentResponse(TypedDict):
     metadata: Optional[dict[str, Any]]
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_random_exponential(multiplier=1, max=10))
+async def call_llm(
+        model_name: str,
+        litellm_params: dict,
+        messages: list[dict],
+        response_format: Optional[
+            Type[
+                ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus
+                | AgentPlan | ObserverResponse
+            ]
+        ] = None,
+        trace_id: Optional[str] = None,
+) -> str:
+    """
+    Invoke the LLM to generate a response based on a given list of messages.
+
+    Args:
+        model_name: The name of the LLM to be used.
+        litellm_params: Optional parameters for LiteLLM.
+        messages: A list of messages (and optional images) to be sent to the LLM.
+        response_format: Optional type of message the LLM should respond with.
+        trace_id: (Optional) Langfuse trace ID.
+
+    Returns:
+        The LLM response as string.
+
+    Raises:
+        ValueError: If the LLM returns an empty or invalid response body.
+    """
+    params = {
+        'model': model_name,
+        'messages': messages,
+    }
+    if response_format:
+        params['response_format'] = response_format
+    params.update(litellm_params)
+
+    response = litellm.completion(**params, metadata={'trace_id': str(trace_id)})
+
+    # Check for empty content
+    response_content = response.choices[0].message.get('content')
+    if not response_content or not response_content.strip():
+        raise ValueError('LLM returned an empty or invalid response body.')
+
+    token_usage = {
+        'cost': response._hidden_params['response_cost'],
+        'prompt_tokens': response.usage.get('prompt_tokens'),
+        'completion_tokens': response.usage.get('completion_tokens'),
+        'total_tokens': response.usage.get('total_tokens'),
+    }
+    logger.info(token_usage)
+    return response_content
+
+
+class Planner:
+    """
+    Given a task, generate a step-by-step plan to solve it.
+    This class is stateless, except for the LLM model configuration.
+    """
+    def __init__(self, model_name: str, litellm_params: Optional[dict] = None):
+        self.model_name = model_name
+        self.litellm_params = litellm_params or {}
+
+    async def create_plan(self, task: Task, agent_type: str) -> AgentPlan:
+        """
+        Create a plan to solve the given task.
+        """
+        messages = ku.make_user_message(
+            text_content=AGENT_PLAN_PROMPT.format(
+                agent_type=agent_type,
+                task=task.description,
+                task_files='\n'.join(task.files) if task.files else '[None]',
+            ),
+            files=task.files,
+        )
+        response = await call_llm(
+            model_name=self.model_name,
+            litellm_params=self.litellm_params,
+            messages=messages,
+            response_format=AgentPlan,
+            trace_id=task.id
+        )
+        return AgentPlan.model_validate_json(response)
+
+    async def update_plan(
+            self, plan: AgentPlan, thought: str, observation: str, task_id: str
+    ) -> AgentPlan:
+        """
+        Update the plan based on the last thought and observation.
+        """
+        prompt = UPDATE_PLAN_PROMPT.format(
+            plan=plan.model_dump_json(indent=2),
+            thought=thought,
+            observation=observation
+        )
+        response = await call_llm(
+            model_name=self.model_name,
+            litellm_params=self.litellm_params,
+            messages=ku.make_user_message(prompt),
+            response_format=AgentPlan,
+            trace_id=task_id
+        )
+        return AgentPlan.model_validate_json(response)
+
+
+class Observer:
+    """
+    Monitors an agent's behavior to detect issues like loops or stalled plans.
+    If a problem is detected, it can generate a corrective message to be injected
+    into the agent's history to prompt a change in behavior.
+    """
+    def __init__(self, model_name: str, litellm_params: Optional[dict] = None, threshold: int = 3):
+        self.threshold = threshold
+        self.model_name = model_name
+        self.litellm_params = litellm_params or {}
+        self.last_correction_iteration: int = 0
+
+    async def observe(
+            self,
+            iteration: int,
+            task: Task,
+            history: str,
+            plan_before: Optional[AgentPlan],
+            plan_after: Optional[AgentPlan],
+    ) -> Optional[str]:
+        """
+        Observe the agent's state and return a corrective message if a problem is detected.
+        """
+        if (iteration <= 1) or (iteration - self.last_correction_iteration < self.threshold):
+            return None
+
+        try:
+            # Use the LLM to analyze the state and provide feedback
+            prompt = OBSERVATION_PROMPT.format(
+                task=task.description,
+                plan_before=plan_before,
+                plan_after=plan_after,
+                history=history
+            )
+            response = await call_llm(
+                model_name=self.model_name,
+                litellm_params=self.litellm_params,
+                messages=[{'role': 'user', 'content': prompt}],
+                response_format=ObserverResponse,
+            )
+            # Parse the structured response
+            observer_output = ObserverResponse.model_validate_json(response)
+            print(f'Observer (iteration {iteration}): {observer_output.model_dump_json()}')
+
+            # Return the correction message if a problem is detected
+            if not observer_output.is_progressing or observer_output.is_in_loop:
+                self.last_correction_iteration = iteration
+                correction = (
+                    f'!!!CRITICAL FOR COURSE CORRECTION: {observer_output.correction_message}\n\n'
+                    'For TOOL call, use the EXACT TOOL NAMES and ARGS specified earlier.'
+                )
+                return correction
+
+        except Exception as e:
+            # Fallback for LLM or parsing errors
+            print(f'LLM Observer failed: {e}')
+            return None  # Or a generic fallback message
+
+        return None
+
+    def reset(self):
+        """Reset the observer state."""
+        self.last_correction_iteration = 0
+
+
 class Agent(ABC):
     """
     An abstract agent. This should serve as the base class for all types of agents.
@@ -582,36 +761,15 @@ class Agent(ABC):
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
         self.plan: Optional[AgentPlan] = None
+        self.observer = Observer(model_name=model_name, litellm_params=litellm_params)
 
         self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
-        self.plan_stalled = False
 
     def __str__(self):
         return (
             f'Agent: {self.name} ({self.id}); LLM: {self.model_name}; Tools: {self.tools}'
         )
 
-    async def create_plan(self):
-        """
-        Create a plan to solve the current task.
-        """
-        if not self.task:
-            raise ValueError('A task must be set before creating a plan.')
-
-        messages = ku.make_user_message(
-            text_content=AGENT_PLAN_PROMPT.format(
-                agent_type=self.__class__.__name__,
-                task=self.task.description,
-                task_files='\n'.join(self.task.files) if self.task.files else '[None]',
-            ),
-            files=self.task.files,
-        )
-        response = await self._call_llm(
-            messages=messages,
-            response_format=AgentPlan,
-            trace_id=self.task.id
-        )
-        self.plan = AgentPlan.model_validate_json(response)
 
     @property
     def current_plan(self) -> Optional[str]:
@@ -633,30 +791,6 @@ class Agent(ABC):
             todo_list.append(f'- [{status}] {step.description}')
         return '\n'.join(todo_list)
 
-    async def _update_plan_progress(self):
-        """
-        Update the plan based on the last thought and observation.
-        """
-        last_thought = ''
-        last_observation = ''
-        if len(self.messages) > 1:
-            if isinstance(self.messages[-2], (ReActChatMessage, CodeChatMessage)):
-                last_thought = self.messages[-2].thought
-            if self.messages[-1].role == 'tool':
-                last_observation = self.messages[-1].content
-
-        prompt = UPDATE_PLAN_PROMPT.format(
-            plan=self.plan.model_dump_json(indent=2),
-            thought=last_thought,
-            observation=last_observation
-        )
-        response = await self._call_llm(
-            ku.make_user_message(prompt),
-            response_format=AgentPlan,
-            trace_id=self.task.id
-        )
-        self.plan = AgentPlan.model_validate_json(response)
-
     async def get_history_summary(self) -> str:
         """
         Generate a summary of the conversation history.
@@ -669,8 +803,10 @@ class Agent(ABC):
             task=self.task.description,
             history=history
         )
-        summary = await self._call_llm(
-            ku.make_user_message(prompt),
+        summary = await call_llm(
+            model_name=self.model_name,
+            litellm_params=self.litellm_params,
+            messages=ku.make_user_message(prompt),
             trace_id=self.task.id if self.task else None
         )
         return summary
@@ -698,8 +834,10 @@ class Agent(ABC):
         )
 
         try:
-            response = await self._call_llm(
-                ku.make_user_message(prompt),
+            response = await call_llm(
+                model_name=self.model_name,
+                litellm_params=self.litellm_params,
+                messages=ku.make_user_message(prompt),
                 trace_id=self.task.id if self.task else None
             )
             relevant_tool_names = response.split(',') if response.strip() else []
@@ -727,10 +865,9 @@ class Agent(ABC):
         if task_id:
             self.task.id = task_id
         self.msg_idx_of_new_task = len(self.messages)
-        self.final_answer_found = False  # Reset from any previous task
-        # Reset planning state for new tasks
+        self.final_answer_found = False
         self.plan = None
-        self.plan_stalled = False
+        self.observer.reset()
 
     async def salvage_response(self) -> str:
         """
@@ -745,7 +882,12 @@ class Agent(ABC):
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             history=self.get_history(start_idx=self.msg_idx_of_new_task)
         )
-        response = await self._call_llm(ku.make_user_message(prompt), trace_id=self.task.id)
+        response = await call_llm(
+            model_name=self.model_name,
+            litellm_params=self.litellm_params,
+            messages=ku.make_user_message(prompt),
+            trace_id=self.task.id
+        )
         return response
 
     def trace(self) -> str:
@@ -789,52 +931,6 @@ class Agent(ABC):
             An update from the agent.
         """
 
-    @retry(stop=stop_after_attempt(3), wait=wait_random_exponential(multiplier=1, max=10))
-    async def _call_llm(
-            self,
-            messages: list[dict],
-            response_format: Optional[
-                Type[ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus | AgentPlan]
-            ] = None,
-            trace_id: Optional[str]=None,
-    ) -> str:
-        """
-        Invoke the LLM to generate a response based on a given list of messages.
-
-        Args:
-            messages: A list of messages (and optional images) to be sent to the LLM.
-            response_format: Optional type of message the LLM should respond with.
-            trace_id: (Optional) Langfuse trace ID.
-
-        Returns:
-            The LLM response as string.
-
-        Raises:
-            ValueError: If the LLM returns an empty or invalid response body.
-        """
-        params = {
-            'model': self.model_name,
-            'messages': messages,
-        }
-        if response_format:
-            params['response_format'] = response_format
-        params.update(self.litellm_params)
-
-        response = litellm.completion(**params, metadata={'trace_id': str(trace_id)})
-
-        # Check for empty content
-        response_content = response.choices[0].message.get('content')
-        if not response_content or not response_content.strip():
-            raise ValueError('LLM returned an empty or invalid response body.')
-
-        token_usage = {
-            'cost': response._hidden_params['response_cost'],
-            'prompt_tokens': response.usage.get('prompt_tokens'),
-            'completion_tokens': response.usage.get('completion_tokens'),
-            'total_tokens': response.usage.get('total_tokens'),
-        }
-        logger.info(token_usage)
-        return response_content
 
     def response(
             self,
@@ -953,7 +1049,6 @@ class ReActAgent(Agent):
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
-            use_planning: bool = False,
     ):
         """
         Instantiate a ReAct agent.
@@ -976,15 +1071,34 @@ class ReActAgent(Agent):
             filter_tools_for_task=filter_tools_for_task,
         )
 
-        self.use_planning = use_planning
+        self.planner = Planner(model_name, litellm_params)
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
+
+    async def _update_plan(self):
+        """
+        Update the plan based on the last thought and observation.
+        """
+        last_thought = ''
+        last_observation = ''
+        if len(self.messages) > 1:
+            if isinstance(self.messages[-2], (ReActChatMessage, CodeChatMessage)):
+                last_thought = self.messages[-2].thought
+            if self.messages[-1].role == 'tool':
+                last_observation = self.messages[-1].content
+        self.plan = await self.planner.update_plan(
+            plan=self.plan,
+            thought=last_thought,
+            observation=last_observation,
+            task_id=self.task.id,
+        )
 
     async def run(
             self,
             task: str,
             files: Optional[list[str]] = None,
-            task_id: Optional[str] = None
+            task_id: Optional[str] = None,
+            summarize_progress_on_failure: bool = True,
     ) -> AsyncIterator[AgentResponse]:
         """
         Solve a task using ReAct's TAO loop.
@@ -993,6 +1107,7 @@ class ReActAgent(Agent):
             task: A description of the task.
             files: An optional list of file paths or URLs.
             task_id: (Optional) An ID for the task, if provided by the caller.
+            summarize_progress_on_failure: Whether to summarize the progress made on task failure.
 
         Yields:
             An update from the agent.
@@ -1005,11 +1120,9 @@ class ReActAgent(Agent):
             channel='run'
         )
 
-        if self.use_planning:
-            await self.create_plan()
-            yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
+        self.plan = await self.planner.create_plan(self.task, self.__class__.__name__)
+        yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
 
-        plan_stalled_counter = 0
         for idx in range(self.max_iterations):
             if self.final_answer_found:
                 break
@@ -1021,44 +1134,48 @@ class ReActAgent(Agent):
             async for update in self._act():
                 yield update
 
-            if self.use_planning and self.plan:
-                # Compare a stable progress signature instead of JSON strings
-                plan_before_update = [(s.description, s.is_done) for s in self.plan.steps]
-                await self._update_plan_progress()
-                plan_after_update = [(s.description, s.is_done) for s in self.plan.steps]
+            plan_before_update = None
+            if self.plan:
+                plan_before_update = self.current_plan
+                await self._update_plan()
 
-                if plan_before_update == plan_after_update:
-                    plan_stalled_counter += 1
-                else:
-                    plan_stalled_counter = 0
-                    self.plan_stalled = False
-
-                if plan_stalled_counter >= PLAN_STALLED_THRESHOLD:
-                    self.plan_stalled = True
+            # The observer checks for issues and suggests corrections
+            correction_msg = await self.observer.observe(
+                task=self.task,
+                history=self.get_history(start_idx=self.msg_idx_of_new_task),
+                plan_before=plan_before_update,
+                plan_after=self.current_plan,
+                iteration=idx + 1
+            )
+            if correction_msg:
+                self.add_to_history(ChatMessage(role='tool', content=correction_msg))
+                yield self.response(rtype='log', value=correction_msg, channel='observer')
             print('-' * 30)
 
         if not self.final_answer_found:
-            progress_summary = await self.salvage_response()
-            failure_msg = (
-                f'Sorry, I failed to get a complete answer even after {self.max_iterations} steps!'
-                f'\n\nHere\'s a summary of my progress for this task:\n{progress_summary}'
-            )
+            failure_msg = f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
+
+            if summarize_progress_on_failure:
+                progress_summary = await self.salvage_response()
+                failure_msg += (
+                    f'\n\nHere\'s a summary of my progress for this task:\n{progress_summary}'
+                )
+
             yield self.response(
                 rtype='final',
                 value=failure_msg,
                 channel='run',
                 metadata={'final_answer_found': False}
             )
-            trace_info = self.trace()
-            if trace_info:
-                failure_msg += f"\n\nHere's a trace of my activities:\n{trace_info}"
-                print(trace_info)
+            # trace_info = self.trace()
+            # if trace_info:
+            #     print(trace_info)
 
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
         else:
             # Update the plan one last time after the final answer is found
-            if self.use_planning and self.plan:
-                await self._update_plan_progress()
+            if self.plan:
+                await self._update_plan()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """
@@ -1087,9 +1204,6 @@ class ReActAgent(Agent):
             visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
-        if self.plan_stalled:
-            logger.debug('Plan appears to be stalled...adding warning to prompt')
-            message += f'\n\n{PLAN_STALLED_WARNING}'
         msg = await self._record_thought(message, ReActChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
@@ -1117,7 +1231,9 @@ class ReActAgent(Agent):
         for _ in range(3):
             try:
                 # Call the LLM with the prompt and response format class
-                response = await self._call_llm(
+                response = await call_llm(
+                    model_name=self.model_name,
+                    litellm_params=self.litellm_params,
                     messages=prompt,
                     response_format=response_format_class,
                     trace_id=self.task.id,
@@ -1443,7 +1559,6 @@ class CodeActAgent(ReActAgent):
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
             filter_tools_for_task: bool = False,
-            use_planning: bool = False,
     ):
         """
         Instantiate a CodeActAgent.
@@ -1471,7 +1586,6 @@ class CodeActAgent(ReActAgent):
             max_iterations=max_iterations,
             description=description,
             filter_tools_for_task=filter_tools_for_task,
-            use_planning=use_planning,
         )
         # Combine the source code of all tools into one place
         # TODO Somehow dynamically identify and include the modules used by the tools
@@ -1548,9 +1662,6 @@ class CodeActAgent(ReActAgent):
             visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
-        if self.plan_stalled:
-            logger.debug('Plan appears to be stalled...adding warning to prompt')
-            message += f'\n\n{PLAN_STALLED_WARNING}'
         msg = await self._record_thought(message, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
@@ -1680,8 +1791,7 @@ async def main():
     #     tools=[calculator, ],
     #     max_iterations=3,
     #     litellm_params=litellm_params,
-    #     filter_tools_for_task=False,
-    #     use_planning=True
+    #     filter_tools_for_task=False
     # )
     code_agent = CodeActAgent(
         name='Web agent',
@@ -1695,8 +1805,7 @@ async def main():
             'ddgs', 'markitdown', 'youtube_transcript_api',
         ],
         pip_packages='ddgs~=9.5.2;"markitdown[all]";',
-        filter_tools_for_task=False,
-        use_planning=True
+        filter_tools_for_task=False
     )
 
     the_tasks = [

@@ -3,6 +3,7 @@ Unit tests for the KodeAgent ReActAgent class.
 """
 import datetime
 import pytest
+from unittest.mock import AsyncMock, patch
 
 from kodeagent import (
     ReActAgent,
@@ -11,7 +12,7 @@ from kodeagent import (
     ReActChatMessage,
     calculator,
     web_search,
-    file_download, CodeActAgent, AgentPlan, PlanStep
+    file_download, CodeActAgent, AgentPlan, PlanStep, Planner, call_llm, Task, Observer
 )
 
 
@@ -45,8 +46,7 @@ def planning_react_agent():
         model_name=MODEL_NAME,
         tools=[dummy_tool_one, calculator, web_search, file_download],
         description='Test ReAct agent with planning for unit tests',
-        max_iterations=3,
-        use_planning=True
+        max_iterations=3
     )
     return agent
 
@@ -231,15 +231,6 @@ async def test_unsupported_task(react_agent):
     ), 'Agent should have failed for unsupported video generation task'
 
 
-@pytest.mark.asyncio
-async def test_create_plan(planning_react_agent):
-    """Test plan creation."""
-    planning_react_agent._run_init('Solve 2+2')
-    await planning_react_agent.create_plan()
-    assert planning_react_agent.plan is not None
-    assert isinstance(planning_react_agent.plan, AgentPlan)
-    assert len(planning_react_agent.plan.steps) > 0
-    assert '- [ ]' in planning_react_agent.current_plan
 
 
 def test_format_plan_as_todo(react_agent):
@@ -253,38 +244,6 @@ def test_format_plan_as_todo(react_agent):
     assert formatted_plan == expected
 
 
-@pytest.mark.asyncio
-async def test_update_plan_progress(planning_react_agent):
-    """Test plan progress update."""
-    agent = planning_react_agent
-    agent._run_init('What is 2+2?')
-    agent.plan = AgentPlan(steps=[
-        PlanStep(description='Use calculator to find 2+2.', is_done=False),
-        PlanStep(description='Provide the final answer.', is_done=False)
-    ])
-
-    # Simulate a thought-action-observation cycle
-    thought_msg = ReActChatMessage(
-        role='assistant',
-        thought='I need to calculate 2+2.',
-        action='calculator',
-        args='{"expression": "2+2"}',
-        content='',
-        successful=False,
-        answer=None
-    )
-    agent.add_to_history(thought_msg)
-
-    obs_msg = ChatMessage(role='tool', content='4')
-    agent.add_to_history(obs_msg)
-
-    original_plan = agent.current_plan
-    await agent._update_plan_progress()
-
-    assert agent.plan is not None
-    assert original_plan != agent.current_plan
-    # A reasonable expectation is that the first item is checked off
-    assert agent.plan.steps[0].is_done is True
 
 
 @pytest.mark.asyncio
@@ -297,6 +256,115 @@ async def test_run_with_planning(planning_react_agent):
     plan_logs = [r for r in responses if r['type'] == 'log' and 'Plan:' in r['value']]
     assert len(plan_logs) == 1
     assert any(r['type'] == 'final' for r in responses)
+
+
+@pytest.mark.asyncio
+async def test_call_llm():
+    """Test the public `call_llm` function."""
+    response = await call_llm(
+        model_name=MODEL_NAME,
+        litellm_params={},
+        messages=[{'role': 'user', 'content': 'Hello!'}]
+    )
+    assert isinstance(response, str)
+    assert len(response) > 0
+
+
+@pytest.fixture
+def planner():
+    """Fixture to create a Planner instance for testing."""
+    return Planner(model_name=MODEL_NAME)
+
+
+@pytest.mark.asyncio
+async def test_planner_create_plan(planner):
+    """Test plan creation by the Planner."""
+    task = Task(description='Solve 2+2', files=[])
+    plan = await planner.create_plan(task, 'ReActAgent')
+    assert plan is not None
+    assert isinstance(plan, AgentPlan)
+    assert len(plan.steps) > 0
+
+
+@pytest.mark.asyncio
+async def test_planner_update_plan(planner):
+    """Test plan progress update by the Planner."""
+    plan = AgentPlan(steps=[
+        PlanStep(description='Use calculator to find 2+2.', is_done=False),
+        PlanStep(description='Provide the final answer.', is_done=False)
+    ])
+    thought = 'I used the calculator and got the result.'
+    observation = '4'
+    task_id = 'test-task-123'
+    updated_plan = await planner.update_plan(plan, thought, observation, task_id)
+
+    assert updated_plan is not None
+    assert isinstance(updated_plan, AgentPlan)
+    assert updated_plan.steps[0].is_done is True
+
+
+@pytest.fixture
+def observer():
+    """Fixture to create an Observer instance for testing."""
+    return Observer(model_name=MODEL_NAME, threshold=3)
+
+
+@pytest.mark.asyncio
+async def test_observer_threshold(observer):
+    """Test that observer does not trigger before threshold."""
+    task = Task(description='test task', files=None)
+    history = 'some history'
+    plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
+
+    # Iteration 1, should not trigger
+    correction = await observer.observe(1, task, history, plan, plan)
+    assert correction is None
+    assert observer.last_correction_iteration == 0
+
+    # Iteration 2 (threshold=3), should not trigger
+    correction = await observer.observe(2, task, history, plan, plan)
+    assert correction is None
+    assert observer.last_correction_iteration == 0
+
+
+@pytest.mark.asyncio
+@patch('kodeagent.call_llm', new_callable=AsyncMock)
+async def test_observer_no_issues(mock_call_llm, observer):
+    """Test that observer returns None when there are no issues."""
+    mock_call_llm.return_value = '{"is_progressing": true, "is_in_loop": false, "reasoning": "all good"}'
+    task = Task(description='test task', files=None)
+    history = 'some history'
+    plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
+
+    correction = await observer.observe(4, task, history, plan, plan)
+    assert correction is None
+    mock_call_llm.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch('kodeagent.call_llm', new_callable=AsyncMock)
+async def test_observer_detects_loop(mock_call_llm, observer):
+    """Test observer returns a correction when a loop is detected."""
+    mock_call_llm.return_value = (
+        '{"is_progressing": false, "is_in_loop": true, "reasoning": "stuck in a loop",'
+        ' "correction_message": "try something else"}'
+    )
+    task = Task(description='test task', files=None)
+    history = 'some history'
+    plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
+
+    correction = await observer.observe(4, task, history, plan, plan)
+    assert correction is not None
+    assert 'try something else' in correction
+    assert observer.last_correction_iteration == 4
+    mock_call_llm.assert_called_once()
+
+
+def test_observer_reset(observer):
+    """Test that observer state is reset."""
+    observer.last_correction_iteration = 5
+    observer.reset()
+    assert observer.last_correction_iteration == 0
 
 
 async def _codeact_agent_date_(code_agent) -> tuple[bool, str]:
