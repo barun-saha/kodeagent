@@ -668,8 +668,8 @@ class Observer:
             iteration: int,
             task: Task,
             history: str,
-            plan_before: Optional[AgentPlan],
-            plan_after: Optional[AgentPlan],
+            plan_before: Optional[str | AgentPlan],
+            plan_after: Optional[str | AgentPlan],
     ) -> Optional[str]:
         """
         Observe the agent's state and return a corrective message if a problem is detected.
@@ -1248,7 +1248,7 @@ class ReActAgent(Agent):
                 self.add_to_history(msg)
                 return msg
 
-            except (pyd.ValidationError, pydantic_core.ValidationError):
+            except (JSONDecodeError, pyd.ValidationError, pydantic_core.ValidationError):
                 # This can happen if the LLM response is not valid JSON
                 logger.error('LLM response validation error in _record_thought(). Retrying...')
                 await asyncio.sleep(random.uniform(0.5, 1.5))
