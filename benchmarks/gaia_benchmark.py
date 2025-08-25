@@ -196,7 +196,13 @@ if __name__ == '__main__':
         help='The LLM model to use.',
         default='gemini/gemini-2.5-flash-lite',
     )
+    parser.add_argument(
+        '--ntasks',
+        type=int,
+        help='The max no. of tasks to run.',
+        default=3
+    )
     args = parser.parse_args()
     download_gaia_dataset()
 
-    asyncio.run(main(args.split, args.model, max_tasks=2))
+    asyncio.run(main(args.split, args.model, max_tasks=args.ntasks))

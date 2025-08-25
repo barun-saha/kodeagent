@@ -16,7 +16,7 @@ from kodeagent import (
 )
 
 
-MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
+MODEL_NAME = 'gemini/gemini-2.5-flash-lite'
 
 
 @tool
@@ -400,7 +400,11 @@ async def test_codeact_agent_host():
 
 @pytest.mark.asyncio
 async def test_codeact_agent_e2b():
-    """Test the CodeActAgent functionality ona remote E2B sandbox."""
+    """Test the CodeActAgent functionality on a remote E2B sandbox."""
+    import os
+    if not os.getenv('E2B_API_KEY'):
+        pytest.skip('E2B_API_KEY environment variable is not set.')
+
     code_agent2 = CodeActAgent(
         name='Code agent',
         model_name=MODEL_NAME,
