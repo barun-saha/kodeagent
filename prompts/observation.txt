@@ -6,6 +6,9 @@ actionable correction. You must respond with a JSON object following the `Observ
 Here is the agent's full task:
 {task}
 
+Here is a set of tools (user-defiend functions) available to the agent (if any):
+{tools}
+
 Here is the general plan the agent is following (completed tasks are marked with "x") from before:
 {plan_before}
 
@@ -21,3 +24,4 @@ If you detect a loop (e.g., same actions/observations/errors appearing repeatedl
 provide a concise and direct corrective instruction in the `correction_message` field to get the agent back on track.
 If the agent is making good progress, you can set `correction_message` to null.
 The `correction_message`, when not empty, should always be in second-person, e.g., "You should...", "Avoid...", "Focus on...".
+The `correction_message` should be actionable and specific to the agent's situation.
