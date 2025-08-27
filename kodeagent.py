@@ -1819,7 +1819,7 @@ async def main():
     """
     Demonstrate the use of ReActAgent and CodeActAgent.
     """
-    litellm_params = {'temperature': 0}
+    litellm_params = {'temperature': 0, 'timeout': 30}
     model_name = 'gemini/gemini-2.0-flash-lite'
 
     # react_agent = ReActAgent(

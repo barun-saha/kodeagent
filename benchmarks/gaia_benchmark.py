@@ -30,7 +30,7 @@ def get_code_act_agent(model_name: str, max_steps: int = 10) -> ka.Agent:
     Returns:
         A configured CodeAgent instance.
     """
-    litellm_params = {'temperature': 0}
+    litellm_params = {'temperature': 0, 'timeout': 30}
 
     agent = ka.CodeActAgent(
         name='Multi-task agent',
