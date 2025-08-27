@@ -16,9 +16,8 @@ In case of wrong tool calls, you must point out the correct tool to use, based o
 For tool calls, instruct the agent to use the exact tool names and arguments provided earlier.
 Use the tool name directly, without any object or attribute prefixes:
 e.g., `tool_name(arg='value')`, not `module.tool_name(arg='value')` or `tool_name.__call__(arg='value')`.
-E.g., if there is a nominal tool `my_custom_tool available` to the agent, it must be called as `my_custom_tool(arg='value')`,
+E.g., if there is a tool named `my_custom_tool` available to the agent, it must be called as `my_custom_tool(arg='value')`,
 not `my_custom_tool.my_custom_tool(arg='value')` or `module.my_custom_tool(arg='value')`.
-
 The presence of `AttributeError` in the logs is indicative of a wrong tool call or wrong Python library usage.
 Provide very specific instructions to fix it and suggest the correct usage.
 Your PRECISE FEEDBACK is crucial for the agent to get back on track!
