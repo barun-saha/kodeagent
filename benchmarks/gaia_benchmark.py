@@ -20,7 +20,7 @@ REPO_ID = 'gaia-benchmark/GAIA'
 LOCAL_DIR = f'{MODULE_ROOT}/gaia_dataset'
 
 
-def get_code_act_agent(model_name: str) -> ka.Agent:
+def get_code_act_agent(model_name: str, max_steps: int = 10) -> ka.Agent:
     """
     Create a CodeActAgent for solving the GAIA benchmark tasks.
 
@@ -30,7 +30,7 @@ def get_code_act_agent(model_name: str) -> ka.Agent:
     Returns:
         A configured CodeAgent instance.
     """
-    litellm_params = {'temperature': 0}
+    litellm_params = {'temperature': 0, 'timeout': 30}
 
     agent = ka.CodeActAgent(
         name='Multi-task agent',
@@ -40,7 +40,7 @@ def get_code_act_agent(model_name: str) -> ka.Agent:
             ka.search_wikipedia, ka.get_audio_transcript,
         ],
         run_env='host',
-        max_iterations=10,
+        max_iterations=max_steps,
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',
@@ -86,7 +86,7 @@ def download_gaia_dataset():
             sys.exit(1)
 
 
-async def main(split: str, model_name, max_tasks: int = 30):
+async def main(split: str, model_name, max_tasks: int, max_steps: int):
     """
     Iterates through the GAIA dataset metadata, printing questions, answers, and associated files.
 
@@ -94,6 +94,7 @@ async def main(split: str, model_name, max_tasks: int = 30):
         split (str): The dataset split to use, either 'test' or 'validation'.
         model_name (str): The LLM model to use.
         max_tasks (int): Maximum number of tasks to process for demo purposes.
+        max_steps (int): Maximum number of agent steps to run.
     """
     if split not in {'test', 'validation'}:
         raise ValueError('Split must be either `test` or `validation`')
@@ -108,7 +109,7 @@ async def main(split: str, model_name, max_tasks: int = 30):
     with open(metadata_file, 'r', encoding='utf-8') as _:
         gaia_data = [json.loads(line) for line in _]
 
-    agent = get_code_act_agent(model_name=model_name)
+    agent = get_code_act_agent(model_name=model_name, max_steps=max_steps)
     evals = []
     n_questions = min(max_tasks, len(gaia_data))
     n_correct = 0
@@ -130,39 +131,43 @@ async def main(split: str, model_name, max_tasks: int = 30):
         print(f'\n#{idx}\nQuestion: {question}\nFile: {file_path if file_name else "N/A"}')
         question += f'\n\n{special_instructions}'
 
-        async for response in agent.run(
-                task=question,
-                files=[file_path] if file_name else None,
-                summarize_progress_on_failure=False,
-        ):
-            if response['type'] == 'final':
-                answer = (
-                    response['value'].content
-                    if isinstance(response['value'], ka.ChatMessage) else response['value']
-                )
-                print(f'Agent: {answer}\n')
-                if true_answer == answer:
-                    n_correct += 1
-
-                # Somehow the last update to the plan is not captured, so adding a delay
-                await asyncio.sleep(random.uniform(1.25, 2))
-                evals.append(
-                    (
-                        task_id,
-                        question.replace('\n', '<br>'),
-                        true_answer.replace('\n', '<br>'),
-                        answer.replace('\n', '<br>'),
-                        true_answer == answer,
-                        agent.current_plan.replace('\n', '<br>')
+        try:
+            async for response in agent.run(
+                    task=question,
+                    files=[file_path] if file_name else None,
+                    summarize_progress_on_failure=False,
+            ):
+                if response['type'] == 'final':
+                    answer = (
+                        response['value'].content
+                        if isinstance(response['value'], ka.ChatMessage) else response['value']
                     )
-                )
-        print(f'True Answer: {true_answer}')
-        print(f'Plan:\n{agent.current_plan}\n\n')
+                    print(f'Agent: {answer}\n')
+                    if true_answer == answer:
+                        n_correct += 1
 
-        if idx >= max_tasks:
-            break
+                    # Somehow the last update to the plan is not captured, so adding a delay
+                    await asyncio.sleep(random.uniform(1.25, 2))
+                    evals.append(
+                        (
+                            task_id,
+                            question.replace('\n', '<br>'),
+                            true_answer.replace('\n', '<br>'),
+                            answer.replace('\n', '<br>'),
+                            true_answer == answer,
+                            agent.current_plan.replace('\n', '<br>')
+                        )
+                    )
+            print(f'True Answer: {true_answer}')
+            print(f'Plan:\n{agent.current_plan}\n\n')
 
-        await asyncio.sleep(random.uniform(1, 2))
+            if idx >= max_tasks:
+                break
+
+            await asyncio.sleep(random.uniform(1, 2))
+        except Exception as e:
+            print(f'Error processing task {task_id}: {e}')
+            evals.append((task_id, question, true_answer, 'Execution error', False, 'N/A'))
 
     table = tabulate(
         evals,
@@ -202,7 +207,13 @@ if __name__ == '__main__':
         help='The max no. of tasks to run.',
         default=3
     )
+    parser.add_argument(
+        '--nsteps',
+        type=int,
+        help='The max no. of agent steps to run.',
+        default=10
+    )
     args = parser.parse_args()
     download_gaia_dataset()
 
-    asyncio.run(main(args.split, args.model, max_tasks=args.ntasks))
+    asyncio.run(main(args.split, args.model, max_tasks=args.ntasks, max_steps=args.nsteps))

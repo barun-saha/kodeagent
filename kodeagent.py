@@ -36,10 +36,9 @@ from typing import (
 import json_repair
 import litellm
 import pydantic as pyd
-import pydantic_core
 import rich
 from dotenv import load_dotenv
-from tenacity import retry, stop_after_attempt, wait_random_exponential
+from tenacity import stop_after_attempt, wait_random_exponential, AsyncRetrying
 
 import kutils as ku
 
@@ -546,7 +545,6 @@ class AgentResponse(TypedDict):
     metadata: Optional[dict[str, Any]]
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_random_exponential(multiplier=1, max=10))
 async def call_llm(
         model_name: str,
         litellm_params: dict,
@@ -575,29 +573,48 @@ async def call_llm(
     Raises:
         ValueError: If the LLM returns an empty or invalid response body.
     """
-    params = {
-        'model': model_name,
-        'messages': messages,
-    }
+    params = {'model': model_name, 'messages': messages}
+
     if response_format:
         params['response_format'] = response_format
+
+    # Add a timeout to prevent indefinite hangs
+    if 'timeout' not in litellm_params:
+        params['timeout'] = 60  # seconds
+
     params.update(litellm_params)
 
-    response = litellm.completion(**params, metadata={'trace_id': str(trace_id)})
+    try:
+        # Use AsyncRetrying to handle retries in a non-blocking way
+        async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(3),
+                wait=wait_random_exponential(multiplier=1, max=10)
+        ):
+            with attempt:
+                # Use the asynchronous litellm call
+                response = await litellm.acompletion(
+                    **params, metadata={'trace_id': str(trace_id)}
+                )
 
-    # Check for empty content
-    response_content = response.choices[0].message.get('content')
-    if not response_content or not response_content.strip():
-        raise ValueError('LLM returned an empty or invalid response body.')
+                # Check for empty content
+                response_content = response.choices[0].message.content
+                if not response_content or not response_content.strip():
+                    raise ValueError('LLM returned an empty or invalid response body.')
 
-    token_usage = {
-        'cost': response._hidden_params['response_cost'],
-        'prompt_tokens': response.usage.get('prompt_tokens'),
-        'completion_tokens': response.usage.get('completion_tokens'),
-        'total_tokens': response.usage.get('total_tokens'),
-    }
-    logger.info(token_usage)
-    return response_content
+                token_usage = {
+                    'cost': response._hidden_params.get('response_cost'),
+                    'prompt_tokens': response.usage.get('prompt_tokens'),
+                    'completion_tokens': response.usage.get('completion_tokens'),
+                    'total_tokens': response.usage.get('total_tokens'),
+                }
+                logger.info(token_usage)
+                return response_content
+
+    except Exception as e:
+        logger.error('LLM call failed after repeated attempts: %s', str(e))
+        raise ValueError(
+            'Failed to get a valid response from LLM after multiple retries.'
+        ) from e
 
 
 class Planner:
@@ -657,9 +674,16 @@ class Observer:
     If a problem is detected, it can generate a corrective message to be injected
     into the agent's history to prompt a change in behavior.
     """
-    def __init__(self, model_name: str, litellm_params: Optional[dict] = None, threshold: int = 3):
+    def __init__(
+            self,
+            model_name: str,
+            tool_names: set[str],
+            litellm_params: Optional[dict] = None,
+            threshold: int = 3
+    ):
         self.threshold = threshold
         self.model_name = model_name
+        self.tool_names = tool_names
         self.litellm_params = litellm_params or {}
         self.last_correction_iteration: int = 0
 
@@ -683,7 +707,8 @@ class Observer:
                 task=task.description,
                 plan_before=plan_before,
                 plan_after=plan_after,
-                history=history
+                history=history,
+                tools=self.tool_names,
             )
             response = await call_llm(
                 model_name=self.model_name,
@@ -701,7 +726,16 @@ class Observer:
                 correction = (
                     f'!!!CRITICAL FOR COURSE CORRECTION: {observer_output.correction_message}\n\n'
                     'For TOOL call, use the EXACT TOOL NAMES and ARGS specified earlier.'
+                    ' You must use a tool name directly, without any object or attribute, e.g.,'
+                    ' `tool_name(args)` instead of, say `module.tool_name(args)` or'
+                    ' `tool_name.__call__(args)`.'
                 )
+
+                if self.tool_names:
+                    correction += (
+                        'Here are the exact tool names once again for reference: '
+                        f'{", ".join(sorted(self.tool_names))}.'
+                    )
                 return correction
 
         except Exception as e:
@@ -729,7 +763,7 @@ class Agent(ABC):
             tools: Optional[list[Callable]] = None,
             litellm_params: Optional[dict] = None,
             max_iterations: int = 20,
-            filter_tools_for_task: bool = False
+            filter_tools_for_task: bool = False,
     ):
         """
         Initialize an agent.
@@ -761,7 +795,11 @@ class Agent(ABC):
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
         self.plan: Optional[AgentPlan] = None
-        self.observer = Observer(model_name=model_name, litellm_params=litellm_params)
+        self.observer = Observer(
+            model_name=model_name,
+            litellm_params=litellm_params,
+            tool_names=self.tool_names
+        )
 
         self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
 
@@ -1248,15 +1286,15 @@ class ReActAgent(Agent):
                 self.add_to_history(msg)
                 return msg
 
-            except (JSONDecodeError, pyd.ValidationError, pydantic_core.ValidationError):
+            except Exception:
                 # This can happen if the LLM response is not valid JSON
                 logger.error('LLM response validation error in _record_thought(). Retrying...')
-                await asyncio.sleep(random.uniform(0.5, 1.5))
+                await asyncio.sleep(random.uniform(0.5, 1.0))
 
                 # Add an explicit observation to the prompt's message history
                 # Add timestamp to avoid potential cached responses
                 feedback_message = (
-                    'Error: Parsing failed because you did not generate the response'
+                    '!Error: Parsing failed because you did not generate the response'
                     ' following the given JSON schema!!! Please ensure your response is a valid'
                     f' JSON object that follows the specified schema. [Timestamp={datetime.now()}]'
                 )
@@ -1782,7 +1820,7 @@ async def main():
     """
     Demonstrate the use of ReActAgent and CodeActAgent.
     """
-    litellm_params = {'temperature': 0}
+    litellm_params = {'temperature': 0, 'timeout': 30}
     model_name = 'gemini/gemini-2.0-flash-lite'
 
     # react_agent = ReActAgent(
