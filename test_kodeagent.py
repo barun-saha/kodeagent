@@ -11,7 +11,7 @@ from kodeagent import (
     ChatMessage,
     ReActChatMessage,
     calculator,
-    web_search,
+    search_web,
     file_download, CodeActAgent, AgentPlan, PlanStep, Planner, call_llm, Task, Observer,
     ObserverResponse
 )
@@ -32,7 +32,7 @@ def react_agent():
     agent = ReActAgent(
         name='test_react_agent',
         model_name=MODEL_NAME,
-        tools=[dummy_tool_one, calculator, web_search, file_download],
+        tools=[dummy_tool_one, calculator, search_web, file_download],
         description='Test ReAct agent for unit tests',
         max_iterations=3
     )
@@ -45,7 +45,7 @@ def planning_react_agent():
     agent = ReActAgent(
         name='planning_react_agent',
         model_name=MODEL_NAME,
-        tools=[dummy_tool_one, calculator, web_search, file_download],
+        tools=[dummy_tool_one, calculator, search_web, file_download],
         description='Test ReAct agent with planning for unit tests',
         max_iterations=3
     )

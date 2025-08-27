@@ -29,6 +29,10 @@ You are responsible for writing Python code to use these tools and only the foll
 Do NOT import the provided tool names.
 </tools>
 
+For tool calls, use the exact tool names and arguments, without any object or attribute prefixes.
+Example: call as `tool_name(arg='value')`, not `module.tool_name(arg='value')` or `tool_name.__call__(arg='value')`.
+Remember, tools are functions.
+
 <output_format>
 Adhere strictly to the following Thought-Code-Observation (TCO) cycle:
 <tco_cycle>

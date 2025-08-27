@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import json
 import argparse
@@ -19,6 +20,9 @@ import kodeagent as ka
 REPO_ID = 'gaia-benchmark/GAIA'
 LOCAL_DIR = f'{MODULE_ROOT}/gaia_dataset'
 
+logging.getLogger('LiteLLM').setLevel(logging.WARNING)
+logging.getLogger('langfuse').disabled = True
+
 
 def get_code_act_agent(model_name: str, max_steps: int = 10) -> ka.Agent:
     """
@@ -26,6 +30,7 @@ def get_code_act_agent(model_name: str, max_steps: int = 10) -> ka.Agent:
 
     Args:
         model_name: The LLM to use.
+        max_steps: Maximum number of agent steps to run.
 
     Returns:
         A configured CodeAgent instance.
@@ -36,7 +41,7 @@ def get_code_act_agent(model_name: str, max_steps: int = 10) -> ka.Agent:
         name='Multi-task agent',
         model_name=model_name,
         tools=[
-            ka.web_search, ka.extract_as_markdown, ka.file_download, ka.get_youtube_transcript,
+            ka.search_web, ka.extract_as_markdown, ka.file_download, ka.get_youtube_transcript,
             ka.search_wikipedia, ka.get_audio_transcript,
         ],
         run_env='host',
@@ -86,7 +91,7 @@ def download_gaia_dataset():
             sys.exit(1)
 
 
-async def main(split: str, model_name, max_tasks: int, max_steps: int):
+async def main(split: str, model_name, max_tasks: int, max_steps: int, output_file: str):
     """
     Iterates through the GAIA dataset metadata, printing questions, answers, and associated files.
 
@@ -95,6 +100,7 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int):
         model_name (str): The LLM model to use.
         max_tasks (int): Maximum number of tasks to process for demo purposes.
         max_steps (int): Maximum number of agent steps to run.
+        output_file (str): The output file name to store the results.
     """
     if split not in {'test', 'validation'}:
         raise ValueError('Split must be either `test` or `validation`')
@@ -143,7 +149,8 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int):
                         if isinstance(response['value'], ka.ChatMessage) else response['value']
                     )
                     print(f'Agent: {answer}\n')
-                    if true_answer == answer:
+                    is_correct = str(true_answer).strip().lower() == str(answer).strip().lower()
+                    if is_correct:
                         n_correct += 1
 
                     # Somehow the last update to the plan is not captured, so adding a delay
@@ -154,7 +161,7 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int):
                             question.replace('\n', '<br>'),
                             true_answer.replace('\n', '<br>'),
                             answer.replace('\n', '<br>'),
-                            true_answer == answer,
+                            is_correct,
                             agent.current_plan.replace('\n', '<br>')
                         )
                     )
@@ -177,12 +184,15 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int):
     evals_md = (
         f'**Date:** {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}\n\n'
         f'**Model:** {model_name}\n\n'
-        f'**Accuracy:** {n_correct / n_questions * 100:.2f}'
+        f'**Agent steps:** {max_steps}\n\n'
+        f'**Dataset split:** {split}\n\n'
+        f'**Accuracy:** {n_correct / n_questions * 100 if n_questions > 0 else 0:.2f}%'
         f' ({n_correct} correct out of {n_questions})\n\n{table} '
     )
     print(evals_md)
 
-    with open(f'gaia_{split}_results.md', 'w', encoding='utf-8') as _:
+    os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)
+    with open(output_file, 'w', encoding='utf-8') as _:
         _.write(evals_md)
 
 
@@ -213,7 +223,20 @@ if __name__ == '__main__':
         help='The max no. of agent steps to run.',
         default=10
     )
+    parser.add_argument(
+        '--output_file',
+        type=str,
+        help='The output file name to store the results.',
+        default='gaia_results.md'
+    )
     args = parser.parse_args()
     download_gaia_dataset()
 
-    asyncio.run(main(args.split, args.model, max_tasks=args.ntasks, max_steps=args.nsteps))
+    asyncio.run(
+        main(
+            args.split, args.model,
+            max_tasks=args.ntasks,
+            max_steps=args.nsteps,
+            output_file=args.output_file
+        )
+    )

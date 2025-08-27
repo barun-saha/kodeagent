@@ -50,6 +50,8 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logging.getLogger('LiteLLM').setLevel(logging.WARNING)
+logging.getLogger('langfuse').disabled = True
 logger = logging.getLogger('KodeAgent')
 
 litellm.success_callback = ['langfuse']
@@ -167,7 +169,7 @@ def calculator(expression: str) -> Union[float, None]:
 
 
 @tool
-def web_search(query: str, max_results: int = 10, show_description: bool = False) -> str:
+def search_web(query: str, max_results: int = 10, show_description: bool = False) -> str:
     """
     Search the Web using DuckDuckGo. The input should be a search query.
     Use this tool when you need to answer questions about current events.
@@ -439,7 +441,7 @@ class ObserverResponse(pyd.BaseModel):
     is_in_loop: bool = pyd.Field(
         description='True if the agent is stuck in a repetitive loop'
     )
-    reasoning: str = pyd.Field(description='A short reason for the assessment')
+    reasoning: str = pyd.Field(description='A short reason for the assessment (max 15--20 words)')
     correction_message: Optional[str] = pyd.Field(
         description='A specific, actionable feedback to help the agent self-correct'
     )
@@ -698,17 +700,20 @@ class Observer:
         """
         Observe the agent's state and return a corrective message if a problem is detected.
         """
-        if (iteration <= 1) or (iteration - self.last_correction_iteration < self.threshold):
+        if (iteration <= 1) or (self.threshold < 0) or (
+                iteration - self.last_correction_iteration < self.threshold
+        ):
             return None
 
         try:
             # Use the LLM to analyze the state and provide feedback
+            tool_names = '\n'.join(sorted(list(self.tool_names)))
             prompt = OBSERVATION_PROMPT.format(
                 task=task.description,
                 plan_before=plan_before,
                 plan_after=plan_after,
                 history=history,
-                tools=self.tool_names,
+                tools=tool_names,
             )
             response = await call_llm(
                 model_name=self.model_name,
@@ -717,31 +722,30 @@ class Observer:
                 response_format=ObserverResponse,
             )
             # Parse the structured response
-            observer_output = ObserverResponse.model_validate_json(response)
-            print(f'Observer (iteration {iteration}): {observer_output.model_dump_json()}')
+            observation = ObserverResponse.model_validate_json(response)
+            print(f'Observer (iteration {iteration}): {observation.model_dump_json()}')
 
             # Return the correction message if a problem is detected
-            if not observer_output.is_progressing or observer_output.is_in_loop:
+            if not observation.is_progressing or observation.is_in_loop:
                 self.last_correction_iteration = iteration
+                msg = (
+                        observation.correction_message or observation.reasoning
+                        or 'Adjust your approach based on the plan and history.'
+                )
                 correction = (
-                    f'!!!CRITICAL FOR COURSE CORRECTION: {observer_output.correction_message}\n\n'
-                    'For TOOL call, use the EXACT TOOL NAMES and ARGS specified earlier.'
-                    ' You must use a tool name directly, without any object or attribute, e.g.,'
-                    ' `tool_name(args)` instead of, say `module.tool_name(args)` or'
-                    ' `tool_name.__call__(args)`.'
+                    f'!!!CRITICAL FOR COURSE CORRECTION: {msg}\n'
                 )
 
                 if self.tool_names:
                     correction += (
-                        'Here are the exact tool names once again for reference: '
-                        f'{", ".join(sorted(self.tool_names))}.'
+                        f'Here are the exact TOOL names once again for reference:\n{tool_names}'
                     )
                 return correction
 
         except Exception as e:
             # Fallback for LLM or parsing errors
             print(f'LLM Observer failed: {e}')
-            return None  # Or a generic fallback message
+            return None
 
         return None
 
@@ -1834,7 +1838,7 @@ async def main():
     code_agent = CodeActAgent(
         name='Web agent',
         model_name=model_name,
-        tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
+        tools=[search_web, extract_as_markdown, file_download, get_youtube_transcript],
         run_env='host',
         max_iterations=6,
         litellm_params=litellm_params,
