@@ -579,9 +579,10 @@ async def call_llm(
         params['response_format'] = response_format
 
     # Add a timeout to prevent indefinite hangs
-    params['timeout'] = litellm_params.pop('timeout', '60')
+    if 'timeout' not in litellm_params:
+        params['timeout'] = 60  # seconds
+
     params.update(litellm_params)
-    attempt = 0
 
     try:
         # Use AsyncRetrying to handle retries in a non-blocking way
@@ -610,7 +611,7 @@ async def call_llm(
                 return response_content
 
     except Exception as e:
-        logger.error('LLM call failed after %d attempts: %s', attempt + 1, str(e))
+        logger.error('LLM call failed after repeated attempts: %s', str(e))
         raise ValueError(
             'Failed to get a valid response from LLM after multiple retries.'
         ) from e
