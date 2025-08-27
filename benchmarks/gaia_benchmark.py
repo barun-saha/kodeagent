@@ -191,6 +191,7 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
     )
     print(evals_md)
 
+    os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)
     with open(output_file, 'w', encoding='utf-8') as _:
         _.write(evals_md)
 

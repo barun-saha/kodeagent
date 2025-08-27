@@ -722,14 +722,18 @@ class Observer:
                 response_format=ObserverResponse,
             )
             # Parse the structured response
-            observer_output = ObserverResponse.model_validate_json(response)
-            print(f'Observer (iteration {iteration}): {observer_output.model_dump_json()}')
+            observation = ObserverResponse.model_validate_json(response)
+            print(f'Observer (iteration {iteration}): {observation.model_dump_json()}')
 
             # Return the correction message if a problem is detected
-            if not observer_output.is_progressing or observer_output.is_in_loop:
+            if not observation.is_progressing or observation.is_in_loop:
                 self.last_correction_iteration = iteration
+                msg = (
+                        observation.correction_message or observation.reasoning
+                        or 'Adjust your approach based on the plan and history.'
+                )
                 correction = (
-                    f'!!!CRITICAL FOR COURSE CORRECTION: {observer_output.correction_message}\n'
+                    f'!!!CRITICAL FOR COURSE CORRECTION: {msg}\n'
                 )
 
                 if self.tool_names:
