@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import json
 import argparse
@@ -19,6 +20,9 @@ import kodeagent as ka
 REPO_ID = 'gaia-benchmark/GAIA'
 LOCAL_DIR = f'{MODULE_ROOT}/gaia_dataset'
 
+logging.getLogger('LiteLLM').setLevel(logging.WARNING)
+logging.getLogger('langfuse').disabled = True
+
 
 def get_code_act_agent(model_name: str, max_steps: int = 10) -> ka.Agent:
     """
@@ -26,6 +30,7 @@ def get_code_act_agent(model_name: str, max_steps: int = 10) -> ka.Agent:
 
     Args:
         model_name: The LLM to use.
+        max_steps: Maximum number of agent steps to run.
 
     Returns:
         A configured CodeAgent instance.

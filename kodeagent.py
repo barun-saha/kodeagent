@@ -50,6 +50,8 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logging.getLogger('LiteLLM').setLevel(logging.WARNING)
+logging.getLogger('langfuse').disabled = True
 logger = logging.getLogger('KodeAgent')
 
 litellm.success_callback = ['langfuse']
