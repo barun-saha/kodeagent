@@ -707,7 +707,7 @@ class Observer:
 
         try:
             # Use the LLM to analyze the state and provide feedback
-            tool_names = '\n'.join(list(self.tool_names))
+            tool_names = '\n'.join(sorted(list(self.tool_names)))
             prompt = OBSERVATION_PROMPT.format(
                 task=task.description,
                 plan_before=plan_before,

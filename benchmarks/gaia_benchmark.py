@@ -149,7 +149,8 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
                         if isinstance(response['value'], ka.ChatMessage) else response['value']
                     )
                     print(f'Agent: {answer}\n')
-                    if str(true_answer).strip().lower() == str(answer).strip().lower():
+                    is_correct = str(true_answer).strip().lower() == str(answer).strip().lower()
+                    if is_correct:
                         n_correct += 1
 
                     # Somehow the last update to the plan is not captured, so adding a delay
@@ -160,7 +161,7 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
                             question.replace('\n', '<br>'),
                             true_answer.replace('\n', '<br>'),
                             answer.replace('\n', '<br>'),
-                            true_answer == answer,
+                            is_correct,
                             agent.current_plan.replace('\n', '<br>')
                         )
                     )
@@ -183,7 +184,9 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
     evals_md = (
         f'**Date:** {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}\n\n'
         f'**Model:** {model_name}\n\n'
-        f'**Accuracy:** {n_correct / n_questions * 100:.2f}'
+        f'**Agent steps:** {max_steps}\n\n'
+        f'**Dataset split:** {split}\n\n'
+        f'**Accuracy:** {n_correct / n_questions * 100 if n_questions > 0 else 0:.2f}%'
         f' ({n_correct} correct out of {n_questions})\n\n{table} '
     )
     print(evals_md)
