@@ -169,7 +169,7 @@ def calculator(expression: str) -> Union[float, None]:
 
 
 @tool
-def web_search(query: str, max_results: int = 10, show_description: bool = False) -> str:
+def search_web(query: str, max_results: int = 10, show_description: bool = False) -> str:
     """
     Search the Web using DuckDuckGo. The input should be a search query.
     Use this tool when you need to answer questions about current events.
@@ -1838,7 +1838,7 @@ async def main():
     code_agent = CodeActAgent(
         name='Web agent',
         model_name=model_name,
-        tools=[web_search, extract_as_markdown, file_download, get_youtube_transcript],
+        tools=[search_web, extract_as_markdown, file_download, get_youtube_transcript],
         run_env='host',
         max_iterations=6,
         litellm_params=litellm_params,

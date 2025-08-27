@@ -41,7 +41,7 @@ def get_code_act_agent(model_name: str, max_steps: int = 10) -> ka.Agent:
         name='Multi-task agent',
         model_name=model_name,
         tools=[
-            ka.web_search, ka.extract_as_markdown, ka.file_download, ka.get_youtube_transcript,
+            ka.search_web, ka.extract_as_markdown, ka.file_download, ka.get_youtube_transcript,
             ka.search_wikipedia, ka.get_audio_transcript,
         ],
         run_env='host',
