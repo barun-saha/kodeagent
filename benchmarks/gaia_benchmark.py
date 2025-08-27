@@ -131,39 +131,43 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int):
         print(f'\n#{idx}\nQuestion: {question}\nFile: {file_path if file_name else "N/A"}')
         question += f'\n\n{special_instructions}'
 
-        async for response in agent.run(
-                task=question,
-                files=[file_path] if file_name else None,
-                summarize_progress_on_failure=False,
-        ):
-            if response['type'] == 'final':
-                answer = (
-                    response['value'].content
-                    if isinstance(response['value'], ka.ChatMessage) else response['value']
-                )
-                print(f'Agent: {answer}\n')
-                if true_answer == answer:
-                    n_correct += 1
-
-                # Somehow the last update to the plan is not captured, so adding a delay
-                await asyncio.sleep(random.uniform(1.25, 2))
-                evals.append(
-                    (
-                        task_id,
-                        question.replace('\n', '<br>'),
-                        true_answer.replace('\n', '<br>'),
-                        answer.replace('\n', '<br>'),
-                        true_answer == answer,
-                        agent.current_plan.replace('\n', '<br>')
+        try:
+            async for response in agent.run(
+                    task=question,
+                    files=[file_path] if file_name else None,
+                    summarize_progress_on_failure=False,
+            ):
+                if response['type'] == 'final':
+                    answer = (
+                        response['value'].content
+                        if isinstance(response['value'], ka.ChatMessage) else response['value']
                     )
-                )
-        print(f'True Answer: {true_answer}')
-        print(f'Plan:\n{agent.current_plan}\n\n')
+                    print(f'Agent: {answer}\n')
+                    if true_answer == answer:
+                        n_correct += 1
 
-        if idx >= max_tasks:
-            break
+                    # Somehow the last update to the plan is not captured, so adding a delay
+                    await asyncio.sleep(random.uniform(1.25, 2))
+                    evals.append(
+                        (
+                            task_id,
+                            question.replace('\n', '<br>'),
+                            true_answer.replace('\n', '<br>'),
+                            answer.replace('\n', '<br>'),
+                            true_answer == answer,
+                            agent.current_plan.replace('\n', '<br>')
+                        )
+                    )
+            print(f'True Answer: {true_answer}')
+            print(f'Plan:\n{agent.current_plan}\n\n')
 
-        await asyncio.sleep(random.uniform(1, 2))
+            if idx >= max_tasks:
+                break
+
+            await asyncio.sleep(random.uniform(1, 2))
+        except Exception as e:
+            print(f'Error processing task {task_id}: {e}')
+            evals.append((task_id, question, true_answer, 'Execution error', False, 'N/A'))
 
     table = tabulate(
         evals,
