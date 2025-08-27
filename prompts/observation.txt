@@ -6,22 +6,26 @@ actionable correction. You must respond with a JSON object following the `Observ
 Here is the agent's full task:
 {task}
 
-Here is a set of tools (user-defiend functions) available to the agent (if any):
+Here is a set of tools (user-defined functions) available (ignore if empty) to the agent to solve the task:
 {tools}
 
-Here is the general plan the agent is following (completed tasks are marked with "x") from before:
+Here is the general plan the agent has been following (completed tasks are marked with "x") from before:
 {plan_before}
 
 Here is the plan again after the last update (note: there can be minor changes in the plan — that's OK):
 {plan_after}
 
 Here is the agent's recent history of thoughts and actions/code executions:
+<HISTORY>
 {history}
+</HISTORY>
 
 Carefully assess the agent's progress based on the logs (history) and the plan.
 If the latest update of the plan shows any new steps marked with "x" (done), that indicates progress.
 If you detect a loop (e.g., same actions/observations/errors appearing repeatedly in the logs) or a stall (no progress in the plan from before),
 provide a concise and direct corrective instruction in the `correction_message` field to get the agent back on track.
+No progress can be because of errors also, e.g., wrong tool usage.
 If the agent is making good progress, you can set `correction_message` to null.
+The `correction_message` must be actionable and specific to the agent's situation.
 The `correction_message`, when not empty, should always be in second-person, e.g., "You should...", "Avoid...", "Focus on...".
-The `correction_message` should be actionable and specific to the agent's situation.
+In case of wrong tool calls, you must point out the correct tool to use, based on the tool names provided earlier.
