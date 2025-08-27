@@ -12,7 +12,8 @@ from kodeagent import (
     ReActChatMessage,
     calculator,
     web_search,
-    file_download, CodeActAgent, AgentPlan, PlanStep, Planner, call_llm, Task, Observer
+    file_download, CodeActAgent, AgentPlan, PlanStep, Planner, call_llm, Task, Observer,
+    ObserverResponse
 )
 
 
@@ -264,7 +265,8 @@ async def test_call_llm():
     response = await call_llm(
         model_name=MODEL_NAME,
         litellm_params={},
-        messages=[{'role': 'user', 'content': 'Hello!'}]
+        messages=[{'role': 'user', 'content': 'Hello!'}],
+        trace_id='test-trace-id'
     )
     assert isinstance(response, str)
     assert len(response) > 0
@@ -306,7 +308,11 @@ async def test_planner_update_plan(planner):
 @pytest.fixture
 def observer():
     """Fixture to create an Observer instance for testing."""
-    return Observer(model_name=MODEL_NAME, threshold=3)
+    return Observer(
+        model_name=MODEL_NAME,
+        tool_names={'dummy_tool_one', 'calculator'},
+        threshold=3
+    )
 
 
 @pytest.mark.asyncio
@@ -339,6 +345,9 @@ async def test_observer_no_issues(mock_call_llm, observer):
     correction = await observer.observe(4, task, history, plan, plan)
     assert correction is None
     mock_call_llm.assert_called_once()
+    _args, kwargs = mock_call_llm.call_args
+    assert kwargs['model_name'] == MODEL_NAME
+    assert kwargs['response_format'] == ObserverResponse
 
 
 @pytest.mark.asyncio
@@ -358,6 +367,9 @@ async def test_observer_detects_loop(mock_call_llm, observer):
     assert 'try something else' in correction
     assert observer.last_correction_iteration == 4
     mock_call_llm.assert_called_once()
+    _args, kwargs = mock_call_llm.call_args
+    assert kwargs['model_name'] == MODEL_NAME
+    assert kwargs['response_format'] == ObserverResponse
 
 
 def test_observer_reset(observer):
