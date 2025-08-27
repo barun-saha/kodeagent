@@ -172,9 +172,11 @@ def calculator(expression: str) -> Union[float, None]:
 def search_web(query: str, max_results: int = 10, show_description: bool = False) -> str:
     """
     Search the Web using DuckDuckGo. The input should be a search query.
-    Use this tool when you need to answer questions about current events.
-    Returns (as Markdown text) the top search results with titles, links, and optional descriptions.
-    NOTE: The returned URLs should be visited to retrieve the contents the pages.
+    Use this tool when you need to answer questions about current events and general web search.
+    It returns (as Markdown text) the top search results with titles, links, and optional
+    descriptions.
+    NOTE: The returned URLs can be visited using the `extract_as_markdown` tool to retrieve
+    the contents the respective pages.
 
     Args:
         query: The query string.
@@ -213,10 +215,10 @@ def search_web(query: str, max_results: int = 10, show_description: bool = False
 
 
 @tool
-def file_download(url: str) -> str:
+def download_file(url: str) -> str:
     """
-    Download a file from the Web and save it locally on the disk.
-    (If the `extract_as_markdown` tool does not work, this can be used an alternative.)
+    Download a file from the Web and save it locally on the disk. This tool is to be used to
+    when the goal is to download a file (binary) rather than retrieve its contents as text.
 
     Args:
         url: The URL pointing to the file (must be a correct URL).
@@ -250,7 +252,8 @@ def extract_as_markdown(
     Extract the contents from HTML files (.html), PDF files (.pdf), Word Documents (.docx),
     and Excel spreadsheets (.xlsx) as Markdown text. No other file type is supported.
     The text can be used for analysis with LLMs. Input can be a URL or a local file path.
-    This tool can directly work with URLs, so no need to download the files separately.
+    This tool can directly work with URLs, so no need to download the files using
+    `file_download` separately.
     NOTE: The output returned by this function can be long and may involve lots of quote marks.
 
     Args:
@@ -334,7 +337,7 @@ def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
 @tool
 def get_youtube_transcript(video_id: str) -> str:
     """
-    Retrieve the transcript/subtitles for a given YouTube video. It also works for automatically
+    Retrieve the transcript/subtitles for YouTube videos (only). It also works for automatically
     generated subtitles, supports translating subtitles. The input should be a valid YouTube
     video ID. E.g., the URL https://www.youtube.com/watch?v=aBc4E has the video ID `aBc4E`.
 
@@ -1860,7 +1863,7 @@ async def main():
     code_agent = CodeActAgent(
         name='Web agent',
         model_name=model_name,
-        tools=[search_web, extract_as_markdown, file_download, get_youtube_transcript],
+        tools=[search_web, extract_as_markdown, download_file, get_youtube_transcript],
         run_env='host',
         max_iterations=6,
         litellm_params=litellm_params,
