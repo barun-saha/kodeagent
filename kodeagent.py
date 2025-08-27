@@ -621,16 +621,17 @@ async def call_llm(
 
 class Planner:
     """
-    Given a task, generate a step-by-step plan to solve it.
-    This class is stateless, except for the LLM model configuration.
+    Given a task, generate and maintain a step-by-step plan to solve it.
+    This class is stateful and holds the current plan.
     """
     def __init__(self, model_name: str, litellm_params: Optional[dict] = None):
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
+        self.plan: Optional[AgentPlan] = None
 
     async def create_plan(self, task: Task, agent_type: str) -> AgentPlan:
         """
-        Create a plan to solve the given task.
+        Create a plan to solve the given task and store it.
         """
         messages = ku.make_user_message(
             text_content=AGENT_PLAN_PROMPT.format(
@@ -647,16 +648,18 @@ class Planner:
             response_format=AgentPlan,
             trace_id=task.id
         )
-        return AgentPlan.model_validate_json(response)
+        self.plan = AgentPlan.model_validate_json(response)
+        return self.plan
 
-    async def update_plan(
-            self, plan: AgentPlan, thought: str, observation: str, task_id: str
-    ) -> AgentPlan:
+    async def update_plan(self, thought: str, observation: str, task_id: str):
         """
         Update the plan based on the last thought and observation.
         """
+        if not self.plan:
+            return
+
         prompt = UPDATE_PLAN_PROMPT.format(
-            plan=plan.model_dump_json(indent=2),
+            plan=self.plan.model_dump_json(indent=2),
             thought=thought,
             observation=observation
         )
@@ -667,7 +670,39 @@ class Planner:
             response_format=AgentPlan,
             trace_id=task_id
         )
-        return AgentPlan.model_validate_json(response)
+        self.plan = AgentPlan.model_validate_json(response)
+
+    def get_steps_done(self) -> list[PlanStep]:
+        """Returns the completed steps from the current plan."""
+        if not self.plan:
+            return []
+        return [step for step in self.plan.steps if step.is_done]
+
+    def get_steps_pending(self) -> list[PlanStep]:
+        """Returns the pending steps from the current plan."""
+        if not self.plan:
+            return []
+        return [step for step in self.plan.steps if not step.is_done]
+
+    def get_formatted_plan(self, scope: Literal['all', 'done', 'pending'] = 'all') -> str:
+        """
+        Convert the agent's plan into a markdown checklist.
+        """
+        if not self.plan or not self.plan.steps:
+            return ''
+
+        if scope == 'all':
+            steps_to_format = self.plan.steps
+        elif scope == 'done':
+            steps_to_format = self.get_steps_done()
+        else:  # pending
+            steps_to_format = self.get_steps_pending()
+
+        todo_list = []
+        for step in steps_to_format:
+            status = 'x' if step.is_done else ' '
+            todo_list.append(f'- [{status}] {step.description}')
+        return '\n'.join(todo_list)
 
 
 class Observer:
@@ -798,7 +833,7 @@ class Agent(ABC):
         self.messages: list[ChatMessage] = []
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
-        self.plan: Optional[AgentPlan] = None
+        self.planner: Optional[Planner] = None
         self.observer = Observer(
             model_name=model_name,
             litellm_params=litellm_params,
@@ -816,22 +851,9 @@ class Agent(ABC):
     @property
     def current_plan(self) -> Optional[str]:
         """Returns the current plan for the task."""
-        if not self.plan:
+        if not self.planner or not self.planner.plan:
             return None
-        return self._format_plan_as_todo()
-
-    def _format_plan_as_todo(self) -> str:
-        """
-        Convert the agent's plan into a markdown checklist.
-        """
-        if not self.plan or not self.plan.steps:
-            return ''
-
-        todo_list = []
-        for step in self.plan.steps:
-            status = 'x' if step.is_done else ' '
-            todo_list.append(f'- [{status}] {step.description}')
-        return '\n'.join(todo_list)
+        return self.planner.get_formatted_plan()
 
     async def get_history_summary(self) -> str:
         """
@@ -908,7 +930,8 @@ class Agent(ABC):
             self.task.id = task_id
         self.msg_idx_of_new_task = len(self.messages)
         self.final_answer_found = False
-        self.plan = None
+        if self.planner:
+            self.planner.plan = None
         self.observer.reset()
 
     async def salvage_response(self) -> str:
@@ -1128,8 +1151,7 @@ class ReActAgent(Agent):
                 last_thought = self.messages[-2].thought
             if self.messages[-1].role == 'tool':
                 last_observation = self.messages[-1].content
-        self.plan = await self.planner.update_plan(
-            plan=self.plan,
+        await self.planner.update_plan(
             thought=last_thought,
             observation=last_observation,
             task_id=self.task.id,
@@ -1162,8 +1184,8 @@ class ReActAgent(Agent):
             channel='run'
         )
 
-        self.plan = await self.planner.create_plan(self.task, self.__class__.__name__)
-        yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
+        await self.planner.create_plan(self.task, self.__class__.__name__)
+        yield self.response(rtype='log', value=f'Plan:\n{self.planner.plan}', channel='run')
 
         for idx in range(self.max_iterations):
             if self.final_answer_found:
@@ -1177,7 +1199,7 @@ class ReActAgent(Agent):
                 yield update
 
             plan_before_update = None
-            if self.plan:
+            if self.planner.plan:
                 plan_before_update = self.current_plan
                 await self._update_plan()
 
@@ -1216,7 +1238,7 @@ class ReActAgent(Agent):
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
         else:
             # Update the plan one last time after the final answer is found
-            if self.plan:
+            if self.planner.plan:
                 await self._update_plan()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:

@@ -234,15 +234,33 @@ async def test_unsupported_task(react_agent):
 
 
 
-def test_format_plan_as_todo(react_agent):
-    """Test formatting of plan into a markdown checklist."""
-    react_agent.plan = AgentPlan(steps=[
+def test_planner_helpers(planner):
+    """Test helper methods of the Planner class."""
+    planner.plan = AgentPlan(steps=[
         PlanStep(description='First step.', is_done=False),
         PlanStep(description='Second step.', is_done=True)
     ])
-    formatted_plan = react_agent._format_plan_as_todo()
+
+    # test get_steps_done
+    done_steps = planner.get_steps_done()
+    assert len(done_steps) == 1
+    assert done_steps[0].description == 'Second step.'
+
+    # test get_steps_pending
+    pending_steps = planner.get_steps_pending()
+    assert len(pending_steps) == 1
+    assert pending_steps[0].description == 'First step.'
+
+    # test get_formatted_plan
+    formatted_plan = planner.get_formatted_plan()
     expected = '- [ ] First step.\n- [x] Second step.'
     assert formatted_plan == expected
+
+    formatted_done = planner.get_formatted_plan(scope='done')
+    assert formatted_done == '- [x] Second step.'
+
+    formatted_pending = planner.get_formatted_plan(scope='pending')
+    assert formatted_pending == '- [ ] First step.'
 
 
 
@@ -286,23 +304,24 @@ async def test_planner_create_plan(planner):
     assert plan is not None
     assert isinstance(plan, AgentPlan)
     assert len(plan.steps) > 0
+    assert planner.plan == plan
 
 
 @pytest.mark.asyncio
 async def test_planner_update_plan(planner):
     """Test plan progress update by the Planner."""
-    plan = AgentPlan(steps=[
+    planner.plan = AgentPlan(steps=[
         PlanStep(description='Use calculator to find 2+2.', is_done=False),
         PlanStep(description='Provide the final answer.', is_done=False)
     ])
     thought = 'I used the calculator and got the result.'
     observation = '4'
     task_id = 'test-task-123'
-    updated_plan = await planner.update_plan(plan, thought, observation, task_id)
+    await planner.update_plan(thought, observation, task_id)
 
-    assert updated_plan is not None
-    assert isinstance(updated_plan, AgentPlan)
-    assert updated_plan.steps[0].is_done is True
+    assert planner.plan is not None
+    assert isinstance(planner.plan, AgentPlan)
+    assert planner.plan.steps[0].is_done is True
 
 
 @pytest.fixture
