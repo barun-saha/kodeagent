@@ -91,7 +91,7 @@ def download_gaia_dataset():
             sys.exit(1)
 
 
-async def main(split: str, model_name, max_tasks: int, max_steps: int):
+async def main(split: str, model_name, max_tasks: int, max_steps: int, output_file: str):
     """
     Iterates through the GAIA dataset metadata, printing questions, answers, and associated files.
 
@@ -100,6 +100,7 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int):
         model_name (str): The LLM model to use.
         max_tasks (int): Maximum number of tasks to process for demo purposes.
         max_steps (int): Maximum number of agent steps to run.
+        output_file (str): The output file name to store the results.
     """
     if split not in {'test', 'validation'}:
         raise ValueError('Split must be either `test` or `validation`')
@@ -148,7 +149,7 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int):
                         if isinstance(response['value'], ka.ChatMessage) else response['value']
                     )
                     print(f'Agent: {answer}\n')
-                    if true_answer == answer:
+                    if str(true_answer).strip().lower() == str(answer).strip().lower():
                         n_correct += 1
 
                     # Somehow the last update to the plan is not captured, so adding a delay
@@ -187,7 +188,7 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int):
     )
     print(evals_md)
 
-    with open(f'gaia_{split}_results.md', 'w', encoding='utf-8') as _:
+    with open(output_file, 'w', encoding='utf-8') as _:
         _.write(evals_md)
 
 
@@ -218,7 +219,20 @@ if __name__ == '__main__':
         help='The max no. of agent steps to run.',
         default=10
     )
+    parser.add_argument(
+        '--output_file',
+        type=str,
+        help='The output file name to store the results.',
+        default='gaia_results.md'
+    )
     args = parser.parse_args()
     download_gaia_dataset()
 
-    asyncio.run(main(args.split, args.model, max_tasks=args.ntasks, max_steps=args.nsteps))
+    asyncio.run(
+        main(
+            args.split, args.model,
+            max_tasks=args.ntasks,
+            max_steps=args.nsteps,
+            output_file=args.output_file
+        )
+    )
