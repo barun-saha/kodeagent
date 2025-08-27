@@ -441,7 +441,7 @@ class ObserverResponse(pyd.BaseModel):
     is_in_loop: bool = pyd.Field(
         description='True if the agent is stuck in a repetitive loop'
     )
-    reasoning: str = pyd.Field(description='A short reason for the assessment')
+    reasoning: str = pyd.Field(description='A short reason for the assessment (max 15--20 words)')
     correction_message: Optional[str] = pyd.Field(
         description='A specific, actionable feedback to help the agent self-correct'
     )
@@ -700,17 +700,20 @@ class Observer:
         """
         Observe the agent's state and return a corrective message if a problem is detected.
         """
-        if (iteration <= 1) or (iteration - self.last_correction_iteration < self.threshold):
+        if (iteration <= 1) or (self.threshold < 0) or (
+                iteration - self.last_correction_iteration < self.threshold
+        ):
             return None
 
         try:
             # Use the LLM to analyze the state and provide feedback
+            tool_names = '\n'.join(list(self.tool_names))
             prompt = OBSERVATION_PROMPT.format(
                 task=task.description,
                 plan_before=plan_before,
                 plan_after=plan_after,
                 history=history,
-                tools=self.tool_names,
+                tools=tool_names,
             )
             response = await call_llm(
                 model_name=self.model_name,
@@ -726,24 +729,19 @@ class Observer:
             if not observer_output.is_progressing or observer_output.is_in_loop:
                 self.last_correction_iteration = iteration
                 correction = (
-                    f'!!!CRITICAL FOR COURSE CORRECTION: {observer_output.correction_message}\n\n'
-                    'For TOOL call, use the EXACT TOOL NAMES and ARGS specified earlier.'
-                    ' You must use a tool name directly, without any object or attribute, e.g.,'
-                    ' `tool_name(args)` instead of, say `module.tool_name(args)` or'
-                    ' `tool_name.__call__(args)`.'
+                    f'!!!CRITICAL FOR COURSE CORRECTION: {observer_output.correction_message}\n'
                 )
 
                 if self.tool_names:
                     correction += (
-                        'Here are the exact tool names once again for reference: '
-                        f'{", ".join(sorted(self.tool_names))}.'
+                        f'Here are the exact TOOL names once again for reference:\n{tool_names}'
                     )
                 return correction
 
         except Exception as e:
             # Fallback for LLM or parsing errors
             print(f'LLM Observer failed: {e}')
-            return None  # Or a generic fallback message
+            return None
 
         return None
 
