@@ -217,6 +217,7 @@ def search_web(query: str, max_results: int = 10, show_description: bool = False
 @tool
 def download_file(url: str) -> str:
     """
+    Use this tool only when `extract_as_markdown` cannot be used.
     Download a file from the Web and save it locally on the disk. This tool is to be used to
     when the goal is to download a file (binary) rather than retrieve its contents as text.
 
@@ -243,15 +244,16 @@ def download_file(url: str) -> str:
 
 
 @tool
-def extract_as_markdown(
+def extract_file_contents_as_markdown(
         url_or_file_path: str,
         scrub_links: bool = True,
         max_length: int = None
 ) -> str:
     """
-    Extract the contents from HTML files (.html), PDF files (.pdf), Word Documents (.docx),
-    and Excel spreadsheets (.xlsx) as Markdown text. No other file type is supported.
-    The text can be used for analysis with LLMs. Input can be a URL or a local file path.
+    Always use this tool to extract the contents of HTML files (.html), PDF files (.pdf),
+    Word documents (.docx), and Excel spreadsheets (.xlsx) as Markdown text. No other file type
+    is supported. The input can point to a URL or a local file path.
+    The extracted text can be used for analysis with LLMs.
     This tool can directly work with URLs, so no need to download the files using
     `file_download` separately.
     NOTE: The output returned by this function can be long and may involve lots of quote marks.
@@ -1720,16 +1722,15 @@ class CodeActAgent(ReActAgent):
         else:
             relevant_tools = self.tools
 
-        message = CODE_ACT_AGENT_PROMPT.format(
+        think_prompt = CODE_ACT_AGENT_PROMPT.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
             authorized_imports=','.join(self.allowed_imports),
             plan=self.current_plan or '[No plan provided; please plan yourself]',
-            visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
-        msg = await self._record_thought(message, CodeChatMessage)
+        msg = await self._record_thought(think_prompt, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
@@ -1863,7 +1864,7 @@ async def main():
     code_agent = CodeActAgent(
         name='Web agent',
         model_name=model_name,
-        tools=[search_web, extract_as_markdown, download_file, get_youtube_transcript],
+        tools=[search_web, extract_file_contents_as_markdown, download_file, get_youtube_transcript],
         run_env='host',
         max_iterations=6,
         litellm_params=litellm_params,
