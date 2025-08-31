@@ -12,7 +12,7 @@ from kodeagent import (
     ReActChatMessage,
     calculator,
     search_web,
-    download_file, CodeActAgent, AgentPlan, PlanStep, Planner, call_llm, Task, Observer,
+    download_file, search_arxiv, CodeActAgent, AgentPlan, PlanStep, Planner, call_llm, Task, Observer,
     ObserverResponse
 )
 
@@ -184,6 +184,15 @@ def test_get_tools_description(react_agent):
     assert "search_web" in desc
     assert "download_file" in desc
     assert "Description for dummy tool one" in desc
+
+
+def test_search_arxiv():
+    """Test the arxiv search tool for research papers."""
+    query = "attention is all you need"
+    results = search_arxiv(query=query, max_results=1)
+    assert "attention is all you need" in results.lower()
+    assert "vaswani" in results.lower()
+    assert "## ArXiv Search Results for:" in results
 
 
 @pytest.mark.asyncio
