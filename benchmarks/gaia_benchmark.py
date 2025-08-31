@@ -204,7 +204,7 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
             print(f'True Answer: {true_answer}')
             print(f'Plan:\n{agent.current_plan}\n\n')
 
-            if idx >= max_tasks:
+            if idx >= n_questions:
                 break
 
             await asyncio.sleep(random.uniform(1, 2))
