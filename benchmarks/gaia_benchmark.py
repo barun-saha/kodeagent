@@ -99,7 +99,7 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
     Args:
         split (str): The dataset split to use, either 'test' or 'validation'.
         model_name (str): The LLM model to use.
-        max_tasks (int): Maximum number of tasks to process for demo purposes.
+        max_tasks (int): Maximum number of tasks to process. Use -1 for all tasks.
         max_steps (int): Maximum number of agent steps to run.
         output_file (str): The output file name to store the results.
     """
@@ -118,7 +118,10 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
 
     agent = get_code_act_agent(model_name=model_name, max_steps=max_steps)
     evals = []
-    n_questions = min(max_tasks, len(gaia_data))
+    if max_tasks == -1:
+        n_questions = len(gaia_data)
+    else:
+        n_questions = min(max_tasks, len(gaia_data))
     n_correct = 0
     # GAIA appears to evaluate results using exact match, so even a correct but differently
     # formatted answer will be marked as incorrect
@@ -137,7 +140,7 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
     print(f'\n--- Processing `{split}` split with {n_questions} tasks ---')
 
     sanitized_model_name = model_name.replace('/', '_').replace('.', '_')
-    jsonl_output_file = f'gaia_{split}_{max_tasks}_{sanitized_model_name}_{max_steps}.jsonl'
+    jsonl_output_file = f'gaia_{split}_{n_questions}_{sanitized_model_name}_{max_steps}.jsonl'
     if os.path.exists(jsonl_output_file):
         os.remove(jsonl_output_file)
 
@@ -253,7 +256,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--ntasks',
         type=int,
-        help='The max no. of tasks to run.',
+        help='The max no. of tasks to run. Use -1 for all tasks.',
         default=3
     )
     parser.add_argument(
