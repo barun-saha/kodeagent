@@ -368,7 +368,7 @@ def search_arxiv(query: str, max_results: int = 5) -> str:
             return f'No results found for the query: {query}'
 
         output = f'## ArXiv Search Results for: {query}\n\n'
-        for i, result in enumerate(results):
+        for result in results:
             authors = ', '.join([author.name for author in result.authors])
             output += f'### [{result.title}]({result.pdf_url})\n'
             output += f'**Authors:** {authors}\n'
