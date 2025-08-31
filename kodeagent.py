@@ -305,7 +305,7 @@ def extract_file_contents_as_markdown(
 @tool
 def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
     """
-    Search Wikipedia and return the top search results as Markdown text.
+    Search Wikipedia (only) and return the top search results as Markdown text.
     The input should be a search query. The output will contain the title, summary, and link
     to the Wikipedia page.
 
@@ -334,6 +334,51 @@ def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
         return '\n\n'.join(markdown_results)
     except wikipedia.exceptions.DisambiguationError as de:
         return f'DisambiguationError: Please select an option from {", ".join(de.options)}'
+
+
+@tool
+def search_arxiv(query: str, max_results: int = 5) -> str:
+    """
+    Search for academic papers on arXiv.org. The input is a search query.
+    This tool is highly specialized and should be used exclusively for
+    finding scientific and academic papers. It returns the top search results
+    with the title, authors, summary, and a link to the PDF.
+
+    Args:
+        query: The search query string for the paper.
+        max_results: The maximum number of search results to return (default is 5).
+
+    Returns:
+        The search results in Markdown format or a message indicating no results were found.
+    """
+    try:
+        import arxiv
+
+        # Construct the default API client
+        client = arxiv.Client()
+        search = arxiv.Search(
+            query=query,
+            max_results=max_results,
+            sort_by=arxiv.SortCriterion.Relevance
+        )
+
+        results = list(client.results(search))
+
+        if not results:
+            return f'No results found for the query: {query}'
+
+        output = f'## ArXiv Search Results for: {query}\n\n'
+        for i, result in enumerate(results):
+            authors = ', '.join([author.name for author in result.authors])
+            output += f'### [{result.title}]({result.pdf_url})\n'
+            output += f'**Authors:** {authors}\n'
+            output += f'**Abstract:** {result.summary}\n'
+            output += f'**Published:** {result.published.strftime("%Y-%m-%d")}\n\n'
+
+        return output
+
+    except Exception as e:
+        return f'An error occurred during the arXiv search: {str(e)}'
 
 
 @tool
@@ -1864,13 +1909,16 @@ async def main():
     code_agent = CodeActAgent(
         name='Web agent',
         model_name=model_name,
-        tools=[search_web, extract_file_contents_as_markdown, download_file, get_youtube_transcript],
+        tools=[
+            search_web, search_arxiv, extract_file_contents_as_markdown, download_file,
+            get_youtube_transcript,
+        ],
         run_env='host',
         max_iterations=6,
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'ddgs', 'markitdown', 'youtube_transcript_api',
+            'ddgs', 'markitdown', 'youtube_transcript_api', 'arxiv',
         ],
         pip_packages='ddgs~=9.5.2;"markitdown[all]";',
         filter_tools_for_task=False

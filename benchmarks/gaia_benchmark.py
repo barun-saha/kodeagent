@@ -41,19 +41,20 @@ def get_code_act_agent(model_name: str, max_steps: int = 10) -> ka.Agent:
         name='Multi-task agent',
         model_name=model_name,
         tools=[
-            ka.search_web, ka.extract_file_contents_as_markdown, ka.download_file, ka.get_youtube_transcript,
-            ka.search_wikipedia, ka.get_audio_transcript,
+            ka.search_web, ka.extract_file_contents_as_markdown, ka.download_file,
+            ka.get_youtube_transcript, ka.get_audio_transcript,
+            ka.search_wikipedia, ka.search_arxiv,
         ],
         run_env='host',
         max_iterations=max_steps,
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'ddgs', 'markitdown', 'youtube_transcript_api', 'wikipedia',
+            'ddgs', 'markitdown', 'youtube_transcript_api', 'wikipedia', 'arxiv',
         ],
         pip_packages=(
             'ddgs~=9.5.2;"markitdown[all]";'
-            'youtube-transcript-api~=1.2.2;wikipedia~=1.4.0'
+            'youtube-transcript-api~=1.2.2;wikipedia~=1.4.0;arxiv~=2.2.0'
         ),
         env_vars_to_set={'FIREWORKS_API_KEY': os.environ.get('FIREWORKS_API_KEY', '')},
         timeout=35,
