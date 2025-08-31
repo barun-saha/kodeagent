@@ -99,7 +99,7 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
     Args:
         split (str): The dataset split to use, either 'test' or 'validation'.
         model_name (str): The LLM model to use.
-        max_tasks (int): Maximum number of tasks to process for demo purposes.
+        max_tasks (int): Maximum number of tasks to process. Use -1 for all tasks.
         max_steps (int): Maximum number of agent steps to run.
         output_file (str): The output file name to store the results.
     """
@@ -118,16 +118,31 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
 
     agent = get_code_act_agent(model_name=model_name, max_steps=max_steps)
     evals = []
-    n_questions = min(max_tasks, len(gaia_data))
+    if max_tasks == -1:
+        n_questions = len(gaia_data)
+    else:
+        n_questions = min(max_tasks, len(gaia_data))
     n_correct = 0
     # GAIA appears to evaluate results using exact match, so even a correct but differently
     # formatted answer will be marked as incorrect
     special_instructions = (
         'The final response should only with the exact answer without any extra text.'
         ' For CSV output, a comma should be followed by a space.'
+        ' Your FINAL ANSWER should be a number OR as few words as possible OR a comma separated'
+        ' list of numbers and/or strings. If you are asked for a number, don\'t use comma to write'
+        ' your number neither use units such as $ or percent sign unless specified otherwise.'
+        ' If you are asked for a string, don\'t use articles, neither abbreviations'
+        ' (e.g. for cities), and write the digits in plain text unless specified otherwise.'
+        ' If you are asked for a comma separated list, apply the above rules depending of whether'
+        ' the element to be put in the list is a number or a string.'
     )
 
     print(f'\n--- Processing `{split}` split with {n_questions} tasks ---')
+
+    sanitized_model_name = model_name.replace('/', '_').replace('.', '_')
+    jsonl_output_file = f'gaia_{split}_{n_questions}_{sanitized_model_name}_{max_steps}.jsonl'
+    if os.path.exists(jsonl_output_file):
+        os.remove(jsonl_output_file)
 
     for idx, item in tqdm.tqdm(enumerate(gaia_data, 1), total=n_questions):
         task_id = item.get('task_id', 'N/A')
@@ -139,12 +154,14 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
         question += f'\n\n{special_instructions}'
 
         try:
+            final_answer_provided = False
             async for response in agent.run(
                     task=question,
                     files=[file_path] if file_name else None,
                     summarize_progress_on_failure=False,
             ):
                 if response['type'] == 'final':
+                    final_answer_provided = True
                     answer = (
                         response['value'].content
                         if isinstance(response['value'], ka.ChatMessage) else response['value']
@@ -166,16 +183,40 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
                             agent.current_plan.replace('\n', '<br>')
                         )
                     )
+                    with open(jsonl_output_file, 'a', encoding='utf-8') as f:
+                        f.write(json.dumps({
+                            'task_id': task_id, 'model_answer': answer,
+                            'reasoning_trace': agent.current_plan
+                        }) + '\n')
+
+            if not final_answer_provided:
+                answer = 'Agent failed to provide an answer.'
+                plan = agent.current_plan or 'N/A'
+                evals.append((
+                    task_id, question.replace('\n', '<br>'), true_answer.replace('\n', '<br>'),
+                    answer, False, plan.replace('\n', '<br>')
+                ))
+                with open(jsonl_output_file, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({
+                        'task_id': task_id, 'model_answer': answer, 'reasoning_trace': plan
+                    }) + '\n')
+
             print(f'True Answer: {true_answer}')
             print(f'Plan:\n{agent.current_plan}\n\n')
 
-            if idx >= max_tasks:
+            if idx >= n_questions:
                 break
 
             await asyncio.sleep(random.uniform(1, 2))
         except Exception as e:
             print(f'Error processing task {task_id}: {e}')
             evals.append((task_id, question, true_answer, 'Execution error', False, 'N/A'))
+            with open(jsonl_output_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps({
+                    'task_id': task_id,
+                    'model_answer': 'Execution error',
+                    'reasoning_trace': 'N/A'
+                }) + '\n')
 
     table = tabulate(
         evals,
@@ -215,7 +256,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--ntasks',
         type=int,
-        help='The max no. of tasks to run.',
+        help='The max no. of tasks to run. Use -1 for all tasks.',
         default=3
     )
     parser.add_argument(
