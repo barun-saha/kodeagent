@@ -181,8 +181,8 @@ def test_get_tools_description(react_agent):
     desc = react_agent.get_tools_description()
     assert "dummy_tool_one" in desc
     assert "calculator" in desc
-    assert "web_search" in desc
-    assert "file_download" in desc
+    assert "search_web" in desc
+    assert "download_file" in desc
     assert "Description for dummy tool one" in desc
 
 
@@ -261,8 +261,6 @@ def test_planner_helpers(planner):
 
     formatted_pending = planner.get_formatted_plan(scope='pending')
     assert formatted_pending == '- [ ] First step.'
-
-
 
 
 @pytest.mark.asyncio
