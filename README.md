@@ -103,6 +103,35 @@ For example, the Python modules that are allowed to be used in code should be ex
 KodeAgent is very much experimental. Capabilities are limited. Use with caution.
 
 
+## Sequence Diagram for CodeAct Agent (via CodeRabbit)
+```mermaid
+sequenceDiagram
+  autonumber
+  actor User
+  participant Agent
+  participant Planner
+  participant LLM as LLM/Prompts
+  participant Tools
+
+  User->>Agent: run(task)
+  Agent->>Planner: create_plan(task)
+  Planner->>LLM: request AgentPlan JSON (agent_plan.txt)
+  LLM-->>Planner: AgentPlan JSON
+  Planner-->>Agent: planner.plan set
+
+  loop For each step
+    Agent->>Planner: get_formatted_plan()
+    Agent->>LLM: codeact prompt + {plan, history}
+    LLM-->>Agent: Thought + Code
+    Agent->>Tools: execute tool call(s)
+    Tools-->>Agent: Observation
+    Agent->>Planner: update_plan(thought, observation, task_id)
+  end
+
+  Agent-->>User: Final Answer / Failure (per codeact spec)
+```
+
+
 ## 🗺️ Roadmap & Contributions
 
 To be updated.
