@@ -76,7 +76,7 @@ def _read_prompt(filename: str) -> str:
 
 
 REACT_PROMPT = _read_prompt('react.txt')
-CODE_ACT_AGENT_PROMPT = _read_prompt('code_act_agent.txt')
+CODE_ACT_AGENT_PROMPT = _read_prompt('codeact.txt')
 RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
 AGENT_PLAN_PROMPT = _read_prompt('agent_plan.txt')
 UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')
@@ -85,13 +85,13 @@ SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
 # Unused currently
 CONTEXTUAL_SUMMARY_PROMPT = _read_prompt('contextual_summary.txt')
 
-VISUAL_CAPABILITY = '''
-5. **Innate Visual Intelligence**: Use your in-built capabilities to answer to basic visual tasks
-    with images files or URLs, such as image analysis and objects counting. You can process multiple
-    image files/URLs together. Use a tool or write code ONLY when the visual task is complex
-    (e.g., OCR, analyzing a video, image editing, or comparing thousands of images)
-    OR if your own visual capabilities fail.
-'''
+# VISUAL_CAPABILITY = '''
+# 5. **Innate Visual Intelligence**: Use your in-built capabilities to answer to basic visual tasks
+#     with images files or URLs, such as image analysis and objects counting. You can process multiple
+#     image files/URLs together. Use a tool or write code ONLY when the visual task is complex
+#     (e.g., OCR, analyzing a video, image editing, or comparing thousands of images)
+#     OR if your own visual capabilities fail.
+# '''
 
 
 def tool(func: Callable) -> Callable:
@@ -172,9 +172,11 @@ def calculator(expression: str) -> Union[float, None]:
 def search_web(query: str, max_results: int = 10, show_description: bool = False) -> str:
     """
     Search the Web using DuckDuckGo. The input should be a search query.
-    Use this tool when you need to answer questions about current events.
-    Returns (as Markdown text) the top search results with titles, links, and optional descriptions.
-    NOTE: The returned URLs should be visited to retrieve the contents the pages.
+    Use this tool when you need to answer questions about current events and general web search.
+    It returns (as Markdown text) the top search results with titles, links, and optional
+    descriptions.
+    NOTE: The returned URLs can be visited using the `extract_as_markdown` tool to retrieve
+    the contents the respective pages.
 
     Args:
         query: The query string.
@@ -213,10 +215,11 @@ def search_web(query: str, max_results: int = 10, show_description: bool = False
 
 
 @tool
-def file_download(url: str) -> str:
+def download_file(url: str) -> str:
     """
-    Download a file from the Web and save it locally on the disk.
-    (If the `extract_as_markdown` tool does not work, this can be used an alternative.)
+    Use this tool only when `extract_as_markdown` cannot be used.
+    Download a file from the Web and save it locally on the disk. This tool is to be used to
+    when the goal is to download a file (binary) rather than retrieve its contents as text.
 
     Args:
         url: The URL pointing to the file (must be a correct URL).
@@ -241,16 +244,18 @@ def file_download(url: str) -> str:
 
 
 @tool
-def extract_as_markdown(
+def extract_file_contents_as_markdown(
         url_or_file_path: str,
         scrub_links: bool = True,
         max_length: int = None
 ) -> str:
     """
-    Extract the contents from HTML files (.html), PDF files (.pdf), Word Documents (.docx),
-    and Excel spreadsheets (.xlsx) as Markdown text. No other file type is supported.
-    The text can be used for analysis with LLMs. Input can be a URL or a local file path.
-    This tool can directly work with URLs, so no need to download the files separately.
+    Always use this tool to extract the contents of HTML files (.html), PDF files (.pdf),
+    Word documents (.docx), and Excel spreadsheets (.xlsx) as Markdown text. No other file type
+    is supported. The input can point to a URL or a local file path.
+    The extracted text can be used for analysis with LLMs.
+    This tool can directly work with URLs, so no need to download the files using
+    `file_download` separately.
     NOTE: The output returned by this function can be long and may involve lots of quote marks.
 
     Args:
@@ -300,7 +305,7 @@ def extract_as_markdown(
 @tool
 def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
     """
-    Search Wikipedia and return the top search results as Markdown text.
+    Search Wikipedia (only) and return the top search results as Markdown text.
     The input should be a search query. The output will contain the title, summary, and link
     to the Wikipedia page.
 
@@ -332,9 +337,54 @@ def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
 
 
 @tool
+def search_arxiv(query: str, max_results: int = 5) -> str:
+    """
+    Search for academic papers on arXiv.org. The input is a search query.
+    This tool is highly specialized and should be used exclusively for
+    finding scientific and academic papers. It returns the top search results
+    with the title, authors, summary, and a link to the PDF.
+
+    Args:
+        query: The search query string for the paper.
+        max_results: The maximum number of search results to return (default is 5).
+
+    Returns:
+        The search results in Markdown format or a message indicating no results were found.
+    """
+    try:
+        import arxiv
+
+        # Construct the default API client
+        client = arxiv.Client()
+        search = arxiv.Search(
+            query=query,
+            max_results=max_results,
+            sort_by=arxiv.SortCriterion.Relevance
+        )
+
+        results = list(client.results(search))
+
+        if not results:
+            return f'No results found for the query: {query}'
+
+        output = f'## ArXiv Search Results for: {query}\n\n'
+        for result in results:
+            authors = ', '.join([author.name for author in result.authors])
+            output += f'### [{result.title}]({result.pdf_url})\n'
+            output += f'**Authors:** {authors}\n'
+            output += f'**Abstract:** {result.summary}\n'
+            output += f'**Published:** {result.published.strftime("%Y-%m-%d")}\n\n'
+
+        return output
+
+    except Exception as e:
+        return f'An error occurred during the arXiv search: {str(e)}'
+
+
+@tool
 def get_youtube_transcript(video_id: str) -> str:
     """
-    Retrieve the transcript/subtitles for a given YouTube video. It also works for automatically
+    Retrieve the transcript/subtitles for YouTube videos (only). It also works for automatically
     generated subtitles, supports translating subtitles. The input should be a valid YouTube
     video ID. E.g., the URL https://www.youtube.com/watch?v=aBc4E has the video ID `aBc4E`.
 
@@ -621,16 +671,17 @@ async def call_llm(
 
 class Planner:
     """
-    Given a task, generate a step-by-step plan to solve it.
-    This class is stateless, except for the LLM model configuration.
+    Given a task, generate and maintain a step-by-step plan to solve it.
+    This class is stateful and holds the current plan.
     """
     def __init__(self, model_name: str, litellm_params: Optional[dict] = None):
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
+        self.plan: Optional[AgentPlan] = None
 
     async def create_plan(self, task: Task, agent_type: str) -> AgentPlan:
         """
-        Create a plan to solve the given task.
+        Create a plan to solve the given task and store it.
         """
         messages = ku.make_user_message(
             text_content=AGENT_PLAN_PROMPT.format(
@@ -647,16 +698,18 @@ class Planner:
             response_format=AgentPlan,
             trace_id=task.id
         )
-        return AgentPlan.model_validate_json(response)
+        self.plan = AgentPlan.model_validate_json(response)
+        return self.plan
 
-    async def update_plan(
-            self, plan: AgentPlan, thought: str, observation: str, task_id: str
-    ) -> AgentPlan:
+    async def update_plan(self, thought: str, observation: str, task_id: str):
         """
         Update the plan based on the last thought and observation.
         """
+        if not self.plan:
+            return
+
         prompt = UPDATE_PLAN_PROMPT.format(
-            plan=plan.model_dump_json(indent=2),
+            plan=self.plan.model_dump_json(indent=2),
             thought=thought,
             observation=observation
         )
@@ -667,7 +720,39 @@ class Planner:
             response_format=AgentPlan,
             trace_id=task_id
         )
-        return AgentPlan.model_validate_json(response)
+        self.plan = AgentPlan.model_validate_json(response)
+
+    def get_steps_done(self) -> list[PlanStep]:
+        """Returns the completed steps from the current plan."""
+        if not self.plan:
+            return []
+        return [step for step in self.plan.steps if step.is_done]
+
+    def get_steps_pending(self) -> list[PlanStep]:
+        """Returns the pending steps from the current plan."""
+        if not self.plan:
+            return []
+        return [step for step in self.plan.steps if not step.is_done]
+
+    def get_formatted_plan(self, scope: Literal['all', 'done', 'pending'] = 'all') -> str:
+        """
+        Convert the agent's plan into a markdown checklist.
+        """
+        if not self.plan or not self.plan.steps:
+            return ''
+
+        if scope == 'all':
+            steps_to_format = self.plan.steps
+        elif scope == 'done':
+            steps_to_format = self.get_steps_done()
+        else:  # pending
+            steps_to_format = self.get_steps_pending()
+
+        todo_list = []
+        for step in steps_to_format:
+            status = 'x' if step.is_done else ' '
+            todo_list.append(f'- [{status}] {step.description}')
+        return '\n'.join(todo_list)
 
 
 class Observer:
@@ -798,7 +883,7 @@ class Agent(ABC):
         self.messages: list[ChatMessage] = []
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
-        self.plan: Optional[AgentPlan] = None
+        self.planner: Optional[Planner] = None
         self.observer = Observer(
             model_name=model_name,
             litellm_params=litellm_params,
@@ -816,22 +901,9 @@ class Agent(ABC):
     @property
     def current_plan(self) -> Optional[str]:
         """Returns the current plan for the task."""
-        if not self.plan:
+        if not self.planner or not self.planner.plan:
             return None
-        return self._format_plan_as_todo()
-
-    def _format_plan_as_todo(self) -> str:
-        """
-        Convert the agent's plan into a markdown checklist.
-        """
-        if not self.plan or not self.plan.steps:
-            return ''
-
-        todo_list = []
-        for step in self.plan.steps:
-            status = 'x' if step.is_done else ' '
-            todo_list.append(f'- [{status}] {step.description}')
-        return '\n'.join(todo_list)
+        return self.planner.get_formatted_plan()
 
     async def get_history_summary(self) -> str:
         """
@@ -908,7 +980,8 @@ class Agent(ABC):
             self.task.id = task_id
         self.msg_idx_of_new_task = len(self.messages)
         self.final_answer_found = False
-        self.plan = None
+        if self.planner:
+            self.planner.plan = None
         self.observer.reset()
 
     async def salvage_response(self) -> str:
@@ -1128,8 +1201,7 @@ class ReActAgent(Agent):
                 last_thought = self.messages[-2].thought
             if self.messages[-1].role == 'tool':
                 last_observation = self.messages[-1].content
-        self.plan = await self.planner.update_plan(
-            plan=self.plan,
+        await self.planner.update_plan(
             thought=last_thought,
             observation=last_observation,
             task_id=self.task.id,
@@ -1162,8 +1234,8 @@ class ReActAgent(Agent):
             channel='run'
         )
 
-        self.plan = await self.planner.create_plan(self.task, self.__class__.__name__)
-        yield self.response(rtype='log', value=f'Plan:\n{self.plan}', channel='run')
+        await self.planner.create_plan(self.task, self.__class__.__name__)
+        yield self.response(rtype='log', value=f'Plan:\n{self.planner.plan}', channel='run')
 
         for idx in range(self.max_iterations):
             if self.final_answer_found:
@@ -1177,7 +1249,7 @@ class ReActAgent(Agent):
                 yield update
 
             plan_before_update = None
-            if self.plan:
+            if self.planner.plan:
                 plan_before_update = self.current_plan
                 await self._update_plan()
 
@@ -1216,7 +1288,7 @@ class ReActAgent(Agent):
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
         else:
             # Update the plan one last time after the final answer is found
-            if self.plan:
+            if self.planner.plan:
                 await self._update_plan()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
@@ -1243,7 +1315,7 @@ class ReActAgent(Agent):
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
             plan=self.current_plan or '<No plan provided; please plan yourself>',
-            visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
+            # visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
         msg = await self._record_thought(message, ReActChatMessage)
@@ -1695,16 +1767,15 @@ class CodeActAgent(ReActAgent):
         else:
             relevant_tools = self.tools
 
-        message = CODE_ACT_AGENT_PROMPT.format(
+        think_prompt = CODE_ACT_AGENT_PROMPT.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
             authorized_imports=','.join(self.allowed_imports),
             plan=self.current_plan or '[No plan provided; please plan yourself]',
-            visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
-        msg = await self._record_thought(message, CodeChatMessage)
+        msg = await self._record_thought(think_prompt, CodeChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
@@ -1838,13 +1909,16 @@ async def main():
     code_agent = CodeActAgent(
         name='Web agent',
         model_name=model_name,
-        tools=[search_web, extract_as_markdown, file_download, get_youtube_transcript],
+        tools=[
+            search_web, search_arxiv, extract_file_contents_as_markdown, download_file,
+            get_youtube_transcript,
+        ],
         run_env='host',
         max_iterations=6,
         litellm_params=litellm_params,
         allowed_imports=[
             'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'ddgs', 'markitdown', 'youtube_transcript_api',
+            'ddgs', 'markitdown', 'youtube_transcript_api', 'arxiv',
         ],
         pip_packages='ddgs~=9.5.2;"markitdown[all]";',
         filter_tools_for_task=False

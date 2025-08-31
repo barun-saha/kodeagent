@@ -10,7 +10,7 @@ Lack of progress can also be due to errors (e.g., wrong tool usage).
 If the agent is making good progress, set `correction_message` to null.
 Otherwise, the `correction_message` must be actionable and specific to the agent's situation.
 When present, `correction_message` must be in second person, very direct, and free of extraneous words,
-e.g., "You need to...", "Avoid...", "Focus on...", "Do NOT...", "You have already... now do...", "Use the tool like this: ...".
+e.g., "Now, you need to...", "Avoid...", "Focus on...", "Do NOT...", "You have already... now do...", "Use the tool like this: ...".
 In case of wrong tool calls, you must point out the correct tool to use, based on the tool names provided earlier.
 
 For tool calls, instruct the agent to use the exact tool names and arguments provided earlier.
@@ -20,6 +20,11 @@ E.g., if there is a tool named `my_custom_tool` available to the agent, it must 
 not `my_custom_tool.my_custom_tool(arg='value')` or `module.my_custom_tool(arg='value')`.
 The presence of `AttributeError` in the logs is indicative of a wrong tool call or wrong Python library usage.
 Provide very specific instructions to fix it and suggest the correct usage.
+
+IMPORTANT: NEVER suggest any new/non-existent tools or libraries.
+If you are certain that a specific (existing) tool is required to achieve the next step, you can suggest it in `correction_message`.
+Also, you must ensure that your correction does NOT contradict the current plan and cover the steps from the plan.
+In addition, you yourself must not get stuck in a loop suggesting the same correction repeatedly to the agent!
 Your PRECISE FEEDBACK is crucial for the agent to get back on track!
 
 

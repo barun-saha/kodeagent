@@ -14,3 +14,4 @@ You're agent type: {agent_type}
 
 Your output should be a to-do list of step-by-step plan.
 Each step should list only one sub-task in plain English, without any code.
+Generate your response as structured data in JSON format that conforms to the `AgentPlan` schema.
