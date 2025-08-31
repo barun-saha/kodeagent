@@ -136,6 +136,11 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
 
     print(f'\n--- Processing `{split}` split with {n_questions} tasks ---')
 
+    sanitized_model_name = model_name.replace('/', '_').replace('.', '_')
+    jsonl_output_file = f'gaia_{split}_{max_tasks}_{sanitized_model_name}_{max_steps}.jsonl'
+    if os.path.exists(jsonl_output_file):
+        os.remove(jsonl_output_file)
+
     for idx, item in tqdm.tqdm(enumerate(gaia_data, 1), total=n_questions):
         task_id = item.get('task_id', 'N/A')
         question = item['Question']
@@ -146,12 +151,14 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
         question += f'\n\n{special_instructions}'
 
         try:
+            final_answer_provided = False
             async for response in agent.run(
                     task=question,
                     files=[file_path] if file_name else None,
                     summarize_progress_on_failure=False,
             ):
                 if response['type'] == 'final':
+                    final_answer_provided = True
                     answer = (
                         response['value'].content
                         if isinstance(response['value'], ka.ChatMessage) else response['value']
@@ -173,6 +180,24 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
                             agent.current_plan.replace('\n', '<br>')
                         )
                     )
+                    with open(jsonl_output_file, 'a', encoding='utf-8') as f:
+                        f.write(json.dumps({
+                            'task_id': task_id, 'model_answer': answer,
+                            'reasoning_trace': agent.current_plan
+                        }) + '\n')
+
+            if not final_answer_provided:
+                answer = 'Agent failed to provide an answer.'
+                plan = agent.current_plan or 'N/A'
+                evals.append((
+                    task_id, question.replace('\n', '<br>'), true_answer.replace('\n', '<br>'),
+                    answer, False, plan.replace('\n', '<br>')
+                ))
+                with open(jsonl_output_file, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({
+                        'task_id': task_id, 'model_answer': answer, 'reasoning_trace': plan
+                    }) + '\n')
+
             print(f'True Answer: {true_answer}')
             print(f'Plan:\n{agent.current_plan}\n\n')
 
@@ -183,6 +208,12 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
         except Exception as e:
             print(f'Error processing task {task_id}: {e}')
             evals.append((task_id, question, true_answer, 'Execution error', False, 'N/A'))
+            with open(jsonl_output_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps({
+                    'task_id': task_id,
+                    'model_answer': 'Execution error',
+                    'reasoning_trace': 'N/A'
+                }) + '\n')
 
     table = tabulate(
         evals,
