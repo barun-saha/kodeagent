@@ -76,7 +76,7 @@ def _read_prompt(filename: str) -> str:
 
 
 REACT_PROMPT = _read_prompt('react.txt')
-CODE_ACT_AGENT_PROMPT = _read_prompt('code_act_agent.txt')
+CODE_ACT_AGENT_PROMPT = _read_prompt('codeact.txt')
 RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
 AGENT_PLAN_PROMPT = _read_prompt('agent_plan.txt')
 UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')

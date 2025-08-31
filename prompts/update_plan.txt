@@ -16,4 +16,5 @@ Last Thought:
 Last Observation:
 {observation}
 
-Updated Plan:
+Generate your response as structured data in JSON format that conforms to the `AgentPlan` schema.
+
