@@ -1899,10 +1899,10 @@ async def main():
     model_name = 'gemini/gemini-2.0-flash-lite'
 
     # react_agent = ReActAgent(
-    #     name='Maths agent',
+    #     name='Simple agent',
     #     model_name=model_name,
-    #     tools=[calculator, ],
-    #     max_iterations=3,
+    #     tools=[calculator, search_web, extract_file_contents_as_markdown,],
+    #     max_iterations=6,
     #     litellm_params=litellm_params,
     #     filter_tools_for_task=False
     # )
