@@ -11,7 +11,7 @@ Here are some reasons why you should use KodeAgent:
 - **Learn-first design**: Helps developers understand agent-building from scratch.
 - **Multimodal**: Supports both text and images in the inputs. 
 
-Written in about 2100 lines (including **prompts**, **documentation**, and **examples**), KodeAgent comes with built-in ReAct, CodeAct, and a multi-agent supervisor. Or you can create your own agent by subclassing `Agent`.
+Written in about 2000 lines (excluding the prompts), KodeAgent comes with built-in ReAct and CodeAct agents. Or you can create your own agent by subclassing `Agent`.
 
 A key motivation beyond KodeAgent is also to teach building agentic frameworks from scratch. KodeAgent introduces a few primitives and code flows that should help you to get an idea about how such frameworks typically work. 
 
@@ -31,7 +31,6 @@ Clone the KodeAgent GitHub repository locally:
 ```bash
 git clone https://github.com/barun-saha/kodeagent.git
 ```
-Alternatively, copy the `kodeagent.py` and `kutils.py` files to your source code location.
 
 Next, create a virtual environment if you do not have one already and activate it:
 ```bash
@@ -66,10 +65,11 @@ from kodeagent import CodeActAgent
 agent = CodeActAgent(
     name='Web agent',
     model_name='gemini/gemini-2.0-flash-lite',
-    tools=[web_search, extract_as_markdown],
+    tools=[search_web, extract_file_contents_as_markdown],
     run_env='e2b',
     max_iterations=3,
     allowed_imports=['re', 'requests', 'duckduckgo_search', 'markitdown'],
+    pip_packages='ddgs~=9.5.2;"markitdown[all]";',
 )
 ```
 
@@ -86,19 +86,7 @@ for task in [
 
 That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [kodeagent.py](kodeagent.py) module.
 
-**Early-stage multi-agent capability** is available. Create multiple agents and associate them with a supervisor, like this:
-```python
-agency = SupervisorAgent(
-    name='Supervisor',
-    model_name=model_name,
-    agents=[agent1, agent2],
-    max_iterations=5
-)
-```
-
-The use of a supervisor increases the interactions and therefore, iterations. It may be helpful to set `max_iterations` to a relatively higher value for all the agents, including `SupervisorAgent`.  
-
-KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm), enabling it to work with any capable LLM. Currently, KodeAgent has been tested with Gemini 2.0 Flash Lite.
+KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm), enabling it to work with any capable LLM. Currently, KodeAgent has been tested with Gemini 2.0 Flash Lite. For advanced tasks, you can try Gemini 2.5 Pro.
 
 LLM model names, parameters, and keys should be set as per [LiteLLM documentation](https://docs.litellm.ai/docs/set_keys). For example, add `GEMINI_API_KEY` to the `.env` to use Gemini API.
 
