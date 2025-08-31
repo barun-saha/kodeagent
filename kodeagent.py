@@ -85,13 +85,13 @@ SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
 # Unused currently
 CONTEXTUAL_SUMMARY_PROMPT = _read_prompt('contextual_summary.txt')
 
-VISUAL_CAPABILITY = '''
-5. **Innate Visual Intelligence**: Use your in-built capabilities to answer to basic visual tasks
-    with images files or URLs, such as image analysis and objects counting. You can process multiple
-    image files/URLs together. Use a tool or write code ONLY when the visual task is complex
-    (e.g., OCR, analyzing a video, image editing, or comparing thousands of images)
-    OR if your own visual capabilities fail.
-'''
+# VISUAL_CAPABILITY = '''
+# 5. **Innate Visual Intelligence**: Use your in-built capabilities to answer to basic visual tasks
+#     with images files or URLs, such as image analysis and objects counting. You can process multiple
+#     image files/URLs together. Use a tool or write code ONLY when the visual task is complex
+#     (e.g., OCR, analyzing a video, image editing, or comparing thousands of images)
+#     OR if your own visual capabilities fail.
+# '''
 
 
 def tool(func: Callable) -> Callable:
@@ -1315,7 +1315,7 @@ class ReActAgent(Agent):
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             tool_names=self.get_tools_description(relevant_tools),
             plan=self.current_plan or '<No plan provided; please plan yourself>',
-            visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
+            # visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
             history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
         )
         msg = await self._record_thought(message, ReActChatMessage)
