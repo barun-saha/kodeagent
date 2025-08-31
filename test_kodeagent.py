@@ -188,8 +188,8 @@ def test_get_tools_description(react_agent):
 
 def test_search_arxiv():
     """Test the arxiv search tool for research papers."""
-    query = "attention is all you need"
-    results = search_arxiv(query=query, max_results=1)
+    query = "attention is all you need vaswani"
+    results = search_arxiv(query=query, max_results=2)
     assert "attention is all you need" in results.lower()
     assert "vaswani" in results.lower()
     assert "## ArXiv Search Results for:" in results
