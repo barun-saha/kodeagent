@@ -96,12 +96,10 @@ Optionally, here's a general plan to follow (ignore if unavailable). Steps alrea
 
 # Guidelines & Constraints
 
-- Always generate a Thought-Code sequence.
-- Do not name new variables with the same name as a tool.
-- Use tools only when needed and only those listed. Prefer tools over writing complex custom code.
-- Always use the correct arguments for tools (e.g., tool(arg='value'), not tool({{'arg': 'value'}})).
-- Remember to import allowed Python modules before using them within a Code block.
-- Do NOT print secrets (API keys, passwords).
+- Always generate a Thought-Action sequence.
+- Use tools only when needed and only those listed.
+- Always use the correct arguments for tools.
+
 
 
 ## Current Interaction
