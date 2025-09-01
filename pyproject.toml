@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kodeagent"
+version = "0.1.0"
+authors = [
+  { name="Barun Saha", email="your.email@example.com" }
+]
+description = "A minimalistic approach to building AI agents "
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.package-data]
+kodeagent = ["prompts/*.txt"]
+
+[project.urls]
+"Homepage" = "https://github.com/barun-saha/kodeagent"
+"Bug Tracker" = "https://github.com/barun-saha/kodeagent/issues"
