@@ -132,6 +132,16 @@ sequenceDiagram
 ```
 
 
+# Run Tests
+
+The repository includes some basic tests in `test_kodeagent.py`. To run the tests, use:
+```bash
+python -m pytest test_kodeagent.py -v --cov
+```
+
+Gemini and E2B API keys should be set in the `.env` file for the tests to work.
+
+
 ## 🗺️ Roadmap & Contributions
 
 To be updated.
