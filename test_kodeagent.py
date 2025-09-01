@@ -12,7 +12,7 @@ from kodeagent import (
     ReActChatMessage,
     calculator,
     search_web,
-    download_file, CodeActAgent, AgentPlan, PlanStep, Planner, call_llm, Task, Observer,
+    download_file, search_arxiv, CodeActAgent, AgentPlan, PlanStep, Planner, call_llm, Task, Observer,
     ObserverResponse
 )
 
@@ -181,9 +181,18 @@ def test_get_tools_description(react_agent):
     desc = react_agent.get_tools_description()
     assert "dummy_tool_one" in desc
     assert "calculator" in desc
-    assert "web_search" in desc
-    assert "file_download" in desc
+    assert "search_web" in desc
+    assert "download_file" in desc
     assert "Description for dummy tool one" in desc
+
+
+def test_search_arxiv():
+    """Test the arxiv search tool for research papers."""
+    query = "attention is all you need vaswani"
+    results = search_arxiv(query=query, max_results=2)
+    assert "attention is all you need" in results.lower()
+    assert "vaswani" in results.lower()
+    assert "## ArXiv Search Results for:" in results
 
 
 @pytest.mark.asyncio
@@ -261,8 +270,6 @@ def test_planner_helpers(planner):
 
     formatted_pending = planner.get_formatted_plan(scope='pending')
     assert formatted_pending == '- [ ] First step.'
-
-
 
 
 @pytest.mark.asyncio
