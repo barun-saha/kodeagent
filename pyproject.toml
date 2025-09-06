@@ -24,6 +24,9 @@ dependencies = {file = ["requirements.txt"]}
 [tool.setuptools.package-data]
 kodeagent = ["prompts/*.txt"]
 
+[tool.pytest.ini_options]
+pythonpath = "src"
+
 [project.urls]
 "Homepage" = "https://github.com/barun-saha/kodeagent"
 "Bug Tracker" = "https://github.com/barun-saha/kodeagent/issues"

@@ -12,12 +12,21 @@ from kodeagent import (
     ReActChatMessage,
     calculator,
     search_web,
-    download_file, search_arxiv, CodeActAgent, AgentPlan, PlanStep, Planner, call_llm, Task, Observer,
+    download_file,
+    search_arxiv,
+    CodeActAgent,
+    CodeChatMessage,
+    AgentPlan,
+    PlanStep,
+    Planner,
+    call_llm,
+    Task,
+    Observer,
     ObserverResponse
 )
 
 
-MODEL_NAME = 'gemini/gemini-2.5-flash-lite'
+MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
 
 
 @tool
@@ -479,3 +488,141 @@ async def test_codeact_agent_unsupported():
     assert (
         'Unsupported code execution' in response
     ), 'Expected code execution to fail on unsupported env'
+
+
+@pytest.mark.asyncio
+async def test_codeact_agent_format_messages():
+    """Test CodeActAgent message formatting."""
+    code_agent = CodeActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        run_env='host',
+        allowed_imports=['datetime']
+    )
+
+    # Add some messages
+    code_agent.add_to_history(ChatMessage(role='user', content='Test message'))
+    code_agent.add_to_history(CodeChatMessage(
+        role='assistant',
+        thought='Testing code',
+        code='print("hello")',
+        content='',
+        successful=False,
+        answer=None
+    ))
+    code_agent.add_to_history(ChatMessage(role='tool', content='hello'))
+
+    formatted = code_agent.format_messages_for_prompt()
+    assert 'Thought: Testing code' in formatted
+    assert 'Code:```py\nprint("hello")' in formatted
+    assert 'Observation: hello' in formatted
+
+
+@pytest.mark.asyncio
+@patch('kodeagent.call_llm')
+async def test_codeact_think_step(mock_call_llm):
+    """Test CodeActAgent's think step."""
+    mock_call_llm.return_value = (
+        '{"role": "assistant", "thought": "test thought", "code": "print(2+2)", '
+        '"content": "", "successful": false, "answer": null}'
+    )
+
+    code_agent = CodeActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        run_env='host',
+        allowed_imports=['datetime']
+    )
+
+    code_agent._run_init('Test task')
+    responses = []
+    async for response in code_agent._think():
+        responses.append(response)
+
+    assert len(responses) == 1
+    assert responses[0]['type'] == 'step'
+    assert isinstance(responses[0]['value'], CodeChatMessage)
+    assert responses[0]['value'].thought == 'test thought'
+    assert responses[0]['value'].code == 'print(2+2)'
+
+
+@pytest.mark.asyncio
+async def test_llm_vision_support():
+    """Test checking vision support for LLMs."""
+    from kodeagent import llm_vision_support
+
+    # Test with known models
+    models = ['gemini/gemini-pro-vision', 'gpt-4-vision-preview']
+    support_status = llm_vision_support(models)
+    assert len(support_status) == len(models)
+    assert all(isinstance(status, bool) for status in support_status)
+
+
+def test_code_chat_message_validation():
+    """Test CodeChatMessage validation."""
+    # Valid message
+    msg = CodeChatMessage(
+        role="assistant",
+        thought="test thought",
+        code="print('test')",
+        content="",
+        successful=False,
+        answer=None
+    )
+    assert msg.role == "assistant"
+    assert msg.thought == "test thought"
+    assert msg.code == "print('test')"
+
+    # Missing required fields
+    with pytest.raises(ValueError):
+        CodeChatMessage(
+            role="assistant",
+            thought="",  # Empty thought
+            code="print('test')",
+            content="",
+            successful=False,
+            answer=None
+        )
+
+
+@pytest.mark.asyncio
+async def test_agent_with_no_tools():
+    """Test agent initialization with no tools."""
+    agent = ReActAgent(
+        name='no_tools_agent',
+        model_name=MODEL_NAME,
+        tools=[]
+    )
+    assert len(agent.tools) == 0
+    assert len(agent.tool_names) == 0
+
+    responses = []
+    async for response in agent.run('Simple task'):
+        responses.append(response)
+
+    assert any('Simple task' in str(r['value']) for r in responses)
+
+
+def test_agent_response_helper():
+    """Test the response helper method of Agent."""
+    agent = ReActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        tools=[calculator]
+    )
+
+    # Test different response types
+    step_response = agent.response('step', 'test value', 'test_channel')
+    assert step_response['type'] == 'step'
+    assert step_response['value'] == 'test value'
+    assert step_response['channel'] == 'test_channel'
+
+    # Test with metadata
+    meta_response = agent.response('log', 'test', metadata={'key': 'value'})
+    assert meta_response['metadata'] == {'key': 'value'}
+
+    # Test final response
+    final_response = agent.response('final', 'done')
+    assert final_response['type'] == 'final'
+    assert final_response['value'] == 'done'
+

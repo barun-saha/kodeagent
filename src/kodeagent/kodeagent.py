@@ -40,7 +40,7 @@ import rich
 from dotenv import load_dotenv
 from tenacity import stop_after_attempt, wait_random_exponential, AsyncRetrying
 
-import kutils as ku
+from . import kutils as ku
 
 
 load_dotenv()
