@@ -299,3 +299,4 @@ cython_debug/
 .aider*
 
 benchmarks/gaia_dataset/
+test_report/
