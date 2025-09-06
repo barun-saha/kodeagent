@@ -118,13 +118,23 @@ def test_make_user_message_basic():
 
 @patch('requests.head')
 @patch('requests.get')
-def test_make_user_message_with_urls(mock_get, mock_head):
+def test_make_user_message_with_urls(mock_head, mock_get):
     """Test message creation with URLs."""
-    # Setup mocks
-    mock_head.return_value = MagicMock(headers={})
-    mock_get.return_value = MagicMock(headers={'Content-Type': 'image/jpeg'})
 
-    # Test with image URL
+    def mock_request_side_effect(url, *args, **kwargs):
+        if 'image.jpg' in url:
+            # This is a mock response for the image file
+            return MagicMock(headers={'Content-Type': 'image/jpeg'})
+        if 'document.pdf' in url:
+            # This is a mock response for the PDF file
+            return MagicMock(headers={'Content-Type': 'application/pdf'})
+        return MagicMock(headers={})
+
+    # Assign the same side effect function to both mocks
+    mock_get.side_effect = mock_request_side_effect
+    mock_head.side_effect = mock_request_side_effect
+
+    # Test with both URLs
     message = make_user_message(
         'Check these URLs',
         files=[
@@ -134,7 +144,8 @@ def test_make_user_message_with_urls(mock_get, mock_head):
     )
 
     content = message[0]['content']
-    assert len(content) == 3  # Original text + 2 files
+    print(f'{content=}')
+    assert len(content) == 3
     assert content[0]['text'] == 'Check these URLs'
     assert content[1]['type'] == 'image_url'
     assert content[2]['type'] == 'text'
@@ -199,27 +210,27 @@ def test_make_user_message_with_images(mock_mime, mock_isfile):
 
 def test_make_user_message_error_handling():
     """Test error handling in message creation."""
-    with patch('os.path.isfile') as mock_isfile:
-        mock_isfile.return_value = True
 
-        # Test file read error
-        with patch('builtins.open', mock_open()) as m:
-            m.side_effect = Exception('Read error')
+    # We mock os.path.isfile and mimetypes.guess_type at the function level
+    with patch('os.path.isfile', return_value=True) as mock_isfile:
+        with patch('mimetypes.guess_type') as mock_guess_type:
+            # Test file read error
+            mock_guess_type.side_effect = Exception('Read error')
             message = make_user_message(
                 'Test errors',
                 files=['error.txt']
             )
+            # Should only have the original message
+            assert len(message[0]['content']) == 1
 
-        # Should only have the original message
-        assert len(message[0]['content']) == 1
-
-        # Test with nonexistent file
-        mock_isfile.return_value = False
-        message = make_user_message(
-            'Test missing file',
-            files=['missing.txt']
-        )
-        assert len(message[0]['content']) == 1
+            # Test with nonexistent file
+            mock_isfile.return_value = False
+            mock_guess_type.side_effect = None  # Reset the side effect for the next test
+            message = make_user_message(
+                'Test missing file',
+                files=['missing.txt']
+            )
+            assert len(message[0]['content']) == 1
 
 
 @patch('os.path.isfile')
