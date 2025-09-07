@@ -1,6 +1,7 @@
 """
 Unit tests for the agents and their operations.
 """
+from typing import Optional, AsyncIterator
 from unittest.mock import AsyncMock, patch
 
 import pydantic_core
@@ -22,6 +23,7 @@ from kodeagent import (
     Task,
     ObserverResponse, Agent
 )
+from kodeagent.kodeagent import AgentResponse
 
 MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
 
@@ -586,7 +588,12 @@ def test_abstract_agent(mock_llm):
 def test_agent_subclass(mock_llm):
     """Test agent initialization with no tools."""
     class MinimalAgent(Agent):
-        async def run(self, task_description: str):
+        async def run(
+                self,
+                task: str,
+                files: Optional[list[str]] = None,
+                task_id: Optional[str] = None
+        ) -> AsyncIterator[AgentResponse]:
             yield self.response('final', 'Done')
 
     agent = MinimalAgent(
