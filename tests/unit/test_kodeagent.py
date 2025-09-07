@@ -1,11 +1,10 @@
 """
-Unit tests for the KodeAgent ReActAgent class.
+Unit tests for the agents and their operations.
 """
-import datetime
+from unittest.mock import AsyncMock, patch
 
 import pydantic_core
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from kodeagent import (
     ReActAgent,
@@ -21,7 +20,6 @@ from kodeagent import (
     PlanStep,
     Planner,
     Task,
-    Observer,
     ObserverResponse
 )
 
@@ -362,3 +360,218 @@ def test_agent_response_helper():
     final_response = agent.response('final', 'done')
     assert final_response['type'] == 'final'
     assert final_response['value'] == 'done'
+
+
+def test_task_initialization():
+    """Test Task class initialization and properties."""
+    task_description = 'Sample task'
+    task = Task(description=task_description, files=None)
+    assert task.description == task_description
+    assert task.is_finished is False
+    assert task.is_error is False
+    assert task.result is None
+    assert task.id is not None
+
+    # Test with files
+    task_files=['file1.txt', 'file2.txt']
+    task_with_files = Task(
+        description='Task with files',
+        files=task_files
+    )
+    assert len(task_with_files.files) == 2
+    assert task_with_files.files == task_files
+
+
+
+def test_task_completion():
+    """Test Task completion and result setting."""
+    task = Task(description='Complete this task', files=None)
+    assert not task.is_finished
+
+    # Simulate task completion
+    task.result = 'Task completed successfully'
+    task.is_finished = True
+
+    assert task.is_finished
+    assert task.result == 'Task completed successfully'
+    assert not task.is_error
+
+    # Test error state
+    error_task = Task(description='Failed task', files=None)
+    error_task.is_error = True
+    error_task.is_finished = True
+    error_task.result = 'Error occurred'
+
+    assert error_task.is_error
+    assert error_task.is_finished
+    assert error_task.result == 'Error occurred'
+
+
+def test_plan_step():
+    """Test PlanStep class initialization and properties."""
+    step = PlanStep(description="Calculate sum")
+    assert step.description == "Calculate sum"
+    assert step.is_done is False
+
+    # Test marking step as done
+    step.is_done = True
+    assert step.is_done is True
+
+
+def test_agent_plan():
+    """Test AgentPlan class initialization and management of steps."""
+    steps = [
+        PlanStep(description='Step 1'),
+        PlanStep(description='Step 2'),
+        PlanStep(description='Step 3')
+    ]
+    plan = AgentPlan(steps=steps)
+
+    assert len(plan.steps) == 3
+    assert all(not step.is_done for step in plan.steps)
+
+    # Test marking steps as done
+    plan.steps[0].is_done = True
+    assert plan.steps[0].is_done
+    assert not plan.steps[1].is_done
+
+
+def test_observer_response():
+    """Test ObserverResponse class initialization and properties."""
+    response = ObserverResponse(
+        is_progressing=True,
+        is_in_loop=False,
+        reasoning='Agent is making good progress on the calculation task',
+        correction_message=None
+    )
+
+    assert response.is_progressing is True
+    assert response.is_in_loop is False
+    assert 'making good progress' in response.reasoning
+    assert response.correction_message is None
+
+    # Test with correction message
+    response_with_correction = ObserverResponse(
+        is_progressing=False,
+        is_in_loop=True,
+        reasoning='Agent is stuck in a loop',
+        correction_message='Try using a different approach to solve the calculation'
+    )
+
+    assert response_with_correction.is_progressing is False
+    assert response_with_correction.is_in_loop is True
+    assert response_with_correction.correction_message is not None
+
+
+def test_observer_response_validation():
+    """Test validation of ObserverResponse fields."""
+    with pytest.raises(ValueError):
+        # Should fail because reasoning is required
+        ObserverResponse(
+            is_progressing=True,
+            is_in_loop=False,
+            reasoning=None  # Empty reasoning should fail
+        )
+
+
+@pytest.fixture
+def planner():
+    """Fixture to create a Planner instance for testing."""
+    return Planner(
+        model_name=MODEL_NAME,
+        litellm_params={'max_tokens': 1000}
+    )
+
+
+@pytest.mark.asyncio
+async def test_planner_create_plan(planner):
+    """Test creating a new plan."""
+    mock_plan_response = '{"steps": [{"description": "Use calculator", "is_done": false}]}'
+
+    with patch('kodeagent.kodeagent.call_llm', autospec=True) as mock_call_llm:
+        mock_call_llm.return_value = mock_plan_response
+        task = Task(description='Calculate 2+2', files=None)
+        plan = await planner.create_plan(task, agent_type='ReAct')
+
+        assert isinstance(plan, AgentPlan)
+        assert len(plan.steps) > 0
+        assert isinstance(plan.steps[0], PlanStep)
+        assert plan.steps[0].description == 'Use calculator'
+        assert not plan.steps[0].is_done
+
+
+@pytest.mark.asyncio
+async def test_planner_update_plan(planner):
+    """Test updating an existing plan."""
+    mock_update_response = '{"steps": [{"description": "Use calculator", "is_done": true}]}'
+
+    with patch('kodeagent.kodeagent.call_llm', autospec=True) as mock_call_llm:
+        mock_call_llm.return_value = mock_update_response
+        task = Task(description='Calculate 2+2', files=None)
+        await planner.create_plan(task, agent_type='ReAct')
+
+        await planner.update_plan(
+            thought='I need to use the calculator',
+            observation='The calculator returned 4',
+            task_id=str(task.id)
+        )
+
+        assert planner.plan is not None
+        assert len(planner.plan.steps) > 0
+        assert planner.plan.steps[0].is_done
+
+
+def test_planner_get_steps_status(planner):
+    """Test getting completed and pending steps."""
+    # Create a plan manually for testing
+    plan = AgentPlan(steps=[
+        PlanStep(description='Step 1', is_done=True),
+        PlanStep(description='Step 2', is_done=False),
+        PlanStep(description='Step 3', is_done=True)
+    ])
+    planner.plan = plan
+
+    done_steps = planner.get_steps_done()
+    pending_steps = planner.get_steps_pending()
+
+    assert len(done_steps) == 2
+    assert len(pending_steps) == 1
+    assert all(step.is_done for step in done_steps)
+    assert not any(step.is_done for step in pending_steps)
+
+
+def test_planner_get_formatted_plan(planner):
+    """Test formatting the plan as a markdown checklist."""
+    # Create a plan manually for testing
+    plan = AgentPlan(steps=[
+        PlanStep(description='Step 1', is_done=True),
+        PlanStep(description='Step 2', is_done=False),
+        PlanStep(description='Step 3', is_done=True)
+    ])
+    planner.plan = plan
+
+    # Test formatting all steps
+    all_steps = planner.get_formatted_plan(scope='all')
+    assert '- [x] Step 1' in all_steps
+    assert '- [ ] Step 2' in all_steps
+    assert '- [x] Step 3' in all_steps
+
+    # Test formatting only done steps
+    done_steps = planner.get_formatted_plan(scope='done')
+    assert '- [x] Step 1' in done_steps
+    assert '- [x] Step 3' in done_steps
+    assert '- [ ] Step 2' not in done_steps
+
+    # Test formatting only pending steps
+    pending_steps = planner.get_formatted_plan(scope='pending')
+    assert '- [ ] Step 2' in pending_steps
+    assert '- [x] Step 1' not in pending_steps
+    assert '- [x] Step 3' not in pending_steps
+
+
+def test_planner_empty_plan(planner):
+    """Test planner behavior with no plan."""
+    assert planner.get_steps_done() == []
+    assert planner.get_steps_pending() == []
+    assert planner.get_formatted_plan() == ''
+    assert planner.plan is None
