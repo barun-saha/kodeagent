@@ -20,7 +20,7 @@ from kodeagent import (
     PlanStep,
     Planner,
     Task,
-    ObserverResponse
+    ObserverResponse, Agent
 )
 
 MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
@@ -575,3 +575,24 @@ def test_planner_empty_plan(planner):
     assert planner.get_steps_pending() == []
     assert planner.get_formatted_plan() == ''
     assert planner.plan is None
+
+
+def test_abstract_agent(mock_llm):
+    """Test agent initialization."""
+    with pytest.raises(TypeError):
+        Agent(name='minimal_agent', model_name=MODEL_NAME)
+
+
+def test_agent_subclass(mock_llm):
+    """Test agent initialization with no tools."""
+    class MinimalAgent(Agent):
+        async def run(self, task_description: str):
+            yield self.response('final', 'Done')
+
+    agent = MinimalAgent(
+        name='minimal_agent',
+        model_name=MODEL_NAME
+    )
+    assert len(agent.tools) == 0
+    assert len(agent.tool_names) == 0
+    assert len(agent.tool_name_to_func) == 0
