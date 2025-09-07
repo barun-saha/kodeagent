@@ -19,7 +19,9 @@ from .kodeagent import (
     Planner,
     Task,
     Observer,
-    ObserverResponse
+    ObserverResponse,
+    CodeRunner,
+    AgentResponse
 )
 from .kutils import (
     is_it_url,
@@ -48,6 +50,8 @@ __all__ = [
     'Task',
     'Observer',
     'ObserverResponse',
+    'CodeRunner',
+    'AgentResponse',
     'is_it_url',
     'detect_file_type',
     'is_image_file',
