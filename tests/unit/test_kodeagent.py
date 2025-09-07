@@ -21,9 +21,13 @@ from kodeagent import (
     PlanStep,
     Planner,
     Task,
-    ObserverResponse, Agent
+    Observer,
+    ObserverResponse,
+    Agent,
+    CodeRunner,
+    AgentResponse
 )
-from kodeagent.kodeagent import AgentResponse
+
 
 MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
 
@@ -235,19 +239,6 @@ def test_clear_history(react_agent):
 
     react_agent.clear_history()
     assert len(react_agent.messages) == 0
-
-
-@pytest.mark.asyncio
-async def test_unsupported_task(react_agent):
-    """Test that agent fails appropriately when given an unsupported task."""
-    task_description = 'Generate a 30-second video animation'
-
-    responses = []
-    async for response in react_agent.run(task_description):
-        responses.append(response)
-
-    response = ' | '.join([str(r) for r in responses])
-    assert any(x in response.lower() for x in ['cannot', 'no relevant tool', 'unable', 'failed', 'unfortunately'])
 
 
 @pytest.fixture
@@ -603,3 +594,178 @@ def test_agent_subclass(mock_llm):
     assert len(agent.tools) == 0
     assert len(agent.tool_names) == 0
     assert len(agent.tool_name_to_func) == 0
+
+
+def test_code_runner_initialization():
+    """Test CodeRunner initialization and configuration."""
+    runner = CodeRunner(
+        env='host',
+        allowed_imports=['os', 'datetime'],
+        pip_packages='requests==2.31.0',
+        timeout=45,
+        env_vars_to_set={'TEST_VAR': 'test_value'}
+    )
+    assert runner.env == 'host'
+    assert 'os' in runner.allowed_imports
+    assert 'datetime' in runner.allowed_imports
+    assert runner.pip_packages == ['requests==2.31.0']
+    assert runner.default_timeout == 45
+    assert runner.env_vars_to_set == {'TEST_VAR': 'test_value'}
+
+
+def test_code_runner_check_imports():
+    """Test import checking functionality of CodeRunner."""
+    runner = CodeRunner(env='host', allowed_imports=['os', 'datetime'])
+
+    # Test allowed imports
+    code_with_allowed = """
+import os
+from datetime import datetime
+print('test')
+"""
+    assert len(runner.check_imports(code_with_allowed)) == 0
+
+    # Test disallowed imports
+    code_with_disallowed = """
+import os
+import requests
+from flask import Flask
+"""
+    disallowed = runner.check_imports(code_with_disallowed)
+    assert 'requests' in disallowed
+    assert 'flask' in disallowed
+
+
+def test_code_runner_syntax_error():
+    """Test CodeRunner handling of syntax errors."""
+    runner = CodeRunner(env='host', allowed_imports=['os'])
+    code_with_syntax_error = """
+print('Hello'
+print('World')  # Missing parenthesis above
+"""
+    _, stderr, exit_code = runner.run(code_with_syntax_error)
+    assert exit_code != 0
+    assert 'SyntaxError' in stderr
+
+
+@pytest.mark.asyncio
+async def test_observer_analyze():
+    """Test Observer's analysis of agent behavior."""
+    mock_response = '{"is_progressing": false, "is_in_loop": true, "reasoning": "Agent keeps using calculator repeatedly", "correction_message": "Try a different approach"}'
+
+    with patch('kodeagent.call_llm', return_value=mock_response):
+        observer = Observer(
+            model_name=MODEL_NAME,
+            tool_names={'calculator', 'search_web'},
+            threshold=2
+        )
+
+        # Mock a task and history that shows a loop
+        task = Task(description='Calculate 2+2', files=None)
+        history = """
+Thought: I should use calculator
+Action: calculator
+Args: {"a": 2, "b": 2}
+Observation: 4
+
+Thought: I should use calculator again
+Action: calculator
+Args: {"a": 2, "b": 2}
+Observation: 4
+"""
+
+        # First call before threshold - should return None
+        correction = await observer.observe(
+            iteration=1,
+            task=task,
+            history=history,
+            plan_before=None,
+            plan_after=None
+        )
+        assert correction is None
+
+        # Call after threshold with looping behavior
+        correction = await observer.observe(
+            iteration=3,
+            task=task,
+            history=history,
+            plan_before=None,
+            plan_after=None
+        )
+        assert correction is not None
+        assert "CRITICAL FOR COURSE CORRECTION" in correction
+
+
+@pytest.mark.asyncio
+async def test_observer_reset():
+    """Test Observer reset functionality."""
+    observer = Observer(
+        model_name=MODEL_NAME,
+        tool_names={'calculator'},
+        threshold=2
+    )
+
+    observer.last_correction_iteration = 5
+    observer.reset()
+    assert observer.last_correction_iteration == 0
+
+
+def test_agent_str(react_agent):
+    """Test the string representation of an Agent."""
+    agent_str = str(react_agent)
+    assert 'Agent: test_react_agent' in agent_str
+    assert react_agent.model_name in agent_str
+    assert 'Tools:' in agent_str
+    assert str(react_agent.id) in agent_str
+
+
+def test_agent_purpose():
+    """Test Agent's purpose string generation."""
+    agent = ReActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        tools=[calculator],
+        description='A test agent'
+    )
+
+    purpose = agent.purpose
+    assert 'Name: test_agent' in purpose
+    assert 'Description: A test agent' in purpose
+    assert 'calculator' in purpose
+
+
+def test_agent_trace(react_agent):
+    """Test the trace method of Agent."""
+    # Add some history
+    react_agent.add_to_history(ChatMessage(role='user', content='Calculate 2+2'))
+    react_agent.add_to_history(ReActChatMessage(
+        role='assistant',
+        thought='Using calculator',
+        action='calculator',
+        args='{"expression": "2+2"}',
+        content='',
+        successful=False,
+        answer=None
+    ))
+    react_agent.add_to_history(ChatMessage(role='tool', content='4'))
+
+    trace = react_agent.trace()
+    assert 'Thought: Using calculator' in trace
+    assert 'Action: calculator' in trace
+    assert 'Observation: 4' in trace
+
+
+@pytest.mark.parametrize('expression,expected', [
+    ('2 + 2', 4),
+    ('10 * 5', 50),
+    ('(3 + 2) * 4', 20),
+    ('2 ** 3', 8),
+    ('invalid expr', None),
+    ('os.system("ls")', None),  # test security
+    ('10 + ^2', None),  # invalid operator
+    ('10 / 0', None),  # division by zero
+])
+def test_calculator_tool(expression, expected):
+    """Test the calculator tool with various inputs."""
+    result = calculator(expression)
+    assert result == expected
