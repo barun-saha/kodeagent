@@ -113,7 +113,7 @@ def make_user_message(
                     mime_type, _ = mimetypes.guess_type(item)
                     if mime_type and 'image' in mime_type:
                         is_image = True
-                except (TypeError, ValueError, OSError):
+                except Exception:
                     logger.error(
                         'Error guessing MIME type for local file %s...will ignore it',
                         item,
@@ -133,7 +133,7 @@ def make_user_message(
                         # FIXED: Added a try-except block here too, for good measure
                         try:
                             mime_type, _ = mimetypes.guess_type(item)
-                        except (TypeError, ValueError, OSError):
+                        except Exception:
                             logger.warning(
                                 'Could not guess MIME type, defaulting to octet-stream',
                                 exc_info=True
@@ -189,7 +189,7 @@ def make_user_message(
                                 content.append({'type': 'text', 'text': f'Input file: {item}'})
                         else:
                             content.append({'type': 'text', 'text': f'Input file: {item}'})
-                    except (TypeError, ValueError, OSError):
+                    except Exception:
                         logger.error(
                             'Error guessing MIME type for local file %s...will ignore it',
                             item,
