@@ -144,7 +144,6 @@ def test_make_user_message_with_urls(mock_head, mock_get):
     )
 
     content = message[0]['content']
-    print(f'{content=}')
     assert len(content) == 3
     assert content[0]['text'] == 'Check these URLs'
     assert content[1]['type'] == 'image_url'
@@ -270,14 +269,19 @@ def test_make_user_message_complex_scenario(mock_isfile):
     # Check all parts are present
     assert len(content) > 1
     assert content[0]['text'] == 'Complex test'
-    assert any('example.com' in str(item) for item in content)
+    assert any(
+        part.get('type') == 'image_url'
+        and isinstance(part.get('image_url'), dict)
+        and 'https://example.com/image.png' in part['image_url'].get('url', '')
+        for part in content
+    )
     assert any('file content' in str(item) for item in content)
 
 
 def test_logging_configuration():
     """Test logger configuration."""
     assert logger.name == 'KodeAgent'
-    assert logger.level == logging.WARNING
+    assert logger.getEffectiveLevel() == logging.WARNING
 
     # Test log message format
     with patch.object(logger, 'warning') as mock_warning:

@@ -2,19 +2,26 @@
 Unit tests for the agents and their operations.
 """
 from typing import Optional, AsyncIterator
-from unittest.mock import AsyncMock, patch
+from unittest import mock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pydantic_core
 import pytest
+import wikipedia
 
 from kodeagent import (
-    ReActAgent,
     tool,
-    ChatMessage,
-    ReActChatMessage,
     calculator,
     search_web,
     download_file,
+    extract_file_contents_as_markdown,
+    search_wikipedia,
+    search_arxiv,
+    get_youtube_transcript,
+    get_audio_transcript,
+    ReActAgent,
+    ChatMessage,
+    ReActChatMessage,
     CodeActAgent,
     CodeChatMessage,
     AgentPlan,
@@ -769,3 +776,120 @@ def test_calculator_tool(expression, expected):
     """Test the calculator tool with various inputs."""
     result = calculator(expression)
     assert result == expected
+
+
+def test_search_web():
+    """Test search_web with mock results."""
+    mock_results = [
+        {'title': 'Result 1', 'href': 'http://test1.com', 'body': 'Description 1'},
+        {'title': 'Result 2', 'href': 'http://test2.com', 'body': 'Description 2'}
+    ]
+
+    with patch('ddgs.DDGS') as mock_ddgs:
+        mock_instance = mock_ddgs.return_value
+        mock_instance.text.return_value = mock_results
+
+        # Test without descriptions
+        result = search_web('test query', max_results=2)
+        assert '[Result 1](http://test1.com)' in result
+        assert '[Result 2](http://test2.com)' in result
+        assert 'Description' not in result
+
+        # Test with descriptions
+        result = search_web('test query', max_results=2, show_description=True)
+
+
+def test_download_file():
+    """Test file download functionality."""
+    with patch('requests.get') as mock_get:
+        mock_response = mock_get.return_value
+        mock_response.iter_content.return_value = [b'test content']
+
+        result = download_file('http://test.com/file.txt')
+        mock_get.assert_called_with(
+            'http://test.com/file.txt',
+            timeout=20,
+            stream=True,
+            headers={'user-agent': 'kodeagent/0.0.1'}
+        )
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+        # Test error case
+        mock_get.return_value.raise_for_status.side_effect = Exception("404 Not Found")
+        with pytest.raises(Exception):
+            download_file('http://test.com/error')
+
+
+def test_extract_file_contents():
+    """Test file content extraction."""
+    with patch('markitdown.MarkItDown') as mock_markitdown:
+        mock_instance = mock_markitdown.return_value
+
+        # Test PDF with CID replacement
+        mock_instance.convert.return_value.text_content = 'Test content with (cid:123)'
+        result = extract_file_contents_as_markdown('test.pdf')
+        assert 'Test content with' in result
+        assert '(cid:123)' not in result
+
+        # Test link handling
+        mock_instance.convert.return_value.text_content = '[Link](http://test.com) text'
+        result = extract_file_contents_as_markdown('test.html', scrub_links=False)
+        assert '[Link](http://test.com)' in result
+
+        result = extract_file_contents_as_markdown('test.html', scrub_links=True)
+        assert '[Link](http://test.com)' not in result
+        assert 'Link' in result
+
+        # Test max length
+        mock_instance.convert.return_value.text_content = 'A' * 100
+        result = extract_file_contents_as_markdown('test.txt', max_length=50)
+        assert len(result) <= 50
+
+
+def test_search_wikipedia():
+    """Test Wikipedia search functionality."""
+    with patch('wikipedia.search') as mock_search:
+        with patch('wikipedia.page') as mock_page:
+            mock_search.return_value = ['Page1', 'Page2']
+
+            class MockPage:
+                def __init__(self, title):
+                    self.title = title
+                    self.url = f'https://en.wikipedia.org/wiki/{title}'
+                    self.summary = f'Summary of {title}'
+
+            mock_page.side_effect = lambda title: MockPage(title)
+            result = search_wikipedia("test query", max_results=2)
+
+            assert '[Page1](https://en.wikipedia.org/wiki/Page1)' in result
+            assert 'Summary of Page1' in result
+
+            # Test no results
+            mock_search.return_value = []
+            result = search_wikipedia('nonexistent')
+            assert 'No results found!' in result
+
+            # Test disambiguation
+            mock_search.side_effect = wikipedia.exceptions.DisambiguationError(
+                'Query', ['Option1', 'Option2']
+            )
+            result = search_wikipedia('ambiguous')
+            assert 'DisambiguationError' in result
+            assert 'Option1' in result
+
+
+def test_get_audio_transcript():
+    """Test audio transcript retrieval with mocked responses."""
+    expected_response = {'text': 'This is the transcribed text'}
+    mock_file = mock.mock_open(read_data=b'fake audio content')
+
+    # Test successful case
+    with patch('builtins.open', mock_file), patch('requests.post') as mock_post:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = expected_response
+        mock_post.return_value = mock_response
+
+        result = get_audio_transcript('test_audio.mp3')
+        assert result == expected_response

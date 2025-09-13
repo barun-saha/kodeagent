@@ -109,15 +109,15 @@ def make_user_message(
                 ) or is_image_file(detect_file_type(item)):
                     is_image = True
             elif os.path.isfile(item):
-                # FIXED: Added a try-except block here
                 try:
                     mime_type, _ = mimetypes.guess_type(item)
                     if mime_type and 'image' in mime_type:
                         is_image = True
-                except Exception as e:
+                except (TypeError, ValueError, OSError):
                     logger.error(
-                        'Error guessing MIME type for local file %s: %s...will ignore it',
-                        item, e
+                        'Error guessing MIME type for local file %s...will ignore it',
+                        item,
+                        exc_info=True
                     )
                     # If an error occurs, treat it as not an image to continue processing
                     is_image = False
@@ -133,9 +133,11 @@ def make_user_message(
                         # FIXED: Added a try-except block here too, for good measure
                         try:
                             mime_type, _ = mimetypes.guess_type(item)
-                        except Exception as e:
+                        except (TypeError, ValueError, OSError):
                             logger.warning(
-                                'Could not guess MIME type, defaulting to octet-stream: %s', e)
+                                'Could not guess MIME type, defaulting to octet-stream',
+                                exc_info=True
+                            )
                             mime_type = 'application/octet-stream'
 
                         mime_type = mime_type if mime_type else 'application/octet-stream'
@@ -187,10 +189,11 @@ def make_user_message(
                                 content.append({'type': 'text', 'text': f'Input file: {item}'})
                         else:
                             content.append({'type': 'text', 'text': f'Input file: {item}'})
-                    except Exception as e:
+                    except (TypeError, ValueError, OSError):
                         logger.error(
-                            'Error guessing MIME type for local file %s: %s...will ignore it',
-                            item, e
+                            'Error guessing MIME type for local file %s...will ignore it',
+                            item,
+                            exc_info=True
                         )
                         # content.append({'type': 'text', 'text': f'Input file: {item}'})
                 else:

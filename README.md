@@ -146,7 +146,7 @@ python -m pytest .\tests\integration -v --cov --cov-report=html
 
 Gemini and E2B API keys should be set in the `.env` file for the tests to work.
 
-Note: Some of the unit tests still make calls to the LLM. This would be fixed in teh future.
+Note: Some of the unit tests still make calls to the LLM. This would be fixed in the future.
 
 
 ## 🗺️ Roadmap & Contributions
