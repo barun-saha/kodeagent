@@ -11,12 +11,14 @@ from typing import Optional, Any
 import requests
 
 
-logging.basicConfig(
-    level=logging.WARNING,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 # Get a logger for the current module
 logger = logging.getLogger('KodeAgent')
+logger.setLevel(logging.WARNING)
+
+# Configure logging format
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 
 def is_it_url(path: str) -> bool:
@@ -79,8 +81,8 @@ def is_image_file(file_type) -> bool:
 
 
 def make_user_message(
-    text_content: str,
-    files: Optional[list[str]] = None
+        text_content: str,
+        files: Optional[list[str]] = None
 ) -> list[dict[str, Any]]:
     """
     Create a single user message to be sent to LiteLLM.
@@ -107,9 +109,18 @@ def make_user_message(
                 ) or is_image_file(detect_file_type(item)):
                     is_image = True
             elif os.path.isfile(item):
-                mime_type, _ = mimetypes.guess_type(item)
-                if mime_type and 'image' in mime_type:
-                    is_image = True
+                try:
+                    mime_type, _ = mimetypes.guess_type(item)
+                    if mime_type and 'image' in mime_type:
+                        is_image = True
+                except Exception:
+                    logger.error(
+                        'Error guessing MIME type for local file %s...will ignore it',
+                        item,
+                        exc_info=True
+                    )
+                    # If an error occurs, treat it as not an image to continue processing
+                    is_image = False
 
             if is_image:
                 if is_it_url(item):
@@ -118,7 +129,16 @@ def make_user_message(
                     try:
                         with open(item, 'rb') as img_file:
                             encoded_image = base64.b64encode(img_file.read()).decode('utf-8')
-                        mime_type, _ = mimetypes.guess_type(item)
+
+                        try:
+                            mime_type, _ = mimetypes.guess_type(item)
+                        except Exception:
+                            logger.warning(
+                                'Could not guess MIME type, defaulting to octet-stream',
+                                exc_info=True
+                            )
+                            mime_type = 'application/octet-stream'
+
                         mime_type = mime_type if mime_type else 'application/octet-stream'
                         content.append({
                             'type': 'image_url',
@@ -137,17 +157,12 @@ def make_user_message(
                 if is_it_url(item):
                     content.append({'type': 'text', 'text': f'File URL: {item}'})
                 elif os.path.isfile(item):
-                    mime_type, _ = mimetypes.guess_type(item)
-                    if mime_type:
-                        if any(
-                                keyword in mime_type for keyword in [
-                                    'application', 'audio', 'video'
-                                ]
+                    try:
+                        mime_type, _ = mimetypes.guess_type(item)
+                        if mime_type and (
+                                'text' in mime_type
+                                or mime_type in ('application/json', 'application/xml')
                         ):
-                            content.append({'type': 'text', 'text': f'Input file: {item}'})
-                        elif 'text' in mime_type or mime_type in [
-                            'application/json', 'application/xml'
-                        ]:
                             try:
                                 with open(item, 'r', encoding='utf-8') as f:
                                     file_content = f.read()
@@ -157,15 +172,22 @@ def make_user_message(
                                         'text': f'File {item} content:\n{file_content}'
                                     }
                                 )
-                            except Exception as e:
+                            except Exception:
                                 logger.error(
-                                    'Error reading text file %s: %s...will ignore it',
-                                    item, e
+                                    'Error reading text file `%s`...will fallback to path only'
+                                    , item
                                 )
+                                content.append({'type': 'text', 'text': f'Input file: {item}'})
                         else:
+                            # Non-text or unknown types: include only the path reference
                             content.append({'type': 'text', 'text': f'Input file: {item}'})
-                    else:
-                        content.append({'type': 'text', 'text': f'Input file: {item}'})
+                    except Exception:
+                        logger.error(
+                            'Error guessing MIME type for local file %s...will ignore it',
+                            item,
+                            exc_info=True
+                        )
+                        # content.append({'type': 'text', 'text': f'Input file: {item}'})
                 else:
                     logger.error('Invalid file path or URL: %s...will ignore it', item)
 

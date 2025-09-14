@@ -134,12 +134,19 @@ sequenceDiagram
 
 # Run Tests
 
-The repository includes some basic tests in `test_kodeagent.py`. To run the tests, use:
+To run unit tests, use:
 ```bash
-python -m pytest test_kodeagent.py -v --cov
+python -m pytest .\tests\unit -v --cov --cov-report=html
+```
+
+For integration tests involving calls to APIs, use:
+```bash
+python -m pytest .\tests\integration -v --cov --cov-report=html
 ```
 
 Gemini and E2B API keys should be set in the `.env` file for the tests to work.
+
+Note: Some of the unit tests still make calls to the LLM. This would be fixed in the future.
 
 
 ## 🗺️ Roadmap & Contributions
