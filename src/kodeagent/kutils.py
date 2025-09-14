@@ -130,7 +130,6 @@ def make_user_message(
                         with open(item, 'rb') as img_file:
                             encoded_image = base64.b64encode(img_file.read()).decode('utf-8')
 
-                        # FIXED: Added a try-except block here too, for good measure
                         try:
                             mime_type, _ = mimetypes.guess_type(item)
                         except Exception:
@@ -158,36 +157,29 @@ def make_user_message(
                 if is_it_url(item):
                     content.append({'type': 'text', 'text': f'File URL: {item}'})
                 elif os.path.isfile(item):
-                    # FIXED: Added a try-except block here as well
                     try:
                         mime_type, _ = mimetypes.guess_type(item)
-                        if mime_type:
-                            if any(
-                                    keyword in mime_type for keyword in [
-                                        'application', 'audio', 'video'
-                                    ]
-                            ):
-                                content.append({'type': 'text', 'text': f'Input file: {item}'})
-                            elif 'text' in mime_type or mime_type in [
-                                'application/json', 'application/xml'
-                            ]:
-                                try:
-                                    with open(item, 'r', encoding='utf-8') as f:
-                                        file_content = f.read()
-                                    content.append(
-                                        {
-                                            'type': 'text',
-                                            'text': f'File {item} content:\n{file_content}'
-                                        }
-                                    )
-                                except Exception as e:
-                                    logger.error(
-                                        'Error reading text file %s: %s...will ignore it',
-                                        item, e
-                                    )
-                            else:
+                        if mime_type and (
+                                'text' in mime_type
+                                or mime_type in ('application/json', 'application/xml')
+                        ):
+                            try:
+                                with open(item, 'r', encoding='utf-8') as f:
+                                    file_content = f.read()
+                                content.append(
+                                    {
+                                        'type': 'text',
+                                        'text': f'File {item} content:\n{file_content}'
+                                    }
+                                )
+                            except Exception:
+                                logger.error(
+                                    'Error reading text file `%s`...will fallback to path only'
+                                    , item
+                                )
                                 content.append({'type': 'text', 'text': f'Input file: {item}'})
                         else:
+                            # Non-text or unknown types: include only the path reference
                             content.append({'type': 'text', 'text': f'Input file: {item}'})
                     except Exception:
                         logger.error(
