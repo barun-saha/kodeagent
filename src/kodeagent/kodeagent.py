@@ -498,6 +498,10 @@ class ChatMessage(pyd.BaseModel):
     """
     role: MESSAGE_ROLES = pyd.Field(description='Role of the message sender')
     content: Any = pyd.Field(description='Content of the message')
+    files: Optional[list[str]] = pyd.Field(
+        description='Optional list of file paths or URLs associated with the message',
+        default=None
+    )
 
 
 class ReActChatMessage(ChatMessage):
@@ -1083,7 +1087,7 @@ class Agent(ABC):
                 hasattr(msg, 'action') and getattr(msg, 'action', None)
             ) and not getattr(msg, 'final_answer', None):
                 # This is a tool call, not a final answer
-                tool_call_id = f"call_{uuid.uuid4().hex[:8]}"
+                tool_call_id = f'call_{uuid.uuid4().hex[:8]}'
                 last_tool_call_id = tool_call_id
                 formatted_messages.append({
                     'role': 'assistant',
@@ -1110,11 +1114,21 @@ class Agent(ABC):
                 # Final answer or normal assistant message
                 # If final_answer is present, use it as content
                 if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
-                    formatted_messages.append({'role': 'assistant', 'content': getattr(msg, 'final_answer')})
+                    formatted_messages.append(
+                        {'role': 'assistant', 'content': getattr(msg, 'final_answer')}
+                    )
                 else:
-                    formatted_messages.append({'role': 'assistant', 'content': d.get('content', '')})
+                    formatted_messages.append(
+                        {'role': 'assistant', 'content': d.get('content', '')}
+                    )
+            elif role == 'user':
+                usr_msgs = ku.make_user_message(
+                    text_content=d.get('content', ''),
+                    files=d.get('files', None)
+                )
+                formatted_messages.extend(usr_msgs)
             else:
-                # user/system
+                # system
                 formatted_messages.append({'role': role, 'content': d.get('content', '')})
 
         print('\n\nCHAT MESSAGES:\n', '\n'.join([str(msg) for msg in formatted_messages]), '\n\n')
@@ -1304,7 +1318,7 @@ class ReActAgent(Agent):
         yield self.response(rtype='log', value=f'Plan:\n{self.planner.plan}', channel='run')
 
         user_message = f'Task: {self.task.description}\n\nPlan:\n{self.current_plan}'
-        self.add_to_history(ChatMessage(role='user', content=user_message))
+        self.add_to_history(ChatMessage(role='user', content=user_message, files=self.task.files))
 
         for idx in range(self.max_iterations):
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
@@ -2040,7 +2054,7 @@ async def main():
 
 
     print('Agent demo\n')
-    for task, img_urls in the_tasks[3:4]:
+    for task, img_urls in the_tasks[2:4]:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in agent.run(task, files=img_urls):
             print_response(response)
