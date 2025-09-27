@@ -506,16 +506,16 @@ class ReActChatMessage(ChatMessage):
     """
     # The content field will not be used by this message (but the LLM can still assign a value)
     # Higher versions of Pydantic allows to exclude the field altogether
-    content: Optional[str] = pyd.Field(description='<Empty string>', exclude=True)
+    content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True)
     thought: str = pyd.Field(description='Thoughts behind the tool use')
     action: str = pyd.Field(description='Name of the tool to use')
     # Gemini complains about empty objects if `args` is defined as dict,
     # hence string type for compatibility
     args: str = pyd.Field(description='Tool arguments as JSON string')
-    answer: Optional[str] = pyd.Field(
+    final_answer: Optional[str] = pyd.Field(
         description='Final answer for the task; set only in the final step', default=None
     )
-    successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
+    task_successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
 
 
 class CodeChatMessage(ChatMessage):
