@@ -530,11 +530,13 @@ class CodeChatMessage(ChatMessage):
     # Higher versions of Pydantic allows to exclude the field altogether
     content: Optional[str] = pyd.Field(description='Unused', exclude=True)
     thought: str = pyd.Field(description='Thoughts behind the code')
-    code: str = pyd.Field(description='Python code with tool use')
-    answer: Optional[str] = pyd.Field(
+    code: Optional[str] = pyd.Field(
+        description='Python code with tool use; `None` when `final_answer` is available'
+    )
+    final_answer: Optional[str] = pyd.Field(
         description='Final answer for the task; set only in the final step', default=None
     )
-    successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
+    task_successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
 
 
 class SupervisorTaskMessage(pyd.BaseModel):
@@ -1469,7 +1471,7 @@ class ReActAgent(Agent):
         """
         prev_msg: ReActChatMessage = self.messages[-1]  # type: ignore
         if (
-                hasattr(prev_msg, 'answer') and prev_msg.answer == ''
+                hasattr(prev_msg, 'final_answer') and prev_msg.final_answer == ''
                 and (prev_msg.action == '' or prev_msg.args == '' or prev_msg.thought == '')
         ):
             self.add_to_history(
@@ -1484,17 +1486,17 @@ class ReActAgent(Agent):
             )
             return
 
-        if hasattr(prev_msg, 'answer') and prev_msg.answer:
+        if hasattr(prev_msg, 'final_answer') and prev_msg.final_answer:
             # The final answer has been found!
             self.final_answer_found = True
             self.task.is_finished = True
-            self.task.is_error = prev_msg.successful
+            self.task.is_error = prev_msg.task_successful
             # Do NOT add another ChatMessage to history here; it's already added in _record_thought
             yield self.response(
                 rtype='final',
                 value=prev_msg,
                 channel='_act',
-                metadata={'final_answer_found': prev_msg.successful}
+                metadata={'final_answer_found': prev_msg.task_successful}
             )
         else:
             # No answer yet, keep tool calling
@@ -1866,8 +1868,8 @@ class CodeActAgent(ReActAgent):
         prev_msg: CodeChatMessage = self.messages[-1]  # type: ignore
 
         if (
-                not hasattr(prev_msg, 'answer') or (
-                    not prev_msg.answer and (not prev_msg.code or not prev_msg.thought)
+                not hasattr(prev_msg, 'final_answer') or (
+                    not prev_msg.final_answer and (not prev_msg.code or not prev_msg.thought)
                 )
         ):
             self.add_to_history(
@@ -1882,17 +1884,17 @@ class CodeActAgent(ReActAgent):
             )
             return
 
-        if hasattr(prev_msg, 'answer') and prev_msg.answer:
+        if hasattr(prev_msg, 'final_answer') and prev_msg.final_answer:
             # The final answer has been found!
             self.final_answer_found = True
             self.task.is_finished = True
-            self.task.is_error = prev_msg.successful
+            self.task.is_error = prev_msg.task_successful
             # Do NOT add another ChatMessage to history here; it's already added in _record_thought
             yield self.response(
                 rtype='final',
                 value=prev_msg,
                 channel='_act',
-                metadata={'final_answer_found': prev_msg.successful}
+                metadata={'final_answer_found': prev_msg.task_successful}
             )
         else:
             # No answer yet, keep tool calling
