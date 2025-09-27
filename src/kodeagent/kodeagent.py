@@ -1307,15 +1307,15 @@ class ReActAgent(Agent):
         self.add_to_history(ChatMessage(role='user', content=user_message))
 
         for idx in range(self.max_iterations):
-            if self.final_answer_found:
-                break
-
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
             # The thought & observation will get appended to the list of messages
             async for update in self._think():
                 yield update
             async for update in self._act():
                 yield update
+
+            if self.final_answer_found:
+                break
 
             plan_before_update = None
             if self.planner.plan:
