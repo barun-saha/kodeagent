@@ -23,7 +23,7 @@ from kodeagent import (
     ChatMessage,
     ReActChatMessage,
     CodeActAgent,
-    CodeChatMessage,
+    CodeActChatMessage,
     AgentPlan,
     PlanStep,
     Planner,
@@ -128,15 +128,15 @@ def test_format_messages_for_prompt(react_agent):
         action='dummy_tool_one',
         args='{"param1": "test"}',
         content='',
-        successful=False,
-        answer=None
+        task_successful=False,
+        final_answer=None
     )
     msg2 = ChatMessage(role='tool', content='tool response')
 
     react_agent.add_to_history(msg1)
     react_agent.add_to_history(msg2)
 
-    formatted = react_agent.format_messages_for_prompt()
+    formatted = '\n'.join([str(m) for m in react_agent.formatted_history_for_llm()])
     assert 'Thought: test thought' in formatted
     assert 'Action: dummy_tool_one' in formatted
     assert 'Observation: tool response' in formatted
@@ -197,8 +197,8 @@ async def test_act_step_with_invalid_tool(react_agent):
         thought="Test thought",
         action="nonexistent_tool",
         args='{"param1": "test"}',
-        answer=None,
-        successful=False,
+        final_answer=None,
+        task_successful=False,
         role="assistant",
         content=""
     )
@@ -296,26 +296,26 @@ def test_code_chat_message_validation():
     role = 'assistant'
     thought = 'test thought'
     code = "print('test')"
-    msg = CodeChatMessage(
+    msg = CodeActChatMessage(
         role=role,
         thought=thought,
         code=code,
         content='',
-        successful=False,
-        answer=None
+        task_successful=False,
+        final_answer=None
     )
     assert msg.role == role
     assert msg.thought == thought
     assert msg.code == code
 
     with pytest.raises(pydantic_core.ValidationError):
-        CodeChatMessage(
+        CodeActChatMessage(
             role=role,
             thought=None,  # No valid thought
             code=code,
             content='',
-            successful=False,
-            answer=None
+            task_successful=False,
+            final_answer=None
         )
 
 
@@ -751,8 +751,8 @@ def test_agent_trace(react_agent):
         action='calculator',
         args='{"expression": "2+2"}',
         content='',
-        successful=False,
-        answer=None
+        task_successful=False,
+        final_answer=None
     ))
     react_agent.add_to_history(ChatMessage(role='tool', content='4'))
 

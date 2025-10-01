@@ -6,10 +6,12 @@ import base64
 import logging
 import mimetypes
 import os
-from typing import Optional, Any
+from typing import Optional, Any, Type
 
+import litellm
+import pydantic as pyd
 import requests
-
+from tenacity import wait_random_exponential, AsyncRetrying, stop_after_attempt
 
 # Get a logger for the current module
 logger = logging.getLogger('KodeAgent')
@@ -80,6 +82,77 @@ def is_image_file(file_type) -> bool:
     return file_type.startswith('image/')
 
 
+async def call_llm(
+        model_name: str,
+        litellm_params: dict,
+        messages: list[dict],
+        response_format: Optional[Type[pyd.BaseModel]] = None,
+        trace_id: Optional[str] = None,
+) -> str | None:
+    """
+    Invoke the LLM to generate a response based on a given list of messages.
+
+    Args:
+        model_name: The name of the LLM to be used.
+        litellm_params: Optional parameters for LiteLLM.
+        messages: A list of messages (and optional images) to be sent to the LLM.
+        response_format: Optional type of message the LLM should respond with.
+        trace_id: (Optional) Langfuse trace ID.
+
+    Returns:
+        The LLM response as string.
+
+    Raises:
+        ValueError: If the LLM returns an empty or invalid response body.
+    """
+    params = {'model': model_name, 'messages': messages}
+
+    if response_format:
+        params['response_format'] = response_format
+
+    # Add a timeout to prevent indefinite hangs
+    if 'timeout' not in litellm_params:
+        params['timeout'] = 30  # seconds
+
+    params.update(litellm_params)
+
+    try:
+        # Use AsyncRetrying to handle retries in a non-blocking way
+        async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(3),
+                wait=wait_random_exponential(multiplier=1, max=10)
+        ):
+            with attempt:
+                # Use the asynchronous litellm call
+                response = await litellm.acompletion(
+                    **params, metadata={'trace_id': str(trace_id)}
+                )
+
+                # Check for empty content
+                response_content = response.choices[0].message.content
+                if not response_content or not response_content.strip():
+                    raise ValueError('LLM returned an empty or invalid response body.')
+
+                token_usage = {
+                    'cost': response._hidden_params.get('response_cost'),
+                    'prompt_tokens': response.usage.get('prompt_tokens'),
+                    'completion_tokens': response.usage.get('completion_tokens'),
+                    'total_tokens': response.usage.get('total_tokens'),
+                }
+                logger.info(token_usage)
+                return response_content
+
+    except Exception as e:
+        logger.exception(
+            'LLM call failed after repeated attempts: %s',
+            str(e), exc_info=True
+        )
+        print('\n\ncall_llm MESSAGES:\n', '\n'.join([str(msg) for msg in messages]), '\n\n')
+        raise ValueError(
+            'Failed to get a valid response from LLM after multiple retries.'
+        ) from e
+
+
 def make_user_message(
         text_content: str,
         files: Optional[list[str]] = None
@@ -95,7 +168,7 @@ def make_user_message(
     Returns:
         A list of dict items representing the messages.
     """
-    content: list[dict[str, Any]] = [{'type': 'text', 'text': text_content.strip()}]
+    content: list[dict[str, Any]] = [{'type': 'text', 'text': str(text_content)}]
     message: list[dict[str, Any]] = [{'role': 'user'}]
 
     if files:
@@ -193,3 +266,33 @@ def make_user_message(
 
     message[0]['content'] = content
     return message
+
+
+def combine_user_messages(messages: list) -> list:
+    """
+    Combines consecutive user messages into a single message with a list of content items.
+
+    Returns:
+        A new list of messages with combined user messages.
+    """
+    combined = []
+    for msg in messages:
+        if msg.get('role') == 'user':
+            if combined and combined[-1].get('role') == 'user':
+                # Merge content lists
+                prev_content = combined[-1]['content']
+                curr_content = msg.get('content', [])
+                if not isinstance(prev_content, list):
+                    prev_content = [prev_content]
+                if not isinstance(curr_content, list):
+                    curr_content = [curr_content]
+                combined[-1]['content'] = prev_content + curr_content
+            else:
+                # Ensure content is a list
+                content = msg.get('content', [])
+                if not isinstance(content, list):
+                    content = [content]
+                combined.append({'role': 'user', 'content': content})
+        else:
+            combined.append(msg)
+    return combined
