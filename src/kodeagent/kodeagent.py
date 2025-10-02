@@ -15,7 +15,6 @@ import subprocess as sp
 import sys
 import tempfile
 import textwrap
-import time
 import uuid
 import warnings
 from abc import ABC, abstractmethod
@@ -54,8 +53,10 @@ logging.getLogger('LiteLLM').setLevel(logging.WARNING)
 logging.getLogger('langfuse').disabled = True
 logger = logging.getLogger('KodeAgent')
 
-litellm.success_callback = ['langfuse']
-litellm.failure_callback = ['langfuse']
+# litellm.success_callback = ['langfuse']
+# litellm.failure_callback = ['langfuse']
+
+# litellm._turn_on_debug()
 
 
 def _read_prompt(filename: str) -> str:
@@ -75,23 +76,15 @@ def _read_prompt(filename: str) -> str:
         ) from e
 
 
-REACT_PROMPT = _read_prompt('react.txt')
-CODE_ACT_AGENT_PROMPT = _read_prompt('codeact.txt')
-RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
+REACT_SYSTEM_PROMPT = _read_prompt('system/react.txt')
+CODE_ACT_SYSTEM_PROMPT = _read_prompt('system/codeact.txt')
 AGENT_PLAN_PROMPT = _read_prompt('agent_plan.txt')
 UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')
 OBSERVATION_PROMPT = _read_prompt('observation.txt')
 SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
+RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
 # Unused currently
 CONTEXTUAL_SUMMARY_PROMPT = _read_prompt('contextual_summary.txt')
-
-# VISUAL_CAPABILITY = '''
-# 5. **Innate Visual Intelligence**: Use your in-built capabilities to answer to basic visual tasks
-#     with images files or URLs, such as image analysis and objects counting. You can process multiple
-#     image files/URLs together. Use a tool or write code ONLY when the visual task is complex
-#     (e.g., OCR, analyzing a video, image editing, or comparing thousands of images)
-#     OR if your own visual capabilities fail.
-# '''
 
 
 def tool(func: Callable) -> Callable:
@@ -505,85 +498,52 @@ class ChatMessage(pyd.BaseModel):
     """
     role: MESSAGE_ROLES = pyd.Field(description='Role of the message sender')
     content: Any = pyd.Field(description='Content of the message')
+    files: Optional[list[str]] = pyd.Field(
+        description='Optional list of file paths or URLs associated with the message',
+        default=None
+    )
 
 
 class ReActChatMessage(ChatMessage):
     """
-    Messages for the ReAct agent.
+    Messages for the ReAct agent. Do not set the `content` field.
     """
     # The content field will not be used by this message (but the LLM can still assign a value)
     # Higher versions of Pydantic allows to exclude the field altogether
-    content: Optional[str] = pyd.Field(description='Unused', exclude=True)
+    content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True)
     thought: str = pyd.Field(description='Thoughts behind the tool use')
-    action: str = pyd.Field(description='Name of the tool to use')
+    action: Optional[str] = pyd.Field(
+        description='Name of the tool to use; `None` when `final_answer` is available'
+    )
     # Gemini complains about empty objects if `args` is defined as dict,
     # hence string type for compatibility
-    args: str = pyd.Field(description='Tool arguments as JSON string')
-    answer: Optional[str] = pyd.Field(
+    args: Optional[str] = pyd.Field(
+        description='Tool arguments as JSON string; `None` when `final_answer` is available'
+    )
+    final_answer: Optional[str] = pyd.Field(
         description='Final answer for the task; set only in the final step', default=None
     )
-    successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
+    task_successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
 
 
-class CodeChatMessage(ChatMessage):
+class CodeActChatMessage(ChatMessage):
     """
-    Messages for the CodeActAgent.
+    Messages for the CodeActAgent. The `final_answer` and `task_successful` fields are "mutually
+    exclusive" to `thought` and `code`. If code is available, final_answer and `content` need
+    to be empty (and task_successful False); if final_answer is available, code must be empty (and
+    task_successful True).
     """
     # The content field will not be used by this message (but the LLM can still assign a value)
     # Higher versions of Pydantic allows to exclude the field altogether
-    content: Optional[str] = pyd.Field(description='Unused', exclude=True)
+    content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True)
     thought: str = pyd.Field(description='Thoughts behind the code')
-    code: str = pyd.Field(description='Python code with tool use')
-    answer: Optional[str] = pyd.Field(
+    code: Optional[str] = pyd.Field(
+        description='Python code with tool use to run; `None` when `task_successful` is true'
+    )
+    final_answer: Optional[str] = pyd.Field(
         description='Final answer for the task; set only in the final step', default=None
     )
-    successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
-
-
-class SupervisorTaskMessage(pyd.BaseModel):
-    """
-    Messages for the supervisor-agent task delegation.
-    """
-    agent_id: int = pyd.Field(
-        description='Integer agent ID based on the instructions (starting from 0)'
-    )
-    task: str = pyd.Field(
-        description='Task or sub-task description to be delegated to an agent'
-    )
-    image_files: Optional[list[str]] = pyd.Field(
-        description='Optional list of image file paths/URLs associated with the task'
-    )
-    facts_available: str = pyd.Field(
-        description='A list of objective facts collected/observed so far'
-    )
-    task_complete: bool = pyd.Field(
-        description=(
-            'Initially False; set to True only when the agent(s) have successfully competed'
-            ' all the sub-tasks'
-        )
-    )
-    final_answer: str = pyd.Field(
-        description=(
-            'The final answer for the user when the main task is done, i.e., `task_complete`'
-            ' is True. Set to empty string otherwise.'
-        )
-    )
-
-
-class DelegatedTaskStatus(pyd.BaseModel):
-    """
-    The status of a task delegated by the supervisor.
-    """
-    status: bool = pyd.Field(description='Either `True` or `False`')
-    reason: str = pyd.Field(
-        description='Brief explanation for the status, e.g., why the task is incomplete'
-    )
-    how_to_fix: str = pyd.Field(
-        description='Briefly describe how to/what would fix the task result'
-    )
-    final_answer: str = pyd.Field(
-        description='Final solution of the task, if found. Otherwise, empty string.'
-    )
+    task_successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
 
 
 class AgentResponse(TypedDict):
@@ -595,78 +555,6 @@ class AgentResponse(TypedDict):
     channel: Optional[str]
     value: Any
     metadata: Optional[dict[str, Any]]
-
-
-async def call_llm(
-        model_name: str,
-        litellm_params: dict,
-        messages: list[dict],
-        response_format: Optional[
-            Type[
-                ChatMessage | SupervisorTaskMessage | DelegatedTaskStatus
-                | AgentPlan | ObserverResponse
-            ]
-        ] = None,
-        trace_id: Optional[str] = None,
-) -> str:
-    """
-    Invoke the LLM to generate a response based on a given list of messages.
-
-    Args:
-        model_name: The name of the LLM to be used.
-        litellm_params: Optional parameters for LiteLLM.
-        messages: A list of messages (and optional images) to be sent to the LLM.
-        response_format: Optional type of message the LLM should respond with.
-        trace_id: (Optional) Langfuse trace ID.
-
-    Returns:
-        The LLM response as string.
-
-    Raises:
-        ValueError: If the LLM returns an empty or invalid response body.
-    """
-    params = {'model': model_name, 'messages': messages}
-
-    if response_format:
-        params['response_format'] = response_format
-
-    # Add a timeout to prevent indefinite hangs
-    if 'timeout' not in litellm_params:
-        params['timeout'] = 60  # seconds
-
-    params.update(litellm_params)
-
-    try:
-        # Use AsyncRetrying to handle retries in a non-blocking way
-        async for attempt in AsyncRetrying(
-                stop=stop_after_attempt(3),
-                wait=wait_random_exponential(multiplier=1, max=10)
-        ):
-            with attempt:
-                # Use the asynchronous litellm call
-                response = await litellm.acompletion(
-                    **params, metadata={'trace_id': str(trace_id)}
-                )
-
-                # Check for empty content
-                response_content = response.choices[0].message.content
-                if not response_content or not response_content.strip():
-                    raise ValueError('LLM returned an empty or invalid response body.')
-
-                token_usage = {
-                    'cost': response._hidden_params.get('response_cost'),
-                    'prompt_tokens': response.usage.get('prompt_tokens'),
-                    'completion_tokens': response.usage.get('completion_tokens'),
-                    'total_tokens': response.usage.get('total_tokens'),
-                }
-                logger.info(token_usage)
-                return response_content
-
-    except Exception as e:
-        logger.error('LLM call failed after repeated attempts: %s', str(e))
-        raise ValueError(
-            'Failed to get a valid response from LLM after multiple retries.'
-        ) from e
 
 
 class Planner:
@@ -691,14 +579,14 @@ class Planner:
             ),
             files=task.files,
         )
-        response = await call_llm(
+        plan_response = await ku.call_llm(
             model_name=self.model_name,
             litellm_params=self.litellm_params,
             messages=messages,
             response_format=AgentPlan,
             trace_id=task.id
         )
-        self.plan = AgentPlan.model_validate_json(response)
+        self.plan = AgentPlan.model_validate_json(plan_response)
         return self.plan
 
     async def update_plan(self, thought: str, observation: str, task_id: str):
@@ -713,14 +601,14 @@ class Planner:
             thought=thought,
             observation=observation
         )
-        response = await call_llm(
+        plan_response = await ku.call_llm(
             model_name=self.model_name,
             litellm_params=self.litellm_params,
             messages=ku.make_user_message(prompt),
             response_format=AgentPlan,
             trace_id=task_id
         )
-        self.plan = AgentPlan.model_validate_json(response)
+        self.plan = AgentPlan.model_validate_json(plan_response)
 
     def get_steps_done(self) -> list[PlanStep]:
         """Returns the completed steps from the current plan."""
@@ -800,14 +688,14 @@ class Observer:
                 history=history,
                 tools=tool_names,
             )
-            response = await call_llm(
+            observation_response = await ku.call_llm(
                 model_name=self.model_name,
                 litellm_params=self.litellm_params,
                 messages=[{'role': 'user', 'content': prompt}],
                 response_format=ObserverResponse,
             )
             # Parse the structured response
-            observation = ObserverResponse.model_validate_json(response)
+            observation = ObserverResponse.model_validate_json(observation_response)
             print(f'Observer (iteration {iteration}): {observation.model_dump_json()}')
 
             # Return the correction message if a problem is detected
@@ -905,26 +793,6 @@ class Agent(ABC):
             return None
         return self.planner.get_formatted_plan()
 
-    async def get_history_summary(self) -> str:
-        """
-        Generate a summary of the conversation history.
-        """
-        history = self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task)
-        if not history.strip():
-            return "No activities yet."
-
-        prompt = CONTEXTUAL_SUMMARY_PROMPT.format(
-            task=self.task.description,
-            history=history
-        )
-        summary = await call_llm(
-            model_name=self.model_name,
-            litellm_params=self.litellm_params,
-            messages=ku.make_user_message(prompt),
-            trace_id=self.task.id if self.task else None
-        )
-        return summary
-
     async def get_relevant_tools(
             self,
             task_description: str,
@@ -948,13 +816,13 @@ class Agent(ABC):
         )
 
         try:
-            response = await call_llm(
+            tools_response = await ku.call_llm(
                 model_name=self.model_name,
                 litellm_params=self.litellm_params,
                 messages=ku.make_user_message(prompt),
                 trace_id=self.task.id if self.task else None
             )
-            relevant_tool_names = response.split(',') if response.strip() else []
+            relevant_tool_names = tools_response.split(',') if tools_response.strip() else []
             relevant_tool_names = {t.strip() for t in relevant_tool_names if t.strip()}
             logger.debug('Relevant tool names: %s', relevant_tool_names)
             relevant_tools = [
@@ -974,11 +842,11 @@ class Agent(ABC):
         """
         Initialize the running of a task by an agent.
         """
-        self.add_to_history(ChatMessage(role='user', content=description))
+        # self.add_to_history(ChatMessage(role='user', content=description))
         self.task = Task(description=description, files=files)
         if task_id:
             self.task.id = task_id
-        self.msg_idx_of_new_task = len(self.messages)
+        # self.msg_idx_of_new_task = len(self.messages)
         self.final_answer_found = False
         if self.planner:
             self.planner.plan = None
@@ -997,13 +865,13 @@ class Agent(ABC):
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
             history=self.get_history(start_idx=self.msg_idx_of_new_task)
         )
-        response = await call_llm(
+        salvaged_response = await ku.call_llm(
             model_name=self.model_name,
             litellm_params=self.litellm_params,
             messages=ku.make_user_message(prompt),
             trace_id=self.task.id
         )
-        return response
+        return salvaged_response
 
     def trace(self) -> str:
         """
@@ -1019,7 +887,7 @@ class Agent(ABC):
                 trace_log.append(f"Thought: {msg.thought}")
                 if msg.action:
                     trace_log.append(f"Action: {msg.action}({msg.args})")
-            elif isinstance(msg, CodeChatMessage):
+            elif isinstance(msg, CodeActChatMessage):
                 trace_log.append(f"Thought: {msg.thought}")
                 if msg.code:
                     trace_log.append(f"Code:\n{msg.code}")
@@ -1070,6 +938,32 @@ class Agent(ABC):
         """
         return {'type': rtype, 'channel': channel, 'value': value, 'metadata': metadata}
 
+    @abstractmethod
+    def formatted_history_for_llm(self) ->list[dict]:
+        """
+        Generate a formatted list of chat history messages to send to an LLM.
+
+        Returns:
+            A list of messages with different roles.
+        """
+
+    async def _chat(self, response_format: Optional[Type[pyd.BaseModel]] = None) -> str:
+        """
+        Interact with the LLM using the agent's message history, which consists of messages with
+        different roles: user, assistant, system, and tool. Use the `call_llm` function.
+        """
+        formatted_messages = self.formatted_history_for_llm()
+        # print('\n\nCHAT MESSAGES:\n', '\n'.join([str(msg) for msg in formatted_messages]), '\n\n')
+        chat_response: str = await ku.call_llm(
+            model_name=self.model_name,
+            litellm_params=self.litellm_params,
+            messages=formatted_messages,
+            response_format=response_format,
+            trace_id=self.task.id if self.task else None
+        )
+
+        return chat_response or ''
+
     def add_to_history(self, message: ChatMessage):
         """
         Add a chat message, generated by user, AI, or tool, to the agent's message history.
@@ -1081,20 +975,6 @@ class Agent(ABC):
             f'add_to_history() expects a `ChatMessage`; got `{type(message)}`'
         )
         self.messages.append(message)
-
-    def format_messages_for_prompt(self, start_idx: int = 0) -> str:
-        """
-        Generate a formatted string based on the historical messages that can be injected
-        into a prompt. The formatting may differ based on the prompts used by different types
-        of agents. Subclasses should override this method accordingly.
-
-        Args:
-            start_idx: The start index of messages to consider (default 0).
-
-        Returns:
-            A formatted string containing the messages.
-        """
-        return self.get_history(start_idx)
 
     def get_tools_description(self, tools: Optional[list[Any]] = None) -> str:
         """
@@ -1197,7 +1077,7 @@ class ReActAgent(Agent):
         last_thought = ''
         last_observation = ''
         if len(self.messages) > 1:
-            if isinstance(self.messages[-2], (ReActChatMessage, CodeChatMessage)):
+            if isinstance(self.messages[-2], (ReActChatMessage, CodeActChatMessage)):
                 last_thought = self.messages[-2].thought
             if self.messages[-1].role == 'tool':
                 last_observation = self.messages[-1].content
@@ -1227,6 +1107,25 @@ class ReActAgent(Agent):
             An update from the agent.
         """
         self._run_init(task, files, task_id)
+        self.clear_history()
+
+        if self.__class__.__name__ == 'ReActAgent':
+            self.add_to_history(
+                ChatMessage(
+                    role='system',
+                    content=REACT_SYSTEM_PROMPT.format(tools=self.get_tools_description())
+                )
+            )
+        elif self.__class__.__name__ == 'CodeActAgent':
+            self.add_to_history(
+                ChatMessage(
+                    role='system',
+                    content=CODE_ACT_SYSTEM_PROMPT.format(
+                        tools=self.get_tools_description(),
+                        authorized_imports='\n'.join(self.allowed_imports)
+                    )
+                )
+            )
 
         yield self.response(
             rtype='log',
@@ -1235,12 +1134,22 @@ class ReActAgent(Agent):
         )
 
         await self.planner.create_plan(self.task, self.__class__.__name__)
-        yield self.response(rtype='log', value=f'Plan:\n{self.planner.plan}', channel='run')
+        yield self.response(
+            rtype='log', value=f'Plan:\n{self.planner.get_formatted_plan()}', channel='run'
+        )
+
+        self.add_to_history(
+            ChatMessage(
+                role='user',
+                content=f'New Task:\n{self.task.description}',
+                files=self.task.files
+            )
+        )
+        self.add_to_history(
+            ChatMessage(role='user', content=f'Plan:\n{self.planner.get_formatted_plan()}')
+        )
 
         for idx in range(self.max_iterations):
-            if self.final_answer_found:
-                break
-
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
             # The thought & observation will get appended to the list of messages
             async for update in self._think():
@@ -1248,21 +1157,32 @@ class ReActAgent(Agent):
             async for update in self._act():
                 yield update
 
+            if self.final_answer_found:
+                break
+
             plan_before_update = None
             if self.planner.plan:
                 plan_before_update = self.current_plan
                 await self._update_plan()
+                self.add_to_history(
+                    ChatMessage(
+                        role='user',
+                        content=f'Plan progress:\n{self.planner.get_formatted_plan()}'
+                    )
+                )
 
             # The observer checks for issues and suggests corrections
             correction_msg = await self.observer.observe(
                 task=self.task,
-                history=self.get_history(start_idx=self.msg_idx_of_new_task),
+                history='\n'.join([str(msg) for msg in self.messages]),
                 plan_before=plan_before_update,
                 plan_after=self.current_plan,
                 iteration=idx + 1
             )
             if correction_msg:
-                self.add_to_history(ChatMessage(role='tool', content=correction_msg))
+                self.add_to_history(
+                    ChatMessage(role='user', content=f'Observation: {correction_msg}')
+                )
                 yield self.response(rtype='log', value=correction_msg, channel='observer')
             print('-' * 30)
 
@@ -1299,10 +1219,8 @@ class ReActAgent(Agent):
         the LLM will suggest the next action. "Think" of ReAct is also "Observe."
 
         Yields:
-            Update from the thing step.
+            Update from the think step.
         """
-        # Note: we're not going to chat with the LLM by sending a sequence of messages
-        # Instead, every think step will send a single message containing all historical info
         if self.filter_tools_for_task:
             relevant_tools = await self.get_relevant_tools(
                 task_description=self.task.description, task_files=self.task.files
@@ -1310,71 +1228,63 @@ class ReActAgent(Agent):
         else:
             relevant_tools = self.tools
 
-        message = REACT_PROMPT.format(
-            task=self.task.description,
-            task_files='\n'.join(self.task.files) if self.task.files else '[None]',
-            tool_names=self.get_tools_description(relevant_tools),
-            plan=self.current_plan or '<No plan provided; please plan yourself>',
-            # visual_principle=VISUAL_CAPABILITY.strip() if self.is_visual_model else '',
-            history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
-        )
-        msg = await self._record_thought(message, ReActChatMessage)
-        yield self.response(rtype='step', value=msg, channel='_think')
+        thought = await self._record_thought(ReActChatMessage)
+        yield self.response(rtype='step', value=thought, channel='_think')
 
     async def _record_thought(
             self,
-            message: str,
             response_format_class: Type[ChatMessage]
     ) -> Optional[ChatMessage]:
         """
         Utility method covering the common aspects of the "think" step of the T*O loop.
 
         Args:
-            message: A single, formatted message with history to be sent to the LLM.
             response_format_class: The type of message used by this agent.
 
         Returns:
             A message of the `response_format_class` type.
         """
-        prompt = ku.make_user_message(text_content=message, files=self.task.files)
-
         # Sometimes the LLM does not generate a valid JSON response based on the given format
         # class. It returns a plain text response instead, which leads to a validation error.
         # To handle this, we will retry the LLM call up to 3 times,
         # attempting to parse the response as JSON each time.
-        for _ in range(3):
+        for attempt in range(3):
             try:
-                # Call the LLM with the prompt and response format class
-                response = await call_llm(
-                    model_name=self.model_name,
-                    litellm_params=self.litellm_params,
-                    messages=prompt,
-                    response_format=response_format_class,
-                    trace_id=self.task.id,
-                )
-                try:
-                    json.loads(response)
-                except JSONDecodeError:
-                    response = json_repair.repair_json(response)
+                thought_response: str = await self._chat(response_format=response_format_class)
+                # print(f'{response_format_class=}, {thought_response=}')
 
-                msg: response_format_class = response_format_class.model_validate_json(response)
+                try:
+                    json.loads(thought_response)
+                except JSONDecodeError:
+                    thought_response = json_repair.repair_json(thought_response)
+
+                msg: response_format_class = response_format_class.model_validate_json(
+                    thought_response
+                )
                 msg.role = 'assistant'
+                msg.content = msg.final_answer
                 self.add_to_history(msg)
+                # print('\n\n\n\n\nHISTORY SO FAR:\n')
+                # print('\n'.join([str(msg) for msg in self.messages]))
                 return msg
 
-            except Exception:
+            except Exception as ex:
                 # This can happen if the LLM response is not valid JSON
                 logger.error('LLM response validation error in _record_thought(). Retrying...')
+                print('HISTORY:', '\n'.join([str(m) for m in self.formatted_history_for_llm()]))
+
                 await asyncio.sleep(random.uniform(0.5, 1.0))
 
-                # Add an explicit observation to the prompt's message history
-                # Add timestamp to avoid potential cached responses
-                feedback_message = (
-                    '!Error: Parsing failed because you did not generate the response'
-                    ' following the given JSON schema!!! Please ensure your response is a valid'
-                    f' JSON object that follows the specified schema. [Timestamp={datetime.now()}]'
-                )
-                prompt.extend(ku.make_user_message(text_content=feedback_message))
+                if attempt == 0:
+                    # Add an explicit observation to the prompt's message history
+                    # Add timestamp to avoid potential cached responses
+                    feedback_message = (
+                        '!Error: Parsing failed because you did not generate the response'
+                        ' following the given JSON schema!!! Please ensure your response is'
+                        ' a valid JSON object that follows the specified schema.'
+                        f' [Timestamp={datetime.now()}]'
+                    )
+                    self.add_to_history(ChatMessage(role='user', content=feedback_message))
                 continue
 
         return None
@@ -1391,7 +1301,7 @@ class ReActAgent(Agent):
         """
         prev_msg: ReActChatMessage = self.messages[-1]  # type: ignore
         if (
-                hasattr(prev_msg, 'answer') and prev_msg.answer == ''
+                hasattr(prev_msg, 'final_answer') and prev_msg.final_answer == ''
                 and (prev_msg.action == '' or prev_msg.args == '' or prev_msg.thought == '')
         ):
             self.add_to_history(
@@ -1406,19 +1316,17 @@ class ReActAgent(Agent):
             )
             return
 
-        if hasattr(prev_msg, 'answer') and prev_msg.answer:
+        if hasattr(prev_msg, 'final_answer') and prev_msg.final_answer:
             # The final answer has been found!
             self.final_answer_found = True
             self.task.is_finished = True
-            self.task.is_error = prev_msg.successful
-            response_msg = ChatMessage(role='assistant', content=prev_msg.answer)
-            self.add_to_history(response_msg)
-
+            self.task.is_error = prev_msg.task_successful
+            # Do NOT add another ChatMessage to history here; it's already added in _record_thought
             yield self.response(
                 rtype='final',
-                value=response_msg,
+                value=prev_msg,
                 channel='_act',
-                metadata={'final_answer_found': prev_msg.successful}
+                metadata={'final_answer_found': prev_msg.task_successful}
             )
         else:
             # No answer yet, keep tool calling
@@ -1447,6 +1355,7 @@ class ReActAgent(Agent):
                         f'Incorrect tool name generated: {tool_name}!'
                         ' Please suggest a correct tool name from the provided list.'
                     )
+                    self.add_to_history(ChatMessage(role='user', content=result))
                     yield self.response(
                         rtype='step',
                         value=result,
@@ -1463,27 +1372,65 @@ class ReActAgent(Agent):
                     metadata={'is_error': True}
                 )
 
-    def format_messages_for_prompt(self, start_idx: int = 0) -> str:
-        """
-        Generate a formatted string based on the historical messages for the ReAct agent.
+    def formatted_history_for_llm(self) ->list[dict]:
+        formatted_messages = []
+        last_tool_call_id = None
 
-        Args:
-            start_idx: The start index of messages to consider (default 0).
+        for msg in self.messages:
+            d = msg.model_dump()
+            role = d.get('role')
+            # Handle assistant tool call (ReActChatMessage with action/tool use)
+            if role == 'assistant' and (
+                    hasattr(msg, 'action') and getattr(msg, 'action', None)
+            ) and not getattr(msg, 'final_answer', None):
+                # This is a tool call, not a final answer
+                tool_call_id = f'call_{uuid.uuid4().hex[:8]}'
+                last_tool_call_id = tool_call_id
+                formatted_messages.append({
+                    'role': 'assistant',
+                    'content': None,
+                    'tool_calls': [
+                        {
+                            'id': tool_call_id,
+                            'type': 'function',
+                            'function': {
+                                'name': getattr(msg, 'action'),
+                                'arguments': getattr(msg, 'args')
+                            }
+                        }
+                    ]
+                })
 
-        Returns:
-            A formatted string containing the messages.
-        """
-        history = ''
+            elif role == 'tool':
+                # Attach tool_call_id if available
+                tool_msg = {'role': 'tool', 'content': str(d.get('content', ''))}
+                if last_tool_call_id:
+                    tool_msg['tool_call_id'] = last_tool_call_id
+                    last_tool_call_id = None
+                formatted_messages.append(tool_msg)
+            elif role == 'assistant':
+                # Final answer or normal assistant message
+                # If final_answer is present, use it as content
+                if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
+                    formatted_messages.append(
+                        {'role': 'assistant', 'content': getattr(msg, 'final_answer')}
+                    )
+                else:
+                    formatted_messages.append(
+                        {'role': 'assistant', 'content': d.get('content', '')}
+                    )
+            elif role == 'user':
+                usr_msgs = ku.make_user_message(
+                    text_content=d.get('content', ''),
+                    files=d.get('files', None)
+                )
+                formatted_messages.extend(usr_msgs)
+            else:
+                # system
+                formatted_messages.append({'role': role, 'content': d.get('content', '')})
 
-        for msg in self.messages[start_idx:]:
-            if msg.role == 'assistant' and isinstance(msg, ReActChatMessage):
-                history += f'Thought: {msg.thought}\n'
-                history += f'Action: {msg.action}\n'
-                history += f'Args: {msg.args}\n'
-            elif msg.role == 'tool':
-                history += f'Observation: {msg.content}\n\n'
-
-        return history
+        formatted_messages = ku.combine_user_messages(formatted_messages)
+        return formatted_messages
 
 
 # The environments where LLM-generated code can be executed
@@ -1570,10 +1517,11 @@ class CodeRunner:
 
         disallowed_imports: set = self.check_imports(source_code)
         if len(disallowed_imports) > 0:
+            modules = '\n'.join([mod for mod in disallowed_imports])
             return (
                 '',
-                f'The following imports are disallowed: {disallowed_imports}'
-                f'\nPlease only use the allowed modules for importing.',
+                f'The following imports are disallowed:{modules}'
+                '\nPlease only use the allowed modules for importing.',
                 -1
             )
 
@@ -1724,31 +1672,73 @@ class CodeActAgent(ReActAgent):
             env_vars_to_set=env_vars_to_set,
         )
 
-    def format_messages_for_prompt(self, start_idx: int = 0) -> str:
+    def formatted_history_for_llm(self) ->list[dict]:
         """
-        Generate a formatted string based on the historical messages for the ReAct agent.
-
-        Args:
-            start_idx: The start index of messages to consider (default 0).
+        Generate a list of messages (dicts) with different roles to be sent to an LLM.
 
         Returns:
-             A formatted string containing the messages.
+            A list of messages for LLM.
         """
-        history = ''
+        formatted_messages = []
+        last_tool_call_id = None
 
-        for msg in self.messages[start_idx:]:
-            if msg.role == 'assistant' and isinstance(msg, CodeChatMessage):
-                history += f'Thought: {msg.thought}\n'
-                code = msg.code.strip()
-                if not code.startswith('```py'):
-                    code = f'```py\n{code}'
-                if not code.endswith('```'):
-                    code = f'{code}\n```'
-                history += f'Code:{code}\n'
-            elif msg.role == 'tool':
-                history += f'Observation: {msg.content}\n\n'
+        for msg in self.messages:
+            d = msg.model_dump()
+            role = d.get('role')
+            # Handle assistant tool call (CodeActChatMessage with action/tool use)
+            if role == 'assistant' and (
+                    hasattr(msg, 'code') and getattr(msg, 'code', None)
+            ) and not getattr(msg, 'final_answer', None):
+                # This is a tool call, not a final answer
+                tool_call_id = f'call_{uuid.uuid4().hex[:8]}'
+                last_tool_call_id = tool_call_id
+                formatted_messages.append({
+                    'role': 'assistant',
+                    'content': None,
+                    'tool_calls': [
+                        {
+                            'id': tool_call_id,
+                            'type': 'function',
+                            'function': {
+                                'name': 'code_execution',
+                                'arguments': json.dumps({
+                                    "code": getattr(msg, 'code')
+                                })
+                            }
+                        }
+                    ]
+                })
 
-        return history
+            elif role == 'tool':
+                # Attach tool_call_id if available
+                tool_msg = {'role': 'tool', 'content': str(d.get('content', ''))}
+                if last_tool_call_id:
+                    tool_msg['tool_call_id'] = last_tool_call_id
+                    last_tool_call_id = None
+                formatted_messages.append(tool_msg)
+            elif role == 'assistant':
+                # Final answer or normal assistant message
+                # If final_answer is present, use it as content
+                if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
+                    formatted_messages.append(
+                        {'role': 'assistant', 'content': getattr(msg, 'final_answer')}
+                    )
+                else:
+                    formatted_messages.append(
+                        {'role': 'assistant', 'content': d.get('content', '')}
+                    )
+            elif role == 'user':
+                usr_msgs = ku.make_user_message(
+                    text_content=d.get('content', ''),
+                    files=d.get('files', None)
+                )
+                formatted_messages.extend(usr_msgs)
+            else:
+                # system
+                formatted_messages.append({'role': role, 'content': d.get('content', '')})
+
+        formatted_messages = ku.combine_user_messages(formatted_messages)
+        return formatted_messages
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """
@@ -1767,15 +1757,7 @@ class CodeActAgent(ReActAgent):
         else:
             relevant_tools = self.tools
 
-        think_prompt = CODE_ACT_AGENT_PROMPT.format(
-            task=self.task.description,
-            task_files='\n'.join(self.task.files) if self.task.files else '[None]',
-            tool_names=self.get_tools_description(relevant_tools),
-            authorized_imports=','.join(self.allowed_imports),
-            plan=self.current_plan or '[No plan provided; please plan yourself]',
-            history=self.format_messages_for_prompt(start_idx=self.msg_idx_of_new_task),
-        )
-        msg = await self._record_thought(think_prompt, CodeChatMessage)
+        msg = await self._record_thought(CodeActChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
@@ -1787,38 +1769,36 @@ class CodeActAgent(ReActAgent):
         Yields:
             Updates from the acting step.
         """
-        prev_msg: CodeChatMessage = self.messages[-1]  # type: ignore
+        prev_msg: CodeActChatMessage = self.messages[-1]  # type: ignore
 
         if (
-                not hasattr(prev_msg, 'answer') or (
-                    not prev_msg.answer and (not prev_msg.code or not prev_msg.thought)
+                not hasattr(prev_msg, 'final_answer') or (
+                    not prev_msg.final_answer and (not prev_msg.code or not prev_msg.thought)
                 )
         ):
             self.add_to_history(
                 ChatMessage(
-                    role='tool',
+                    role='user',
                     content=(
-                        '* Error: incorrect response generated. Must have values for the `answer`'
-                        ' or the `action`, `args`, and `thought` fields. Please respond strictly'
-                        ' following the CodeChatMessage schema.'
+                        '* Error: incorrect response generated. Must have values for the'
+                        ' `final_answer` or the `thought` and `code` fields. Please respond '
+                        ' strictly following the CodeActChatMessage schema.'
                     )
                 )
             )
             return
 
-        if hasattr(prev_msg, 'answer') and prev_msg.answer:
+        if hasattr(prev_msg, 'final_answer') and prev_msg.final_answer:
             # The final answer has been found!
             self.final_answer_found = True
             self.task.is_finished = True
-            self.task.is_error = prev_msg.successful
-            response_msg = ChatMessage(role='assistant', content=prev_msg.answer)
-            self.add_to_history(response_msg)
-
+            self.task.is_error = prev_msg.task_successful
+            # Do NOT add another ChatMessage to history here; it's already added in _record_thought
             yield self.response(
                 rtype='final',
-                value=response_msg,
+                value=prev_msg,
                 channel='_act',
-                metadata={'final_answer_found': prev_msg.successful}
+                metadata={'final_answer_found': prev_msg.task_successful}
             )
         else:
             # No answer yet, keep tool calling
@@ -1841,6 +1821,7 @@ class CodeActAgent(ReActAgent):
 
             except Exception as ex:
                 error_msg = f'*** An error occurred while running the code: {ex}'
+                self.add_to_history(ChatMessage(role='user', content=error_msg))
                 yield self.response(
                     rtype='step',
                     value=error_msg,
@@ -1898,31 +1879,66 @@ async def main():
     litellm_params = {'temperature': 0, 'timeout': 30}
     model_name = 'gemini/gemini-2.0-flash-lite'
 
-    # react_agent = ReActAgent(
-    #     name='Simple agent',
+    # response = await call_llm(
     #     model_name=model_name,
-    #     tools=[calculator, search_web, extract_file_contents_as_markdown,],
-    #     max_iterations=6,
     #     litellm_params=litellm_params,
-    #     filter_tools_for_task=False
+    #     messages=[
+    #         {'role': 'system',
+    #          'content': 'You are an expert, helpful agent designed to solve complex tasks using a set of specialized tools.\n\n\n## Core Directives\n\n1.  **Process:** Your process is a strict `Thought` -> `Action` -> `Observation` cycle. Repeat this cycle until the task is complete.\n2.  **Progression:** Each step must meaningfully advance the task. Never repeat a failed attempt without a clear modification. Do not call the same tool with the same arguments twice.\n3.  **Final Answer:** When the task is complete, you must provide the final answer using the structured format below.\n\n\nStrictly adhere to the following Thought-Action sequence:\nThought: Based on the current task status, what is the next logical step to take?\nAction: tool name (one of aforementioned tool names)\nArgs: the input arguments to the tool, in a JSON format representing the kwargs (e.g. {"input": "hello world", "num_beams": 5})\n\n\n## Final Answer Format\n\n* **For a successful task:**\n\n`Thought: I have enough information to answer. I will use the user\'s language.`\n`Answer: <Your final answer in the user\'s language>`\n`Successful: True`\n\n* **For a failed task:**\n\n`Thought: I cannot answer the question with the provided tools/information.`\n`Answer: <Your explanation in the user\'s language>`\n`Successful: False`\n\n\n## Examples\n\nHere are some examples of good and bad practices to help you understand the expected format and behavior using **notional** tasks and tools.\n\n---\n[Task: What color is the sky in this picture? (Image: camera.jpg)]\nThought: The user has provided an image file and wants to know the color of the sky. I have the image directly available to me. Since this is a basic visual analysis task, I will use my innate abilities to answer instead of using a tool.\nAnswer: The sky in the picture is blue.\nSuccessful: True\n\n---\n[Task: Which city has the highest population: Guangzhou or Shanghai?]\n\nThought: The current language of the user is: English. I need to get the populations for both cities and compare them. I will start with Guangzhou and use the tool `web_search`.\nAction: web_search\nArgs: {"query": "Guangzhou population"}\nObservation: [\'Guangzhou has a population of 15 million inhabitants as of 2021.\']\n\nThought: I have the population for Guangzhou. Now I need to find the population of Shanghai using `web_search`.\nAction: web_search\nArgs: {"query": "Shanghai population"}\nObservation: [\'Shanghai population 26 million (2019)\']\n\nThought: Based on the search results from the previous steps, I know that Shanghai has a population of 26 million and Guangzhou has 15 million. So Shanghai has the highest population.\nAnswer: Based on the search results, Shanghai has the highest population.\nSuccessful: True\n\n---\n[Task: Generate a video of the moon.]\n\nThought: The user has asked to generate a video of the moon. Unfortunately, I neither have the innate ability nor any tool that can generate a video. So, I can\'t solve this task.\nAnswer: Unfortunately, I lack the ability to solve this task. May I help you with something else?\nSuccessful: False\n\n---\n[Task: Generate an image of the oldest person in this document.]\n\nThought: The current language of the user is: English. I will begin by identifying the oldest person mentioned in the document using the `document_qa tool`. I only need to print the answer, not the entire document.\nAction: document_qa\nArgs: {"question": "Who is the oldest person mentioned?"}\nObservation: The oldest person in the document is John Doe, a 55 year old lumberjack living in Newfoundland.\n\nThought: Based on the given document, John Doe (55) is the oldest person. He lives in Newfoundland, Canada. As my next logical step, I\'ll use the `image_generator` tool to generate his portrait.\nAction: image_generator\nArgs: {"prompt": "A portrait of John Doe, a 55-year-old man living in Canada."}\nObservation: image.png\n\nThought: Based on the given document, John Doe (55) is the oldest person. I have also generated his portrait and saved it in the image.png file.\nAnswer: An image of the oldest person has been generated and saved as `image.png`.\nSuccessful: True\n\n\n## Tools\n\nYou have access to the following specialized tools:\n- Tool name: calculator\n- Tool description: A simple calculator tool that can evaluate basic arithmetic expressions.\nThe expression must contain only the following allowed mathematical symbols:\ndigits, +, -, *, /, ., (, )\n\nThe ^ symbol, for example, is not allowed. For exponent, use **.\nIn case the expression has any invalid symbol, the function returns `None`.\n\nArgs:\n    expression (str): The arithmetic expression as a string.\n\nReturns:\n    The numerical result or `None` in case an incorrect arithmetic expression is provided\n     or any other error occurs.\n---\n- Tool name: search_web\n- Tool description: Search the Web using DuckDuckGo. The input should be a search query.\nUse this tool when you need to answer questions about current events and general web search.\nIt returns (as Markdown text) the top search results with titles, links, and optional\ndescriptions.\nNOTE: The returned URLs can be visited using the `extract_as_markdown` tool to retrieve\nthe contents the respective pages.\n\nArgs:\n    query: The query string.\n    max_results: Maximum no. of search results (links) to return.\n    show_description: If `True`, includes the description of each search result.\n     Default is `False`.\n\nReturns:\n     The search results.\n---\n- Tool name: extract_file_contents_as_markdown\n- Tool description: Always use this tool to extract the contents of HTML files (.html), PDF files (.pdf),\nWord documents (.docx), and Excel spreadsheets (.xlsx) as Markdown text. No other file type\nis supported. The input can point to a URL or a local file path.\nThe extracted text can be used for analysis with LLMs.\nThis tool can directly work with URLs, so no need to download the files using\n`file_download` separately.\nNOTE: The output returned by this function can be long and may involve lots of quote marks.\n\nArgs:\n    url_or_file_path: URL or Path to a .html, .pdf, .docx, or .xlsx file.\n    scrub_links: Defaults to `True`, which removes all links from the extracted Markdown text.\n     Set it to `False` if you want to retain the links in the text.\n    max_length: If set, limit the output to the first `max_length` characters. This can be used\n     to truncate the output but doing so can also lead to loss of information.\n\nReturns:\n    The content of the file in Markdown format.\n---\n\n\n\n## Guidelines & Constraints\n\n- Always generate a Thought-Action sequence.\n- Use tools only when needed and only those listed.\n- Always use the correct arguments for tools.\n'},
+    #         {'role': 'user',
+    #          'content': 'Task: What is four plus seven? Also, what are the festivals in Paris? How they differ from Kolkata?\n\nPlan:\n- [ ] Calculate the sum of four and seven.\n- [ ] Identify the festivals celebrated in Paris.\n- [ ] Identify the festivals celebrated in Kolkata.\n- [ ] Compare the festivals in Paris and Kolkata, highlighting their differences.'},
+    #         # ReAct
+    #         # {'role': 'assistant', 'content': None, 'tool_calls': [
+    #         #     {'id': 'call_6b5e8ec0', 'type': 'function',
+    #         #      'function': {'name': 'calculator', 'arguments': '{"expression": "4 + 7"}'}}]},
+    #         # CodeAct equivalent
+    #         {
+    #             "role": "assistant",
+    #             "content": "Thought: I need to calculate 4 + 7 and fetch festivals in Paris and Kolkata.\nCode:\n```python\nresult = calculator(expression=\"4 + 7\")\n```\n",
+    #             "tool_calls": [
+    #                 {
+    #                     "id": "call_6b5e8ec0",
+    #                     "type": "code_execution",
+    #                     "function": {
+    #                         "name": "code",  # or "python" depending on framework
+    #                         "arguments": json.dumps({
+    #                           "code": "result = calculator(expression=\"4 + 7\")"
+    #                         })
+    #                     }
+    #                 }
+    #             ]
+    #         },
+    #         {'role': 'tool', 'content': '11', 'tool_call_id': 'call_6b5e8ec0'}
+    #     ]
     # )
-    code_agent = CodeActAgent(
-        name='Web agent',
+    # print(response)
+    # return
+
+    agent = ReActAgent(
+        name='Simple agent',
         model_name=model_name,
-        tools=[
-            search_web, search_arxiv, extract_file_contents_as_markdown, download_file,
-            get_youtube_transcript,
-        ],
-        run_env='host',
-        max_iterations=6,
+        tools=[calculator, search_web, extract_file_contents_as_markdown,],
+        max_iterations=5,
         litellm_params=litellm_params,
-        allowed_imports=[
-            'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'ddgs', 'markitdown', 'youtube_transcript_api', 'arxiv',
-        ],
-        pip_packages='ddgs~=9.5.2;"markitdown[all]";',
         filter_tools_for_task=False
     )
+    # agent = CodeActAgent(
+    #     name='Web agent',
+    #     model_name=model_name,
+    #     tools=[
+    #         search_web, search_arxiv, extract_file_contents_as_markdown, download_file,
+    #         get_youtube_transcript,
+    #     ],
+    #     run_env='host',
+    #     max_iterations=5,
+    #     litellm_params=litellm_params,
+    #     allowed_imports=[
+    #         'os', 're', 'time', 'random', 'requests', 'tempfile',
+    #         'ddgs', 'markitdown', 'youtube_transcript_api', 'arxiv',
+    #     ],
+    #     pip_packages='ddgs~=9.5.2;"markitdown[all]";',
+    #     filter_tools_for_task=False
+    # )
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
@@ -1945,14 +1961,16 @@ async def main():
         ),
     ]
 
-    print('CodeAct agent demo\n')
+
+    print(f'{agent.__class__.__name__} demo\n')
+
     for task, img_urls in the_tasks:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
-        async for response in code_agent.run(f'{time.time()} {task}', files=img_urls):
+        async for response in agent.run(task, files=img_urls):
             print_response(response)
 
-        if code_agent.current_plan:
-            print(f'Plan:\n{code_agent.current_plan}')
+        if agent.current_plan:
+            print(f'Plan:\n{agent.current_plan}')
 
         await asyncio.sleep(random.uniform(0.15, 0.55))
         print('\n\n')

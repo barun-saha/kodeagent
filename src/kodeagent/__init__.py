@@ -2,7 +2,6 @@
 
 from .kodeagent import (
     tool,
-    call_llm,
     llm_vision_support,
     calculator,
     search_web,
@@ -17,7 +16,7 @@ from .kodeagent import (
     CodeActAgent,
     ChatMessage,
     ReActChatMessage,
-    CodeChatMessage,
+    CodeActChatMessage,
     AgentPlan,
     PlanStep,
     Planner,
@@ -41,7 +40,7 @@ __all__ = [
     'AgentResponse',
     'ChatMessage',
     'CodeActAgent',
-    'CodeChatMessage',
+    'CodeActChatMessage',
     'CodeRunner',
     'Observer',
     'ObserverResponse',
@@ -50,7 +49,6 @@ __all__ = [
     'ReActAgent',
     'ReActChatMessage',
     'Task',
-    'call_llm',
     'calculator',
     'detect_file_type',
     'download_file',
