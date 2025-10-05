@@ -795,12 +795,50 @@ from flask import Flask
 def test_code_runner_syntax_error():
     """Test CodeRunner handling of syntax errors."""
     runner = CodeRunner(env='host', allowed_imports=['os'])
-    code_with_syntax_error = """
+    code_with_syntax_error = '''
 print('Hello'
 print('World')  # Missing parenthesis above
-"""
+'''
     _, stderr, exit_code = runner.run(code_with_syntax_error)
     assert exit_code != 0
+    assert 'SyntaxError' in stderr
+
+
+def test_code_runner():
+    """Test the CodeRunner's code execution functionality."""
+    # Initialize CodeRunner with host environment and basic allowed imports
+    runner = CodeRunner(
+        env='host',
+        allowed_imports=['math', 'datetime'],
+        timeout=5
+    )
+
+    # Test successful code execution
+    code = '''
+import math
+result = math.sqrt(16)
+print(f"Square root is {result}")
+'''
+    stdout, stderr, return_code = runner.run(code)
+    assert return_code == 0
+    assert 'Square root is 4.0' in stdout
+    assert stderr == ''
+
+    # Test disallowed imports
+    code_with_unauthorized_import = '''
+import os
+os.getcwd()
+'''
+    stdout, stderr, return_code = runner.run(code_with_unauthorized_import)
+    assert return_code != 0
+    assert 'unauthorized' in stderr.lower() or 'disallowed' in stderr.lower()
+
+    # Test syntax error handling
+    invalid_code = '''
+print("Hello
+'''
+    stdout, stderr, return_code = runner.run(invalid_code)
+    assert return_code != 0
     assert 'SyntaxError' in stderr
 
 
@@ -913,6 +951,54 @@ def test_agent_trace(react_agent):
     assert 'Thought: Using calculator' in trace
     assert 'Action: calculator' in trace
     assert 'Observation: 4' in trace
+
+
+def test_agent_trace_detailed(react_agent):
+    """Test detailed scenarios for Agent.trace."""
+    # Test empty history
+    assert react_agent.trace() == ''
+
+    # Add a sequence of messages to test different scenarios
+    messages = [
+        ChatMessage(role='user', content='Calculate 2+2'),
+        ReActChatMessage(
+            role='assistant',
+            thought='I will use the calculator',
+            action='calculator',
+            args='{"expression": "2+2"}',
+            content='',
+            task_successful=False,
+            final_answer=None
+        ),
+        ChatMessage(role='tool', content='4'),
+        ReActChatMessage(
+            role='assistant',
+            thought='I have the result',
+            action=None,
+            args=None,
+            content='The result is 4',
+            task_successful=True,
+            final_answer='The answer is 4'
+        )
+    ]
+
+    for msg in messages:
+        react_agent.add_to_history(msg)
+
+    trace = react_agent.trace()
+    print(trace)
+
+    # Verify all components are present in the trace
+    assert 'Thought: I will use the calculator' in trace
+    assert 'Action: calculator({"expression": "2+2"})' in trace
+    assert 'Observation: 4' in trace
+    assert 'Thought: I have the result' in trace
+
+    # Verify order of events
+    thought_pos = trace.find('Thought: I will use the calculator')
+    action_pos = trace.find('Action: calculator')
+    observation_pos = trace.find('Observation: 4')
+    assert thought_pos < action_pos < observation_pos
 
 
 @pytest.mark.parametrize('expression,expected', [
@@ -1066,4 +1152,5 @@ def test_observer_response_missing_fields():
     assert response.is_in_loop
     assert response.reasoning == ''
     assert response.correction_message is None
+
 
