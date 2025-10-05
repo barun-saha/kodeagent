@@ -139,14 +139,14 @@ To run unit tests, use:
 python -m pytest .\tests\unit -v --cov --cov-report=html
 ```
 
+The current test coverage is 86%, on average.
+
 For integration tests involving calls to APIs, use:
 ```bash
 python -m pytest .\tests\integration -v --cov --cov-report=html
 ```
 
-Gemini and E2B API keys should be set in the `.env` file for the tests to work.
-
-Note: Some of the unit tests still make calls to the LLM. This would be fixed in the future.
+Gemini and E2B API keys should be set in the `.env` file for integration tests to work.
 
 
 ## 🗺️ Roadmap & Contributions

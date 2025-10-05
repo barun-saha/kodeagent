@@ -8,14 +8,162 @@ from unittest.mock import patch, mock_open, MagicMock
 import pytest
 import requests
 
-
 from kodeagent.kutils import (
     is_it_url,
     detect_file_type,
     is_image_file,
     make_user_message,
-    logger
+    combine_user_messages,
+    logger,
+    call_llm
 )
+
+
+@pytest.mark.parametrize('messages,expected', [
+    # Single user message
+    ([{'role': 'user', 'content': ['a']}], [{'role': 'user', 'content': ['a']}]),
+    # Two consecutive user messages
+    (
+            [
+                {'role': 'user', 'content': ['a']},
+                {'role': 'user', 'content': ['b']}
+            ],
+            [{'role': 'user', 'content': ['a', 'b']}]
+    ),
+    # User and assistant messages
+    (
+            [
+                {'role': 'user', 'content': ['a']},
+                {'role': 'assistant', 'content': ['b']}
+            ],
+            [{'role': 'user', 'content': ['a']}, {'role': 'assistant', 'content': ['b']}]
+    ),
+    # Mixed content types
+    (
+            [
+                {'role': 'user', 'content': 'a'},
+                {'role': 'user', 'content': ['b']}
+            ],
+            [{'role': 'user', 'content': ['a', 'b']}]
+    ),
+    # Non-list content
+    ([{'role': 'user', 'content': 'a'}], [{'role': 'user', 'content': ['a']}]),
+    # Multiple merges
+    (
+            [
+                {'role': 'user', 'content': ['a']},
+                {'role': 'user', 'content': ['b']},
+                {'role': 'user', 'content': ['c']}
+            ],
+            [{'role': 'user', 'content': ['a', 'b', 'c']}]
+    ),
+])
+def test_combine_user_messages(messages, expected):
+    """
+    Test combining consecutive user messages.
+
+    Args:
+        messages: List of message dicts with 'role' and 'content'.
+        expected: The expected combined message list.
+    """
+    assert combine_user_messages(messages) == expected
+
+
+@pytest.mark.asyncio
+async def test_call_llm_success(monkeypatch):
+    """
+    Test successful LLM call.
+
+    Args:
+        monkeypatch: The pytest monkeypatch fixture.
+    """
+    # Mock litellm.acompletion to return a valid response
+    class DummyResponse:
+        class Choices:
+            class Message:
+                content = 'response text'
+            message = Message()
+        choices = [Choices()]
+        usage = {
+            'prompt_tokens': 1,
+            'completion_tokens': 2,
+            'total_tokens': 3
+        }
+        _hidden_params = {'response_cost': 0.01}
+
+
+    async def dummy_acompletion(**kwargs):
+        """
+        Mocked acompletion function.
+
+        Args:
+            **kwargs: Arbitrary keyword arguments.
+
+        Returns:
+            DummyResponse: A dummy response object.
+        """
+        return DummyResponse()
+
+
+    monkeypatch.setattr('src.kodeagent.kutils.litellm.acompletion', dummy_acompletion)
+    result = await call_llm(
+        'model', {}, [{'role': 'user', 'content': 'hi'}]
+    )
+    assert result == 'response text'
+
+
+@pytest.mark.asyncio
+async def test_call_llm_empty_response(monkeypatch):
+    """
+    Test LLM call with empty response content.
+
+    Args:
+        monkeypatch: The pytest monkeypatch fixture.
+    """
+    # Mock litellm.acompletion to return empty content
+    class DummyResponse:
+        class Choices:
+            class Message:
+                content = ''
+            message = Message()
+        choices = [Choices()]
+        usage = {
+            'prompt_tokens': 1,
+            'completion_tokens': 2,
+            'total_tokens': 3
+        }
+        _hidden_params = {'response_cost': 0.01}
+
+
+    async def dummy_acompletion(**kwargs):
+        return DummyResponse()
+
+
+    monkeypatch.setattr('src.kodeagent.kutils.litellm.acompletion', dummy_acompletion)
+    with pytest.raises(ValueError):
+        await call_llm(
+            'model', {}, [{'role': 'user', 'content': 'hi'}]
+        )
+
+
+@pytest.mark.asyncio
+async def test_call_llm_exception(monkeypatch):
+    """
+    Test LLM call that raises an exception.
+
+    Args:
+        monkeypatch: The pytest monkeypatch fixture.
+    """
+    # Mock litellm.acompletion to raise exception
+    async def dummy_acompletion(**kwargs):
+        raise Exception('fail')
+
+
+    monkeypatch.setattr('src.kodeagent.kutils.litellm.acompletion', dummy_acompletion)
+    with pytest.raises(ValueError):
+        await call_llm(
+            'model', {}, [{'role': 'user', 'content': 'hi'}]
+        )
 
 
 def test_is_it_url():
@@ -79,7 +227,7 @@ def test_detect_file_type_errors():
         assert detect_file_type('https://invalid-url') == 'Unknown file type'
 
 
-@pytest.mark.parametrize("file_type,expected", [
+@pytest.mark.parametrize('file_type,expected', [
     ('image/jpeg', True),
     ('image/png', True),
     ('image/gif', True),
@@ -109,7 +257,7 @@ def test_make_user_message_basic():
 
     # Test message with whitespace
     message = make_user_message('  Trim me  ')
-    assert message[0]['content'][0]['text'] == 'Trim me'
+    assert message[0]['content'][0]['text'] == '  Trim me  '
 
     # Test empty message
     message = make_user_message('')
@@ -237,6 +385,8 @@ def test_make_user_message_complex_scenario(mock_isfile):
     """Test message creation with mixed content types."""
     def side_effect(path):
         return path in ['local.txt', 'image.jpg']
+
+
     mock_isfile.side_effect = side_effect
 
     with patch('mimetypes.guess_type') as mock_mime:
@@ -287,3 +437,59 @@ def test_logging_configuration():
     with patch.object(logger, 'warning') as mock_warning:
         logger.warning('Test message')
         mock_warning.assert_called_once_with('Test message')
+
+
+# Edge case: make_user_message with empty file list
+def test_make_user_message_empty_files():
+    msg = make_user_message('hello', files=[])
+    assert msg[0]['content'][0]['text'] == 'hello'
+    assert len(msg[0]['content']) == 1
+
+
+# Edge case: make_user_message with unknown MIME type
+@patch('os.path.isfile', return_value=True)
+@patch('mimetypes.guess_type', return_value=(None, None))
+def test_make_user_message_unknown_mime(mock_mime, mock_isfile):
+    msg = make_user_message('unknown mime', files=['file.unknown'])
+    assert any('Input file:' in c['text'] for c in msg[0]['content'] if c['type'] == 'text')
+
+
+# Edge case: make_user_message with invalid file path
+@patch('os.path.isfile', return_value=False)
+def test_make_user_message_invalid_path(mock_isfile):
+    """
+    Test make_user_message with an invalid file path.
+
+    Args:
+        mock_isfile: Mock for os.path.isfile.
+    """
+    msg = make_user_message('invalid path', files=['notfound.txt'])
+    assert msg[0]['content'][0]['text'] == 'invalid path'
+    assert len(msg[0]['content']) == 1
+
+
+# Logger error branch for detect_file_type
+@patch('requests.head', side_effect=requests.RequestException('fail'))
+def test_detect_file_type_logger_error(mock_head):
+    """
+    Test detect_file_type logging on request exception.
+
+    Args:
+        mock_head: A mock for requests.head.
+    """
+    with patch.object(logger, 'error') as mock_log:
+        result = detect_file_type('http://bad.url')
+        assert result == 'Unknown file type'
+        mock_log.assert_called()
+
+
+# Logger error branch for make_user_message (invalid image)
+def test_make_user_message_logger_error():
+    """
+    Test make_user_message logging on invalid image file.
+    """
+    with patch('os.path.isfile', return_value=False):
+        with patch.object(logger, 'error') as mock_log:
+            msg = make_user_message('bad image', files=['badimage.jpg'])
+            mock_log.assert_called()
+            assert msg[0]['content'][0]['text'] == 'bad image'

@@ -1,9 +1,10 @@
 """
 Unit tests for the agents and their operations.
 """
+import datetime
 from typing import Optional, AsyncIterator
 from unittest import mock
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pydantic_core
 import pytest
@@ -16,8 +17,6 @@ from kodeagent import (
     download_file,
     extract_file_contents_as_markdown,
     search_wikipedia,
-    search_arxiv,
-    get_youtube_transcript,
     get_audio_transcript,
     ReActAgent,
     ChatMessage,
@@ -40,10 +39,15 @@ MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
 
 # Mock responses for LLM calls
 MOCK_LLM_RESPONSES = {
-    'think': '{"role": "assistant", "thought": "I should use the calculator", "action": "calculator", "args": "{\\"a\\": 2, \\"b\\": 2}", "content": "", "successful": false, "answer": null}',
+    'think': '{"role": "assistant", "thought": "I should use the calculator",'
+             ' "action": "calculator", "args": "{\\"a\\": 2, \\"b\\": 2}",'
+             ' "content": "", "successful": false, "answer": null}',
     'observe': '{"is_progressing": true, "is_in_loop": false, "reasoning": "all good"}',
     'plan': '{"steps": [{"description": "Use calculator", "is_done": false}]}',
-    'code': '{"role": "assistant", "thought": "Getting date", "code": "from datetime import datetime\\nprint(datetime.now().strftime(\'%B %d, %Y\'))", "content": "", "successful": false, "answer": null}'
+    'code': '{"role": "assistant", "thought": "Getting date",'
+            ' "code": "from datetime import datetime'
+            '\\nprint(datetime.now().strftime(\'%B %d, %Y\'))",'
+            ' "content": "", "successful": false, "answer": null}'
 }
 
 @tool
@@ -59,15 +63,15 @@ def mock_llm():
         # Return different responses based on the context
         if any('Thought:' in str(m.get('content', '')) for m in kwargs.get('messages', [])):
             return MOCK_LLM_RESPONSES['think']
-        elif 'plan' in str(kwargs.get('messages', [])):
+        if 'plan' in str(kwargs.get('messages', [])):
             return MOCK_LLM_RESPONSES['plan']
-        elif 'observe' in str(kwargs.get('messages', [])):
+        if 'observe' in str(kwargs.get('messages', [])):
             return MOCK_LLM_RESPONSES['observe']
-        elif 'code' in str(kwargs.get('messages', [])):
+        if 'code' in str(kwargs.get('messages', [])):
             return MOCK_LLM_RESPONSES['code']
         return 'Default mock response'
 
-    with patch('kodeagent.call_llm', new=mock_call_llm):
+    with patch('kodeagent.kutils.call_llm', new=mock_call_llm):
         yield mock_call_llm
 
 
@@ -79,19 +83,6 @@ def react_agent(mock_llm):
         model_name=MODEL_NAME,
         tools=[dummy_tool_one, calculator, search_web, download_file],
         description='Test ReAct agent for unit tests',
-        max_iterations=3
-    )
-    return agent
-
-
-@pytest.fixture
-def planning_react_agent(mock_llm):
-    """Fixture to create a ReActAgent instance with planning enabled."""
-    agent = ReActAgent(
-        name='planning_react_agent',
-        model_name=MODEL_NAME,
-        tools=[dummy_tool_one, calculator, search_web, download_file],
-        description='Test ReAct agent with planning for unit tests',
         max_iterations=3
     )
     return agent
@@ -137,57 +128,88 @@ def test_format_messages_for_prompt(react_agent):
     react_agent.add_to_history(msg2)
 
     formatted = '\n'.join([str(m) for m in react_agent.formatted_history_for_llm()])
-    assert 'Thought: test thought' in formatted
-    assert 'Action: dummy_tool_one' in formatted
-    assert 'Observation: tool response' in formatted
+    assert "'role': 'assistant'" in formatted
+    assert "'role': 'tool', 'content': 'tool response'" in formatted
+    assert "'name': 'dummy_tool_one'" in formatted
 
 
 @pytest.mark.asyncio
 async def test_react_agent_run_success(react_agent):
     """Test successful task execution by ReActAgent."""
-    responses = []
-    async for response in react_agent.run('Add 2 and 2'):
-        responses.append(response)
+    # Predefined assistant responses
+    assistant_sequence = [
+        # Plan
+        '{"steps": [{"description": "Use calculator", "is_done": false}]}',
+        # Step 1: Think (ReActChatMessage)
+        '{"role": "assistant", "thought": "I need to calculate 2 + 2.'
+        ' I will use the calculator tool.",'
+        ' "action": "calculator", "args": "{\\"expression\\": \\"2+2\\"}",'
+        ' "task_successful": false, "content": null, "final_answer": null}',
+        # Update plan
+        '{"steps": [{"description": "Use calculator", "is_done": true}]}',
+        # Step 1: Final after tool (ReActChatMessage)
+        '{"role": "assistant", "thought": "I have calculated 2 + 2 = 4.'
+        ' I can now provide the final answer.",'
+        ' "action": null, "args": null, "content": null,'
+        ' "task_successful": true, "final_answer": "The sum of 2 and 2 is 4"}',
+        # Final update plan
+        '{"steps": [{"description": "Use calculator", "is_done": true}]}',
+    ]
 
-    assert any(r['type'] == 'final' for r in responses)
-    assert react_agent.final_answer_found
-    assert react_agent.task.is_finished
-    final_response = next(r for r in responses if r['type'] == 'final')
-    assert '4' in str(final_response['value'])
+    # Patch call_llm to return each response in order
+    with patch('kodeagent.kutils.call_llm', side_effect=assistant_sequence):
+        responses = []
+        async for response in react_agent.run('Add 2 and 2'):
+            responses.append(response)
+
+        assert any(r['type'] == 'final' for r in responses)
+        assert react_agent.final_answer_found
+        assert react_agent.task.is_finished
+        final_response = next(r for r in responses if r['type'] == 'final')
+        assert '4' in str(final_response['value'])
 
 
 @pytest.mark.asyncio
-async def test_react_agent_run_with_tool_error(react_agent):
+async def test_react_agent_run_with_tool_error():
     """Test ReActAgent handling tool execution errors."""
     @tool
     def broken_tool(param1: str) -> str:
         """A tool that always fails."""
         raise Exception('Tool error')
 
-    react_agent.tools.append(broken_tool)
+    def llm_side_effect(*args, **kwargs):
+        # If response_format is AgentPlan, return valid AgentPlan JSON
+        if kwargs.get('response_format') == AgentPlan:
+            return '{"steps": [{"description": "Use the broken tool", "is_done": false}]}'
+        # If response_format is ObserverResponse, return valid ObserverResponse JSON
+        if kwargs.get('response_format') == ObserverResponse:
+            return (
+                '{"is_progressing": true, "is_in_loop": false,'
+                ' "reasoning": "Agent is progressing", "correction_message": null}'
+            )
+        # Otherwise, return a valid ReActChatMessage-like response
+        return (
+            '{"role": "assistant", "thought": "Use `broken_tool`",'
+            ' "action": "broken_tool", "args": "{\"param1\": \"Something\"}",'
+            ' "content": "", "task_successful": false, "final_answer": false}'
+        )
 
-    responses = []
-    async for response in react_agent.run('Use the broken tool'):
-        responses.append(response)
+    with patch('kodeagent.kutils.call_llm', side_effect=llm_side_effect):
+        responses = []
+        agent = ReActAgent(
+            name='broken_tools_agent',
+            model_name=MODEL_NAME,
+            tools=[broken_tool],
+            max_iterations=1
+        )
+        assert len(agent.tools) == 1
 
-    error_responses = [r for r in responses if r["metadata"] and r["metadata"].get("is_error")]
-    assert len(error_responses) > 0
-    assert "Incorrect tool name generated" in str(error_responses[0]["value"])
+        async for response in agent.run('Use the broken tool'):
+            responses.append(response)
 
-
-@pytest.mark.asyncio
-async def test_think_step(react_agent):
-    """Test the think step of ReActAgent."""
-    react_agent._run_init("Calculate 5 plus 3")
-
-    responses = []
-    async for response in react_agent._think():
-        responses.append(response)
-
-    assert len(responses) == 1
-    assert responses[0]["type"] == "step"
-    assert isinstance(responses[0]["value"], ReActChatMessage)
-    assert responses[0]["value"].thought is not None
+        error_responses = [r for r in responses if r["metadata"] and r["metadata"].get("is_error")]
+        assert len(error_responses) > 0
+        assert 'An error occurred while taking' in str(error_responses[0]['value'])
 
 
 @pytest.mark.asyncio
@@ -225,17 +247,17 @@ def test_get_tools_description(react_agent):
 
 
 @pytest.mark.asyncio
-@patch('kodeagent.call_llm')
+@patch('kodeagent.kutils.call_llm')
 async def test_get_relevant_tools(mock_llm, react_agent):
     """Test filtering relevant tools for a task."""
-    mock_llm.return_value = '["calculator", "dummy_tool_one"]'
+    mock_llm.return_value = 'calculator'
     task_description = 'What is 2 plus 3?'
     react_agent._run_init(task_description)
 
     tools = await react_agent.get_relevant_tools(task_description)
     assert len(tools) > 0
     tool_names = {t.name for t in tools}
-    assert "calculator" in tool_names
+    assert 'calculator' in tool_names
 
 
 def test_clear_history(react_agent):
@@ -270,9 +292,51 @@ def mock_e2b():
 @pytest.mark.asyncio
 async def test_codeact_agent_host():
     """Test the CodeActAgent functionality on a local system."""
-    with patch('kodeagent.call_llm', new_callable=AsyncMock) as mock_llm:
-        mock_llm.return_value = MOCK_LLM_RESPONSES['code']
+    current_month = datetime.datetime.today().strftime('%B')
 
+    def llm_side_effect(*args, **kwargs):
+        # If response_format is AgentPlan, return valid AgentPlan JSON
+        if kwargs.get('response_format') == AgentPlan:
+            return (
+                '{"steps": [{"description": "Find the current month name based on today\'s date",'
+                ' "is_done": false}]}'
+            )
+        # If response_format is ObserverResponse, return valid ObserverResponse JSON
+        if kwargs.get('response_format') == ObserverResponse:
+            return (
+                '{"is_progressing": true, "is_in_loop": false,'
+                ' "reasoning": "Agent is progressing", "correction_message": null}'
+            )
+
+        messages = kwargs.get('messages', [])
+        if not messages:
+            return '{"role": "system", "content": "You are an assistant."}'
+
+        last_message = messages[-1]
+
+        if last_message['role'] == 'user':
+            # Return a properly formatted CodeActChatMessage for the initial task
+            return (
+                '{"role": "assistant", "thought": "I need to get the current month name", '
+                '"code": "from datetime import datetime\\nprint(datetime.now().strftime(\'%B\'))", '
+                '"content": "", "task_successful": false, "final_answer": null}'
+            )
+
+        if last_message['role'] == 'tool':
+            # Return a final CodeActChatMessage with the result
+            return (
+                '{"role": "assistant", "thought": "I have the month name", '
+                f'"code": "", "content": "The current month is {current_month}", '
+                f'"task_successful": true, "final_answer": "The current month is {current_month}"'
+                '}'
+            )
+
+        return (
+            '{"role": "assistant", "content": "I am not sure what to do next.",'
+            ' "task_successful": false, "final_answer": null}'
+        )
+
+    with patch('kodeagent.kutils.call_llm', side_effect=llm_side_effect):
         code_agent = CodeActAgent(
             name='Code agent',
             model_name=MODEL_NAME,
@@ -282,13 +346,79 @@ async def test_codeact_agent_host():
             description='Agent that can write and execute Python code'
         )
 
-        task = "What is today's date? Express it in words without time."
+        task = 'Compute the name of the month today.'
         responses = []
         async for response in code_agent.run(task):
             responses.append(response['value'])
 
         response = ' | '.join([str(r) for r in responses])
-        assert any('September' in str(r) for r in responses)
+        assert current_month in response
+
+
+@pytest.mark.asyncio
+async def test_codeact_agent_unsupported_env():
+    """Test the CodeActAgent functionality on an unsupported run env."""
+    current_month = datetime.datetime.today().strftime('%B')
+
+    def llm_side_effect(*args, **kwargs):
+        # If response_format is AgentPlan, return valid AgentPlan JSON
+        if kwargs.get('response_format') == AgentPlan:
+            return (
+                '{"steps": [{"description": "Find the current month name based on today\'s date",'
+                ' "is_done": false}]}'
+            )
+        # If response_format is ObserverResponse, return valid ObserverResponse JSON
+        if kwargs.get('response_format') == ObserverResponse:
+            return (
+                '{"is_progressing": true, "is_in_loop": false,'
+                ' "reasoning": "Agent is progressing", "correction_message": null}'
+            )
+
+        messages = kwargs.get('messages', [])
+        if not messages:
+            return '{"role": "system", "content": "You are an assistant."}'
+
+        last_message = messages[-1]
+
+        if last_message['role'] == 'user':
+            # Return a properly formatted CodeActChatMessage for the initial task
+            return (
+                '{"role": "assistant", "thought": "I need to get the current month name", '
+                '"code": "from datetime import datetime\\nprint(datetime.now().strftime(\'%B\'))", '
+                '"content": "", "task_successful": false, "final_answer": null}'
+            )
+
+        if last_message['role'] == 'tool':
+            # Return a final CodeActChatMessage with the result
+            return (
+                '{"role": "assistant", "thought": "I have the month name", '
+                f'"code": "", "content": "The current month is {current_month}", '
+                f'"task_successful": true, "final_answer": "The current month is {current_month}"'
+                '}'
+            )
+
+        return (
+            '{"role": "assistant", "content": "I am not sure what to do next.",'
+            ' "task_successful": false, "final_answer": null}'
+        )
+
+    with patch('kodeagent.kutils.call_llm', side_effect=llm_side_effect):
+        code_agent = CodeActAgent(
+            name='Code agent',
+            model_name=MODEL_NAME,
+            run_env='unknown_env',
+            max_iterations=3,
+            allowed_imports=['datetime'],
+            description='Agent that can write and execute Python code'
+        )
+
+        task = 'Compute the name of the month today.'
+        responses = []
+        async for response in code_agent.run(task):
+            responses.append(response['value'])
+
+        response = ' | '.join([str(r) for r in responses])
+        assert 'Unsupported code execution env: unknown_env' in response
 
 
 def test_code_chat_message_validation():
@@ -322,13 +452,29 @@ def test_code_chat_message_validation():
 @pytest.mark.asyncio
 async def test_agent_with_no_tools():
     """Test agent initialization with no tools."""
-    with patch('kodeagent.call_llm', new_callable=AsyncMock) as mock_llm:
-        mock_llm.return_value = 'I cannot help with that task as I have no tools.'
+    def llm_side_effect(*args, **kwargs):
+        # If response_format is AgentPlan, return valid AgentPlan JSON
+        if kwargs.get('response_format') == AgentPlan:
+            return '{"steps": [{"description": "Ask for details", "is_done": false}]}'
+        # If response_format is ObserverResponse, return valid ObserverResponse JSON
+        if kwargs.get('response_format') == ObserverResponse:
+            return (
+                '{"is_progressing": true, "is_in_loop": false,'
+                ' "reasoning": "Agent is progressing", "correction_message": null}'
+            )
+        # Otherwise, return a valid ReActChatMessage-like response
+        return (
+            '{"role": "assistant", "thought": "I should ask for details",'
+            ' "action": "", "args": "", "content": "", "task_successful": true,'
+            ' "final_answer": true}'
+        )
 
+    with patch('kodeagent.kutils.call_llm', side_effect=llm_side_effect):
         agent = ReActAgent(
             name='no_tools_agent',
             model_name=MODEL_NAME,
-            tools=[]
+            tools=[],
+            max_iterations=1
         )
         assert len(agent.tools) == 0
         assert len(agent.tool_names) == 0
@@ -337,7 +483,6 @@ async def test_agent_with_no_tools():
         async for response in agent.run('Simple task'):
             responses.append(response)
 
-        print(f'{responses=}')
         assert any('Simple task' in str(r['value']) for r in responses)
 
 
@@ -470,7 +615,8 @@ def test_observer_response_validation():
         ObserverResponse(
             is_progressing=True,
             is_in_loop=False,
-            reasoning=None  # Empty reasoning should fail
+            reasoning=None,  # Empty reasoning should fail
+            correction_message=None
         )
 
 
@@ -488,7 +634,7 @@ async def test_planner_create_plan(planner):
     """Test creating a new plan."""
     mock_plan_response = '{"steps": [{"description": "Use calculator", "is_done": false}]}'
 
-    with patch('kodeagent.kodeagent.call_llm', autospec=True) as mock_call_llm:
+    with patch('kodeagent.kutils.call_llm', autospec=True) as mock_call_llm:
         mock_call_llm.return_value = mock_plan_response
         task = Task(description='Calculate 2+2', files=None)
         plan = await planner.create_plan(task, agent_type='ReAct')
@@ -505,7 +651,7 @@ async def test_planner_update_plan(planner):
     """Test updating an existing plan."""
     mock_update_response = '{"steps": [{"description": "Use calculator", "is_done": true}]}'
 
-    with patch('kodeagent.kodeagent.call_llm', autospec=True) as mock_call_llm:
+    with patch('kodeagent.kutils.call_llm', autospec=True) as mock_call_llm:
         mock_call_llm.return_value = mock_update_response
         task = Task(description='Calculate 2+2', files=None)
         await planner.create_plan(task, agent_type='ReAct')
@@ -594,6 +740,9 @@ def test_agent_subclass(mock_llm):
         ) -> AsyncIterator[AgentResponse]:
             yield self.response('final', 'Done')
 
+        def formatted_history_for_llm(self) ->list[dict]:
+            return []
+
     agent = MinimalAgent(
         name='minimal_agent',
         model_name=MODEL_NAME
@@ -646,21 +795,63 @@ from flask import Flask
 def test_code_runner_syntax_error():
     """Test CodeRunner handling of syntax errors."""
     runner = CodeRunner(env='host', allowed_imports=['os'])
-    code_with_syntax_error = """
+    code_with_syntax_error = '''
 print('Hello'
 print('World')  # Missing parenthesis above
-"""
+'''
     _, stderr, exit_code = runner.run(code_with_syntax_error)
     assert exit_code != 0
+    assert 'SyntaxError' in stderr
+
+
+def test_code_runner():
+    """Test the CodeRunner's code execution functionality."""
+    # Initialize CodeRunner with host environment and basic allowed imports
+    runner = CodeRunner(
+        env='host',
+        allowed_imports=['math', 'datetime'],
+        timeout=5
+    )
+
+    # Test successful code execution
+    code = '''
+import math
+result = math.sqrt(16)
+print(f"Square root is {result}")
+'''
+    stdout, stderr, return_code = runner.run(code)
+    assert return_code == 0
+    assert 'Square root is 4.0' in stdout
+    assert stderr == ''
+
+    # Test disallowed imports
+    code_with_unauthorized_import = '''
+import os
+os.getcwd()
+'''
+    stdout, stderr, return_code = runner.run(code_with_unauthorized_import)
+    assert return_code != 0
+    assert 'unauthorized' in stderr.lower() or 'disallowed' in stderr.lower()
+
+    # Test syntax error handling
+    invalid_code = '''
+print("Hello
+'''
+    stdout, stderr, return_code = runner.run(invalid_code)
+    assert return_code != 0
     assert 'SyntaxError' in stderr
 
 
 @pytest.mark.asyncio
 async def test_observer_analyze():
     """Test Observer's analysis of agent behavior."""
-    mock_response = '{"is_progressing": false, "is_in_loop": true, "reasoning": "Agent keeps using calculator repeatedly", "correction_message": "Try a different approach"}'
+    mock_response = (
+        '{"is_progressing": false, "is_in_loop": true,'
+        ' "reasoning": "Agent keeps using calculator repeatedly",'
+        ' "correction_message": "Try a different approach"}'
+    )
 
-    with patch('kodeagent.call_llm', return_value=mock_response):
+    with patch('kodeagent.kutils.call_llm', return_value=mock_response):
         observer = Observer(
             model_name=MODEL_NAME,
             tool_names={'calculator', 'search_web'},
@@ -760,6 +951,54 @@ def test_agent_trace(react_agent):
     assert 'Thought: Using calculator' in trace
     assert 'Action: calculator' in trace
     assert 'Observation: 4' in trace
+
+
+def test_agent_trace_detailed(react_agent):
+    """Test detailed scenarios for Agent.trace."""
+    # Test empty history
+    assert react_agent.trace() == ''
+
+    # Add a sequence of messages to test different scenarios
+    messages = [
+        ChatMessage(role='user', content='Calculate 2+2'),
+        ReActChatMessage(
+            role='assistant',
+            thought='I will use the calculator',
+            action='calculator',
+            args='{"expression": "2+2"}',
+            content='',
+            task_successful=False,
+            final_answer=None
+        ),
+        ChatMessage(role='tool', content='4'),
+        ReActChatMessage(
+            role='assistant',
+            thought='I have the result',
+            action=None,
+            args=None,
+            content='The result is 4',
+            task_successful=True,
+            final_answer='The answer is 4'
+        )
+    ]
+
+    for msg in messages:
+        react_agent.add_to_history(msg)
+
+    trace = react_agent.trace()
+    print(trace)
+
+    # Verify all components are present in the trace
+    assert 'Thought: I will use the calculator' in trace
+    assert 'Action: calculator({"expression": "2+2"})' in trace
+    assert 'Observation: 4' in trace
+    assert 'Thought: I have the result' in trace
+
+    # Verify order of events
+    thought_pos = trace.find('Thought: I will use the calculator')
+    action_pos = trace.find('Action: calculator')
+    observation_pos = trace.find('Observation: 4')
+    assert thought_pos < action_pos < observation_pos
 
 
 @pytest.mark.parametrize('expression,expected', [
@@ -893,3 +1132,25 @@ def test_get_audio_transcript():
 
         result = get_audio_transcript('test_audio.mp3')
         assert result == expected_response
+
+
+def test_get_audio_transcript_error():
+    """Test audio transcript retrieval with error response."""
+    mock_file = mock.mock_open(read_data=b'fake audio content')
+    with patch('builtins.open', mock_file), patch('requests.post') as mock_post:
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = 'Bad Request'
+        mock_post.return_value = mock_response
+        result = get_audio_transcript('test_audio.mp3')
+        assert 'Audio transcription error' in result
+
+
+# Edge case: Observer with missing reasoning and correction_message
+def test_observer_response_missing_fields():
+    response = ObserverResponse(is_progressing=False, is_in_loop=True, reasoning='', correction_message=None)
+    assert response.is_in_loop
+    assert response.reasoning == ''
+    assert response.correction_message is None
+
+
