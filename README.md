@@ -86,7 +86,7 @@ for task in [
 
 That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [kodeagent.py](kodeagent.py) module.
 
-KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm), enabling it to work with any capable LLM. Currently, KodeAgent has been tested with Gemini 2.0 Flash Lite. For advanced tasks, you can try Gemini 2.5 Pro.
+KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm), enabling it to work with any capable LLM. Currently, KodeAgent has been tested with Gemini 2.5 Flash Lite. For advanced tasks, you can try Gemini 2.5 Pro.
 
 LLM model names, parameters, and keys should be set as per [LiteLLM documentation](https://docs.litellm.ai/docs/set_keys). For example, add `GEMINI_API_KEY` to the `.env` to use Gemini API.
 
@@ -147,6 +147,8 @@ python -m pytest .\tests\integration -v --cov --cov-report=html
 ```
 
 Gemini and E2B API keys should be set in the `.env` file for integration tests to work.
+
+A [Kaggle notebook](https://www.kaggle.com/code/barunsaha/kodeagent-benchmark/) for benchmarking KodeAgent is also available.
 
 
 ## 🗺️ Roadmap & Contributions
