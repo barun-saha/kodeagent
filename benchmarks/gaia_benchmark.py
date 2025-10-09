@@ -29,42 +29,55 @@ logging.getLogger('LiteLLM').setLevel(logging.WARNING)
 logging.getLogger('langfuse').disabled = True
 
 
-def get_code_act_agent(model_name: str, max_steps: int = 10) -> ka.Agent:
+def get_agent(agent_type: str, model_name: str, max_steps: int = 10) -> ka.Agent:
     """
     Create a CodeActAgent for solving the GAIA benchmark tasks.
 
     Args:
+        agent_type: Agent type, should be `codeact` or `react`.
         model_name: The LLM to use.
         max_steps: Maximum number of agent steps to run.
 
     Returns:
         A configured CodeAgent instance.
     """
-    litellm_params = {'temperature': 0, 'timeout': 30}
+    all_tools = [
+        ka.search_web, ka.extract_file_contents_as_markdown, ka.download_file,
+        ka.get_youtube_transcript, ka.get_audio_transcript,
+        ka.search_wikipedia, ka.search_arxiv,
+    ]
+    litellm_params = {'temperature': 0, 'timeout': 45}
 
-    agent = ka.CodeActAgent(
-        name='Multi-task agent',
-        model_name=model_name,
-        tools=[
-            ka.search_web, ka.extract_file_contents_as_markdown, ka.download_file,
-            ka.get_youtube_transcript, ka.get_audio_transcript,
-            ka.search_wikipedia, ka.search_arxiv,
-        ],
-        run_env='host',
-        max_iterations=max_steps,
-        litellm_params=litellm_params,
-        allowed_imports=[
-            'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'ddgs', 'markitdown', 'youtube_transcript_api', 'wikipedia', 'arxiv',
-        ],
-        pip_packages=(
-            'ddgs~=9.5.2;"markitdown[all]";'
-            'youtube-transcript-api~=1.2.2;wikipedia~=1.4.0;arxiv~=2.2.0'
-        ),
-        env_vars_to_set={'FIREWORKS_API_KEY': os.environ.get('FIREWORKS_API_KEY', '')},
-        timeout=35,
-        filter_tools_for_task=False
-    )
+    if agent_type == 'react':
+        print('Creating a ReAct agent...')
+        agent = ka.ReActAgent(
+            name='Multi-task ReAct agent',
+            model_name=model_name,
+            tools=all_tools,
+            max_iterations=max_steps,
+            litellm_params=litellm_params,
+        )
+    else:
+        print('Creating a CodeAct agent...')
+        agent = ka.CodeActAgent(
+            name='Multi-task CodeAct agent',
+            model_name=model_name,
+            tools=all_tools,
+            run_env='host',
+            max_iterations=max_steps,
+            litellm_params=litellm_params,
+            allowed_imports=[
+                'os', 're', 'time', 'random', 'requests', 'tempfile',
+                'ddgs', 'markitdown', 'youtube_transcript_api', 'wikipedia', 'arxiv',
+            ],
+            pip_packages=(
+                'ddgs~=9.5.2;"markitdown[all]";'
+                'youtube-transcript-api~=1.2.2;wikipedia~=1.4.0;arxiv~=2.2.0'
+            ),
+            env_vars_to_set={'FIREWORKS_API_KEY': os.environ.get('FIREWORKS_API_KEY', '')},
+            timeout=35,
+            filter_tools_for_task=False
+        )
 
     return agent
 
@@ -97,16 +110,27 @@ def download_gaia_dataset():
             sys.exit(1)
 
 
-async def main(split: str, model_name, max_tasks: int, max_steps: int, output_file: str):
+async def main(
+        split: str,
+        model_name: str,
+        max_tasks: int,
+        task_range: str,
+        max_steps: int,
+        output_file: str,
+        agent_type: str = 'react'
+):
     """
     Iterates through the GAIA dataset metadata, printing questions, answers, and associated files.
 
     Args:
         split (str): The dataset split to use, either 'test' or 'validation'.
         model_name (str): The LLM model to use.
-        max_tasks (int): Maximum number of tasks to process. Use -1 for all tasks.
+        max_tasks (int): Maximum number of tasks to process from start. Use -1 for all tasks.
+        task_range (str): Range of tasks to process in format "start:end" (1-based).
+         Takes precedence over max_tasks.
         max_steps (int): Maximum number of agent steps to run.
         output_file (str): The output file name to store the results.
+        agent_type (str): Type of agent to use ('react' or 'codeact').
     """
     if split not in {'test', 'validation'}:
         raise ValueError('Split must be either `test` or `validation`')
@@ -121,12 +145,35 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
     with open(metadata_file, 'r', encoding='utf-8') as _:
         gaia_data = [json.loads(line) for line in _]
 
-    agent = get_code_act_agent(model_name=model_name, max_steps=max_steps)
+    agent = get_agent(agent_type=agent_type, model_name=model_name, max_steps=max_steps)
     evals = []
-    if max_tasks == -1:
-        n_questions = len(gaia_data)
+
+    # Handle task selection based on range or max_tasks
+    if task_range:
+        try:
+            start, end = map(int, task_range.split(':'))
+            if start < 1 or end > len(gaia_data) or start > end:
+                raise ValueError
+            # Convert to 0-based indexing but make end inclusive
+            start_idx = start - 1
+            end_idx = end  # This will be inclusive due to Python list slicing
+            gaia_data = gaia_data[start_idx:end_idx]
+            n_questions = len(gaia_data)
+            enum_start = start  # Store the starting number for enumeration
+            print(f'{start_idx=}, {end_idx=}, {n_questions=}, {enum_start=}')
+        except (ValueError, TypeError):
+            print(
+                f'Invalid task range: {task_range}. Format should be "start:end" (1-based indices)'
+            )
+            return
     else:
-        n_questions = min(max_tasks, len(gaia_data))
+        if max_tasks == -1:
+            n_questions = len(gaia_data)
+        else:
+            n_questions = min(max_tasks, len(gaia_data))
+            gaia_data = gaia_data[:n_questions]
+        enum_start = 1  # Start from 1 when using ntasks
+
     n_correct = 0
     # GAIA appears to evaluate results using exact match, so even a correct but differently
     # formatted answer will be marked as incorrect
@@ -149,7 +196,10 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
     if os.path.exists(jsonl_output_file):
         os.remove(jsonl_output_file)
 
-    for idx, item in tqdm.tqdm(enumerate(gaia_data, 1), total=n_questions):
+    for idx, item in tqdm.tqdm(
+        enumerate(gaia_data, enum_start),
+        total=n_questions
+    ):
         task_id = item.get('task_id', 'N/A')
         question = item['Question']
         true_answer = item['Final answer']
@@ -163,7 +213,6 @@ async def main(split: str, model_name, max_tasks: int, max_steps: int, output_fi
             async for response in agent.run(
                     task=question,
                     files=[file_path] if file_name else None,
-                    summarize_progress_on_failure=False,
             ):
                 if response['type'] == 'final':
                     final_answer_provided = True
@@ -256,14 +305,32 @@ if __name__ == '__main__':
         '--model',
         type=str,
         help='The LLM model to use.',
-        default='gemini/gemini-2.0-flash-lite',
+        default='gemini/gemini-2.5-flash-lite',
     )
-    parser.add_argument(
+
+    # Create mutually exclusive group for task selection
+    task_group = parser.add_mutually_exclusive_group()
+    task_group.add_argument(
         '--ntasks',
         type=int,
-        help='The max no. of tasks to run. Use -1 for all tasks.',
+        help='The max no. of tasks to run from start. Use -1 for all tasks.',
         default=3
     )
+    task_group.add_argument(
+        '--task-range',
+        type=str,
+        help='Range of tasks to process "start:end" (1-based, both inclusive). Example: "2:23"',
+        default=''
+    )
+
+    parser.add_argument(
+        '--agent',
+        type=str,
+        choices=['react', 'codeact'],
+        help='The type of agent to use (default: `react`).',
+        default='react'
+    )
+
     parser.add_argument(
         '--nsteps',
         type=int,
@@ -283,7 +350,9 @@ if __name__ == '__main__':
         main(
             args.split, args.model,
             max_tasks=args.ntasks,
+            task_range=args.task_range,
             max_steps=args.nsteps,
-            output_file=args.output_file
+            output_file=args.output_file,
+            agent_type=args.agent
         )
     )
