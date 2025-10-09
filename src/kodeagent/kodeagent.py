@@ -1589,10 +1589,9 @@ class CodeRunner:
             logger.info('E2B sandbox info: %s', sbx.get_info())
             execution = sbx.run_code(code=source_code, timeout=self.default_timeout)
             std_out: str = '\n'.join(execution.logs.stdout)
-            std_err: str = (
-                    '\n'.join(execution.logs.stderr) +
-                    f'\n{execution.error.name}\n{execution.error.value}' if execution.error else ''
-            )
+            std_err: str = '\n'.join(execution.logs.stderr)
+            if execution.error:
+                std_err += f'\n{execution.error.name}\n{execution.error.value}'
             ret_code: int = -1 if execution.error else 0
             return std_out, std_err, ret_code
 
