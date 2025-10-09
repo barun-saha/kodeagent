@@ -1944,7 +1944,7 @@ async def main():
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
-        ('What is the date today? Express it in words.', None),
+        ('What is the date today? Express it in words like <Month> <Day>, <Year>.', None),
         (
             'Which image has a purple background?',
             [
