@@ -1,3 +1,7 @@
+"""
+A script to evaluate a CodeActAgent on the GAIA benchmark dataset.
+https://huggingface.co/spaces/gaia-benchmark/leaderboard
+"""
 import asyncio
 import logging
 import os
@@ -13,6 +17,7 @@ from tabulate import tabulate
 
 MODULE_ROOT = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.join(MODULE_ROOT, '..'))
+sys.path.append(os.path.join(MODULE_ROOT, '../..'))
 
 import kodeagent as ka
 
@@ -251,7 +256,7 @@ if __name__ == '__main__':
         '--model',
         type=str,
         help='The LLM model to use.',
-        default='gemini/gemini-2.5-flash-lite',
+        default='gemini/gemini-2.0-flash-lite',
     )
     parser.add_argument(
         '--ntasks',
