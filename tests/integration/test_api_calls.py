@@ -10,9 +10,9 @@ from kodeagent import (
     ReActAgent,
     CodeActAgent,
     calculator,
-    search_arxiv,
-    call_llm
+    search_arxiv
 )
+from kodeagent.kutils import call_llm
 
 
 MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
@@ -75,14 +75,14 @@ async def test_codeact_agent_e2b():
         pip_packages=None,
     )
 
-    task = "What is today's date? Express it in words without time."
+    task = "What is today's date in words (without time)? Use the `datetime` module."
     responses = []
     async for response in code_agent.run(task):
         responses.append(response['value'])
 
     # Get today's date for verification
     today = datetime.datetime.now().strftime('%B %d, %Y')
-    response = ' | '.join([str(r) for r in responses])
+    response = '\n'.join([str(r) for r in responses])
     assert today.lower() in response.lower()
 
 

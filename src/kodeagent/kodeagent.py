@@ -37,7 +37,6 @@ import litellm
 import pydantic as pyd
 import rich
 from dotenv import load_dotenv
-from tenacity import stop_after_attempt, wait_random_exponential, AsyncRetrying
 
 from . import kutils as ku
 
@@ -1464,7 +1463,7 @@ class CodeRunner:
         self.env: CODE_ENV_NAMES = env
         self.pip_packages: list[str] = re.split('[,;]', pip_packages) if pip_packages else []
         self.default_timeout = timeout
-        self.local_modules_to_copy = ['kutils.py']
+        self.local_modules_to_copy = []
         self.pip_packages_str = ' '.join(self.pip_packages)
         self.env_vars_to_set = env_vars_to_set
 
@@ -1591,6 +1590,8 @@ class CodeRunner:
             execution = sbx.run_code(code=source_code, timeout=self.default_timeout)
             std_out: str = '\n'.join(execution.logs.stdout)
             std_err: str = '\n'.join(execution.logs.stderr)
+            if execution.error:
+                std_err += f'\n{execution.error.name}\n{execution.error.value}'
             ret_code: int = -1 if execution.error else 0
             return std_out, std_err, ret_code
 
@@ -1651,7 +1652,7 @@ class CodeActAgent(ReActAgent):
         )
         # Combine the source code of all tools into one place
         # TODO Somehow dynamically identify and include the modules used by the tools
-        self.tools_source_code: str = 'from typing import *\n\nimport kutils as ku\n\n'
+        self.tools_source_code: str = 'from typing import *\n\n'
 
         if tools:
             for t in self.tools:
@@ -1666,7 +1667,7 @@ class CodeActAgent(ReActAgent):
         self.allowed_imports = allowed_imports + ['datetime', 'typing', 'mimetypes']
         self.code_runner = CodeRunner(
             env=run_env,
-            allowed_imports=self.allowed_imports + ['kutils'],
+            allowed_imports=self.allowed_imports,
             pip_packages=pip_packages,
             timeout=timeout,
             env_vars_to_set=env_vars_to_set,
@@ -1942,7 +1943,7 @@ async def main():
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
-        ('What is the date today? Express it in words.', None),
+        ('What is the date today? Express it in words like <Month> <Day>, <Year>.', None),
         (
             'Which image has a purple background?',
             [
