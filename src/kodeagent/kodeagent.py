@@ -37,7 +37,6 @@ import litellm
 import pydantic as pyd
 import rich
 from dotenv import load_dotenv
-from tenacity import stop_after_attempt, wait_random_exponential, AsyncRetrying
 
 from . import kutils as ku
 
@@ -1464,7 +1463,7 @@ class CodeRunner:
         self.env: CODE_ENV_NAMES = env
         self.pip_packages: list[str] = re.split('[,;]', pip_packages) if pip_packages else []
         self.default_timeout = timeout
-        self.local_modules_to_copy = ['kutils.py']
+        self.local_modules_to_copy = []
         self.pip_packages_str = ' '.join(self.pip_packages)
         self.env_vars_to_set = env_vars_to_set
 
@@ -1654,7 +1653,7 @@ class CodeActAgent(ReActAgent):
         )
         # Combine the source code of all tools into one place
         # TODO Somehow dynamically identify and include the modules used by the tools
-        self.tools_source_code: str = 'from typing import *\n\nimport kutils as ku\n\n'
+        self.tools_source_code: str = 'from typing import *\n\n'
 
         if tools:
             for t in self.tools:
@@ -1669,7 +1668,7 @@ class CodeActAgent(ReActAgent):
         self.allowed_imports = allowed_imports + ['datetime', 'typing', 'mimetypes']
         self.code_runner = CodeRunner(
             env=run_env,
-            allowed_imports=self.allowed_imports + ['kutils'],
+            allowed_imports=self.allowed_imports,
             pip_packages=pip_packages,
             timeout=timeout,
             env_vars_to_set=env_vars_to_set,
