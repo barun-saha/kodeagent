@@ -153,7 +153,9 @@ async def main(
         try:
             start, end = map(int, task_range.split(':'))
             if start < 1 or end > len(gaia_data) or start > end:
-                raise ValueError
+                raise ValueError(
+                    f'Invalid start or end values in task range. Max is {len(gaia_data)}'
+                )
             # Convert to 0-based indexing but make end inclusive
             start_idx = start - 1
             end_idx = end  # This will be inclusive due to Python list slicing
@@ -161,10 +163,13 @@ async def main(
             n_questions = len(gaia_data)
             enum_start = start  # Store the starting number for enumeration
             print(f'{start_idx=}, {end_idx=}, {n_questions=}, {enum_start=}')
-        except (ValueError, TypeError):
+        except TypeError:
             print(
                 f'Invalid task range: {task_range}. Format should be "start:end" (1-based indices)'
             )
+            return
+        except ValueError as ve:
+            print(str(ve))
             return
     else:
         if max_tasks == -1:
@@ -192,17 +197,21 @@ async def main(
     print(f'\n--- Processing `{split}` split with {n_questions} tasks ---')
 
     sanitized_model_name = model_name.replace('/', '_').replace('.', '_')
-    jsonl_output_file = f'gaia_{split}_{n_questions}_{sanitized_model_name}_{max_steps}.jsonl'
+    jsonl_output_file = (
+        f'gaia_{split}_tasks-{enum_start}-{enum_start + n_questions -1}_'
+        f'steps-{max_steps}_model-{sanitized_model_name}.jsonl'
+    )
     if os.path.exists(jsonl_output_file):
         os.remove(jsonl_output_file)
 
     for idx, item in tqdm.tqdm(
         enumerate(gaia_data, enum_start),
-        total=n_questions
+        total=n_questions,
+        desc=f'Processing tasks {enum_start} to {enum_start + n_questions - 1}'
     ):
         task_id = item.get('task_id', 'N/A')
         question = item['Question']
-        true_answer = item['Final answer']
+        true_answer = item.get('Final answer', 'N/A')
         file_name = item.get('file_name', None)
         file_path = os.path.join(os.path.dirname(metadata_file), file_name)
         print(f'\n#{idx}\nQuestion: {question}\nFile: {file_path if file_name else "N/A"}')
@@ -257,9 +266,6 @@ async def main(
 
             print(f'True Answer: {true_answer}')
             print(f'Plan:\n{agent.current_plan}\n\n')
-
-            if idx >= n_questions:
-                break
 
             await asyncio.sleep(random.uniform(1, 2))
         except Exception as e:
