@@ -198,7 +198,8 @@ async def main(
 
     for idx, item in tqdm.tqdm(
         enumerate(gaia_data, enum_start),
-        total=n_questions
+        total=n_questions,
+        desc=f'Processing tasks {enum_start} to {enum_start + n_questions - 1}'
     ):
         task_id = item.get('task_id', 'N/A')
         question = item['Question']
@@ -257,9 +258,6 @@ async def main(
 
             print(f'True Answer: {true_answer}')
             print(f'Plan:\n{agent.current_plan}\n\n')
-
-            if idx >= n_questions:
-                break
 
             await asyncio.sleep(random.uniform(1, 2))
         except Exception as e:
