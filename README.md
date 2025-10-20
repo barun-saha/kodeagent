@@ -151,6 +151,26 @@ Gemini and E2B API keys should be set in the `.env` file for integration tests t
 A [Kaggle notebook](https://www.kaggle.com/code/barunsaha/kodeagent-benchmark/) for benchmarking KodeAgent is also available.
 
 
+## 🚀 Publishing to PyPI
+
+This project uses [Trusted Publishing](https://docs.pypi.org/trusted-publishers/using-a-publisher/) to automatically publish to PyPI when a new release is created on GitHub. To set this up, follow these steps:
+
+1.  **Configure Trusted Publisher on PyPI:**
+    *   Log in to your PyPI account and go to the "Publishing" page for the `kodeagent` package.
+    *   Add a new "Trusted Publisher" with the following settings:
+        *   **Owner:** The GitHub organization or username that owns the repository (e.g., `barun-saha`).
+        *   **Repository name:** `kodeagent`
+        *   **Workflow name:** `publish-to-pypi.yml`
+
+2.  **Create a New Release on GitHub:**
+    *   Go to the "Releases" page in your GitHub repository and click "Draft a new release".
+    *   Create a new tag for the release (e.g., `v0.0.1`).
+    *   Add a title and description for the release.
+    *   Click "Publish release".
+
+Once the release is published, the GitHub Actions workflow will automatically build the package and upload it to PyPI.
+
+
 ## 🗺️ Roadmap & Contributions
 
 To be updated.
