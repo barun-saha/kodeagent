@@ -11,9 +11,11 @@ Here are some reasons why you should use KodeAgent:
 - **Learn-first design**: Helps developers understand agent-building from scratch, focusing on the agent loop and various data structures.
 - **Multimodal**: Supports both text and images in the inputs. 
 
-Written in about 2000 lines (excluding the prompts), KodeAgent comes with built-in [ReAct](https://arxiv.org/abs/2210.03629) and [CodeAct](https://arxiv.org/abs/2402.01030) agents. Or you can create your own agent by subclassing `Agent`.
+Written in about 2000 lines (excluding the prompts), KodeAgent comes with built-in [ReAct](https://arxiv.org/abs/2210.03629) and [CodeAct](https://arxiv.org/abs/2402.01030) agents. Or you can create your own agent by subclassing `Agent`. The ReAct and CodeAct agents are supported by `Planner` and `Observer`.
 
-A key motivation beyond KodeAgent is also to teach building agent-like frameworks from scratch. KodeAgent introduces a few primitives and code flows that should help you to get an idea about how such frameworks typically work. 
+A key motivation beyond KodeAgent is also to teach building agent-like frameworks from scratch. KodeAgent introduces a few primitives and code flows that should help you to get an idea about how such frameworks typically work.
+
+KodeAgent is stateless. It is generally suitable for use as part of larger systems to execute specific tasks.
 
 
 ## ✋ Why Not?
@@ -75,7 +77,7 @@ agent = CodeActAgent(
     model_name='gemini/gemini-2.0-flash-lite',
     tools=[search_web, extract_file_contents_as_markdown],
     run_env='host',
-    max_iterations=3,
+    max_iterations=5,
     allowed_imports=['re', 'requests', 'duckduckgo_search', 'markitdown'],
     pip_packages='ddgs~=9.5.2;"markitdown[all]";',
 )
