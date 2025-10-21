@@ -24,7 +24,8 @@ from .kodeagent import (
     Observer,
     ObserverResponse,
     CodeRunner,
-    AgentResponse
+    AgentResponse,
+    print_response
 )
 from .kutils import (
     is_it_url,
@@ -59,6 +60,7 @@ __all__ = [
     'is_it_url',
     'llm_vision_support',
     'make_user_message',
+    'print_response',
     'search_arxiv',
     'search_web',
     'search_wikipedia',
@@ -66,8 +68,15 @@ __all__ = [
 ]
 
 
+# Prefer a single-source file inside the package for the version, with fallbacks.
 try:
-    from importlib.metadata import version as _pkg_version  # Python 3.8+
-    __version__ = _pkg_version('kodeagent')
+    # Primary: local single-source file created/updated by maintainers or build tooling
+    from ._version import __version__  # type: ignore
 except Exception:
-    __version__ = '0.1.0'
+    try:
+        # Secondary: package metadata (works for installed packages)
+        from importlib.metadata import version as _pkg_version  # Python 3.8+
+        __version__ = _pkg_version('kodeagent')
+    except Exception:
+        # Final fallback: best-effort default
+        __version__ = '0.1.0'

@@ -7,13 +7,15 @@ KodeAgent: A minimalistic approach to building AI agents.
 
 Here are some reasons why you should use KodeAgent:
 
-- **Framework-less**: Unlike some heavy agentic frameworks, KodeAgent stays lightweight, making it easy to integrate and extend.
-- **Learn-first design**: Helps developers understand agent-building from scratch.
+- **Framework-less**: Unlike some heavy agentic frameworks, KodeAgent is lightweight, making it easy to integrate and extend.
+- **Learn-first design**: Helps developers understand agent-building from scratch, focusing on the agent loop and various data structures.
 - **Multimodal**: Supports both text and images in the inputs. 
 
-Written in about 2000 lines (excluding the prompts), KodeAgent comes with built-in ReAct and CodeAct agents. Or you can create your own agent by subclassing `Agent`.
+Written in about 2000 lines (excluding the prompts), KodeAgent comes with built-in [ReAct](https://arxiv.org/abs/2210.03629) and [CodeAct](https://arxiv.org/abs/2402.01030) agents. Or you can create your own agent by subclassing `Agent`. The ReAct and CodeAct agents are supported by `Planner` and `Observer`.
 
-A key motivation beyond KodeAgent is also to teach building agentic frameworks from scratch. KodeAgent introduces a few primitives and code flows that should help you to get an idea about how such frameworks typically work. 
+A key motivation beyond KodeAgent is also to teach building agent-like frameworks from scratch. KodeAgent introduces a few primitives and code flows that should help you to get an idea about how such frameworks typically work.
+
+KodeAgent is stateless. It is generally suitable for use as part of larger systems to execute specific tasks.
 
 
 ## ✋ Why Not?
@@ -21,32 +23,31 @@ A key motivation beyond KodeAgent is also to teach building agentic frameworks f
 Also, here are a few reasons why you shouldn't use KodeAgent:
 
 - KodeAgent is actively evolving, meaning some aspects may change.
-- The first priority is simplicity; optimization is secondary.
-- You already use some of the well-known frameworks or want to use them.
+- The priority of KodeAgent is simplicity; optimization is secondary.
+- You want to use some of the well-known frameworks.
 
 
 ## 👨‍💻 Usage
 
-Clone the KodeAgent GitHub repository locally:
+Install [KodeAgent](https://pypi.org/project/kodeagent/) via pip:
 ```bash
-git clone https://github.com/barun-saha/kodeagent.git
+pip install kodeagent
 ```
 
-Next, create a virtual environment if you do not have one already and activate it:
+Or if you want to clone the KodeAgent GitHub repository locally and run from there, use:
 ```bash
+git clone https://github.com/barun-saha/kodeagent.git
+
 python -m venv venv
 source venv/bin/activate
 # venv\Scripts\activate.bat  # Windows
-```
 
-KodeAgent has only a few direct dependencies. Install them as follows:
-```bash
 pip install -r requirements.txt
 ```
 
-Now, in your application code, create a ReAct agent like this:
+Now, in your application code, create a ReAct agent like and run a task using the agent like this:
 ```python
-from kodeagent import ReActAgent
+from kodeagent import ReActAgent, calculator, print_response
 
 
 agent = ReActAgent(
@@ -55,26 +56,7 @@ agent = ReActAgent(
     tools=[calculator],
     max_iterations=3,
 )
-```
 
-Or if you want to use CodeAct agent:
-
-```python
-from kodeagent import CodeActAgent
-
-agent = CodeActAgent(
-    name='Web agent',
-    model_name='gemini/gemini-2.0-flash-lite',
-    tools=[search_web, extract_file_contents_as_markdown],
-    run_env='e2b',
-    max_iterations=3,
-    allowed_imports=['re', 'requests', 'duckduckgo_search', 'markitdown'],
-    pip_packages='ddgs~=9.5.2;"markitdown[all]";',
-)
-```
-
-Now let your agent solve the tasks like this:
-```python
 for task in [
     'What is 10 + 15, raised to 2, expressed in words?',
 ]:
@@ -82,6 +64,23 @@ for task in [
 
     async for response in agent.run(task):
         print_response(response)
+```
+
+Or if you want to use CodeAct agent:
+
+```python
+from kodeagent import CodeActAgent, search_web, extract_file_contents_as_markdown
+
+
+agent = CodeActAgent(
+    name='Web agent',
+    model_name='gemini/gemini-2.0-flash-lite',
+    tools=[search_web, extract_file_contents_as_markdown],
+    run_env='host',
+    max_iterations=5,
+    allowed_imports=['re', 'requests', 'duckduckgo_search', 'markitdown'],
+    pip_packages='ddgs~=9.5.2;"markitdown[all]";',
+)
 ```
 
 That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [kodeagent.py](kodeagent.py) module.
@@ -149,26 +148,6 @@ python -m pytest .\tests\integration -v --cov --cov-report=html
 Gemini and E2B API keys should be set in the `.env` file for integration tests to work.
 
 A [Kaggle notebook](https://www.kaggle.com/code/barunsaha/kodeagent-benchmark/) for benchmarking KodeAgent is also available.
-
-
-## 🚀 Publishing to PyPI
-
-This project uses [Trusted Publishing](https://docs.pypi.org/trusted-publishers/using-a-publisher/) to automatically publish to PyPI when a new release is created on GitHub. To set this up, follow these steps:
-
-1.  **Configure Trusted Publisher on PyPI:**
-    *   Log in to your PyPI account and go to the "Publishing" page for the `kodeagent` package.
-    *   Add a new "Trusted Publisher" with the following settings:
-        *   **Owner:** The GitHub organization or username that owns the repository (e.g., `barun-saha`).
-        *   **Repository name:** `kodeagent`
-        *   **Workflow name:** `publish-to-pypi.yml`
-
-2.  **Create a New Release on GitHub:**
-    *   Go to the "Releases" page in your GitHub repository and click "Draft a new release".
-    *   Create a new tag for the release (e.g., `v0.0.1`).
-    *   Add a title and description for the release.
-    *   Click "Publish release".
-
-Once the release is published, the GitHub Actions workflow will automatically build the package and upload it to PyPI.
 
 
 ## 🗺️ Roadmap & Contributions
