@@ -28,7 +28,7 @@ where = ["src"]
 dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.package-data]
-kodeagent = ["prompts/*.txt"]
+kodeagent = ["prompts/**/*.txt"]
 
 [tool.pytest.ini_options]
 pythonpath = "src"

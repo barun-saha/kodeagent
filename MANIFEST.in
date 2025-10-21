@@ -1,0 +1,6 @@
+# Include all prompt .txt files under the package for sdist
+recursive-include src/kodeagent/prompts *.txt
+
+# Include common top-level files
+include README.md LICENSE
+
