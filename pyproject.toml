@@ -4,7 +4,6 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kodeagent"
-version = "0.1.0"
 authors = [
   { name="Barun Saha", email="your.email@example.com" }
 ]
@@ -16,7 +15,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent"
 ]
-dynamic = ["dependencies"]
+dynamic = ["dependencies", "version"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -27,6 +26,7 @@ where = ["src"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
+version = {attr = "kodeagent._version.__version__"}
 
 [tool.setuptools.package-data]
 kodeagent = ["prompts/**/*.txt"]
