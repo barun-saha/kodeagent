@@ -1,15 +1,16 @@
 """Tests for web search and related tools."""
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, mock_open
 import pytest
 from datetime import datetime
 import wikipedia
-from kodeagent import (
+from kodeagent.tools import (
     search_web,
     download_file,
     extract_file_contents_as_markdown,
     search_wikipedia,
     search_arxiv,
-    get_youtube_transcript
+    get_youtube_transcript,
+    get_audio_transcript
 )
 
 def test_search_web_with_results():
@@ -195,3 +196,31 @@ def test_get_youtube_transcript_not_found():
         )
         result = get_youtube_transcript(video_id)
         assert 'No transcript found' in result
+
+
+def test_get_audio_transcript():
+    """Test audio transcript retrieval with mocked responses."""
+    expected_response = {'text': 'This is the transcribed text'}
+    mock_file = mock_open(read_data=b'fake audio content')
+
+    # Test successful case
+    with patch('builtins.open', mock_file), patch('requests.post') as mock_post:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = expected_response
+        mock_post.return_value = mock_response
+
+        result = get_audio_transcript('test_audio.mp3')
+        assert result == expected_response
+
+
+def test_get_audio_transcript_error():
+    """Test audio transcript retrieval with error response."""
+    mock_file = mock_open(read_data=b'fake audio content')
+    with patch('builtins.open', mock_file), patch('requests.post') as mock_post:
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = 'Bad Request'
+        mock_post.return_value = mock_response
+        result = get_audio_transcript('test_audio.mp3')
+        assert 'Audio transcription error' in result
