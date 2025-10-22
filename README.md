@@ -83,7 +83,7 @@ agent = CodeActAgent(
 )
 ```
 
-That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [kodeagent.py](kodeagent.py) module.
+That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [tools.py](src/kodeagent/tools.py) module.
 
 KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm), enabling it to work with any capable LLM. Currently, KodeAgent has been tested with Gemini 2.5 Flash Lite. For advanced tasks, you can try Gemini 2.5 Pro.
 
