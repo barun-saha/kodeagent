@@ -2,10 +2,14 @@
 
 KodeAgent: A minimalistic approach to building AI agents.
 
+<a href="https://pypi.org/project/kodeagent/" target="_blank">
+    <img src="https://img.shields.io/pypi/v/kodeagent.svg" alt="PyPI Version">
+</a>
+
 
 ## ✅ Why KodeAgent?
 
-Here are some reasons why you should use KodeAgent:
+Use KodeAgent because it is:
 
 - **Framework-less**: Unlike some heavy agentic frameworks, KodeAgent is lightweight, making it easy to integrate and extend.
 - **Learn-first design**: Helps developers understand agent-building from scratch, focusing on the agent loop and various data structures.
@@ -29,6 +33,11 @@ Also, here are a few reasons why you shouldn't use KodeAgent:
 
 ## 👨‍💻 Usage
 
+<a target="_blank" href="https://colab.research.google.com/drive/1D9ly3qi9sPZn_sUFdfC1XCFehldCVPXM?usp=sharing">
+  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
+</a>
+
+
 Install [KodeAgent](https://pypi.org/project/kodeagent/) via pip:
 ```bash
 pip install kodeagent
@@ -47,26 +56,26 @@ pip install -r requirements.txt
 
 Now, in your application code, create a ReAct agent like and run a task using the agent like this:
 ```python
-from kodeagent import ReActAgent, calculator, print_response
+from kodeagent import ReActAgent, print_response, extract_file_contents_as_markdown, search_web
 
 
 agent = ReActAgent(
     name='Maths agent',
-    model_name='gemini/gemini-2.0-flash-lite',
-    tools=[calculator],
-    max_iterations=3,
+    model_name='gemini/gemini-2.5-flash-lite',
+    tools=[search_web, extract_file_contents_as_markdown],
+    max_iterations=7,
 )
 
 for task in [
-    'What is 10 + 15, raised to 2, expressed in words?',
+    'What are the festivals in Paris? How they differ from Kolkata?',
 ]:
     print(f'User: {task}')
 
     async for response in agent.run(task):
-        print_response(response)
+        print_response(response, only_final=True)
 ```
 
-Or if you want to use CodeAct agent:
+You can also create a CodeAct agent:
 
 ```python
 from kodeagent import CodeActAgent, search_web, extract_file_contents_as_markdown
@@ -74,32 +83,66 @@ from kodeagent import CodeActAgent, search_web, extract_file_contents_as_markdow
 
 agent = CodeActAgent(
     name='Web agent',
-    model_name='gemini/gemini-2.0-flash-lite',
+    model_name='gemini/gemini-2.5-flash-lite',
     tools=[search_web, extract_file_contents_as_markdown],
     run_env='host',
-    max_iterations=5,
+    max_iterations=7,
     allowed_imports=['re', 'requests', 'duckduckgo_search', 'markitdown'],
     pip_packages='ddgs~=9.5.2;"markitdown[all]";',
 )
 ```
 
-That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [tools.py](src/kodeagent/tools.py) module.
+That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [kodeagent.py](src/kodeagent/kodeagent.py) module.
 
 KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm), enabling it to work with any capable LLM. Currently, KodeAgent has been tested with Gemini 2.5 Flash Lite. For advanced tasks, you can try Gemini 2.5 Pro.
 
-LLM model names, parameters, and keys should be set as per [LiteLLM documentation](https://docs.litellm.ai/docs/set_keys). For example, add `GEMINI_API_KEY` to the `.env` to use Gemini API.
+LLM model names, parameters, and keys should be set as per [LiteLLM API Keys documentation](https://docs.litellm.ai/docs/set_keys). For example, set the `GEMINI_API_KEY` environment variable (add in the `.env` file you are running from source code) to use Gemini API. Additionally, you can set `OPENAI_API_KEY` for OpenAI models; set `ANTHROPIC_API_KEY` for Claude models; and so on. For [Azure OpenAI](https://docs.litellm.ai/docs/providers/azure/) models, set `AZURE_API_KEY`, `AZURE_API_BASE`, and `AZURE_API_VERSION` environment variables.
+
 
 ### Code Execution
 
 `CodeActAgent` executes LLM-generated code to leverage the tools. KodeAgent currently supports two different code run environments:
 - `host`: The Python code will be run on the system where you created this agent. In other words, where the application is running.
-- `e2b`:  The Python code will be run on an [E2B sandbox](https://e2b.dev/). You will need an E2B API key and add to your `.env` file.
+- `e2b`:  The Python code will be run on an [E2B sandbox](https://e2b.dev/). You will need an E2B API key and set the `E2B_API_KEY` environment variable.
 
 With `host` as the code running environment, no special steps are required, since it uses the current Python installation. However, with `e2b`, code (and tools) are copied to a different environment and execute. Therefore, some additional set up may be required.
 
 For example, the Python modules that are allowed to be used in code should be explicitly specified using `allowed_imports`. In addition, any additional Python package that may need to be installed should be specified as a comma-separated list via `pip_packages`.  
 
 KodeAgent is very much experimental. Capabilities are limited. Use with caution.
+
+
+## 🛠️ Tools
+
+KodeAgent comes with the following built-in [tools](src/kodeagent/kodeagent.py):
+- `calculator`: A simple calculator tool to perform basic arithmetic operations.
+- `download_file`: A tool to download a file from a given URL.
+- `extract_file_contents_as_markdown`: A tool to read file contents and return as markdown using MarkItDown.
+- `get_audio_transcript`: A tool to transcribe audio files using OpenAI's Whisper via [Fireworks API](https://fireworks.ai/). Need to set the `FIREWORKS_API_KEY` environment variable.
+- `get_youtube_transcript`: A tool to fetch YouTube video transcripts.
+- `search_arxiv`: A tool to search arXiv for research papers and return summaries and links.
+- `search_web`: A web search tool using DuckDuckGo to fetch top search results.
+- `search_wikipedia`: A tool to search Wikipedia and return summaries and links.
+
+Checkout the docstrings of these tools in the [tools.py](src/kodeagent/tools.py) module for more details.
+
+To add a new tool, use the `@tool` decorator from `kodeagent.tool` module. For example:
+```python
+from kodeagent import tool
+
+@tool
+def my_tool(param1: str) -> str:
+    """Description of the tool.
+    Args:
+        param1 (str): Description of param1.
+    Returns:
+        str: Description of the return value.
+    """
+    # Tool implementation here
+    return "result"
+```
+
+Module imports and all variables should be inside the tool function. If you're using `CodeActAgent`, KodeAgent will execute the tool function in isolation.
 
 
 ## Sequence Diagram for CodeAct Agent (via CodeRabbit)
