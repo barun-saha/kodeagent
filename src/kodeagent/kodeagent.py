@@ -14,12 +14,10 @@ import shutil
 import subprocess as sp
 import sys
 import tempfile
-import textwrap
 import uuid
 import warnings
 from abc import ABC, abstractmethod
 from datetime import datetime
-from functools import wraps
 from json import JSONDecodeError
 from typing import (
     AsyncIterator,
@@ -39,6 +37,7 @@ import rich
 from dotenv import load_dotenv
 
 from . import kutils as ku
+from . import tools
 
 
 load_dotenv()
@@ -1564,7 +1563,7 @@ async def main():
     agent = ReActAgent(
         name='Simple agent',
         model_name=model_name,
-        tools=[calculator, search_web, extract_file_contents_as_markdown,],
+        tools=[tools.calculator, tools.search_web, tools.extract_file_contents_as_markdown,],
         max_iterations=5,
         litellm_params=litellm_params,
         filter_tools_for_task=False
@@ -1573,8 +1572,8 @@ async def main():
     #     name='Web agent',
     #     model_name=model_name,
     #     tools=[
-    #         search_web, search_arxiv, extract_file_contents_as_markdown, download_file,
-    #         get_youtube_transcript,
+    #         tools.search_web, tools.search_arxiv, tools.extract_file_contents_as_markdown,
+    #         tools.download_file, tools.get_youtube_transcript,
     #     ],
     #     run_env='host',
     #     max_iterations=5,

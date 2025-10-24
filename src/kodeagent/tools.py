@@ -1,4 +1,9 @@
-"""This module defines the `tool` decorator and a set of built-in tools for Kodeagents."""
+"""
+This module defines the `tool` decorator and a set of built-in tools for KodeAgent.
+All tools import necessary dependencies within their function bodies to ensure they are
+self-contained and can operate in isolated environments. Similarly, all variables are declared
+locally within the functions.
+"""
 import asyncio
 import inspect
 import textwrap
@@ -9,6 +14,7 @@ from typing import (
     Union,
     Optional
 )
+
 import pydantic as pyd
 
 
@@ -79,10 +85,8 @@ def calculator(expression: str) -> Union[float, None]:
             result = eval(expression)
             return result
         except Exception as e:
-            print(f'calculator:: Error evaluating expression: {e}')
             return None
     else:
-        print(f'calculator:: Invalid expression: {expression}')
         return None
 
 
@@ -344,7 +348,6 @@ def get_audio_transcript(file_path: str) -> Any:
         The transcript of the audio file as text.
     """
     import os
-
     import requests
 
     with open(file_path, 'rb') as f:
