@@ -348,7 +348,6 @@ def get_audio_transcript(file_path: str) -> Any:
         The transcript of the audio file as text.
     """
     import os
-
     import requests
 
     with open(file_path, 'rb') as f:
