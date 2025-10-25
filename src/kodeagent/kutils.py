@@ -127,7 +127,7 @@ async def call_llm(
                 response = await litellm.acompletion(
                     **params,
                     metadata={
-                        'trace_id': str(trace_id),
+                        'trace_id': str(trace_id) if trace_id else None,
                         'trace_name': 'kodeagent',
                         'generation_name': 'kodeagent-generation',
                         'generation_metadata': {
