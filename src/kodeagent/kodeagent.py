@@ -51,8 +51,8 @@ logging.getLogger('LiteLLM').setLevel(logging.WARNING)
 logging.getLogger('langfuse').disabled = True
 logger = logging.getLogger('KodeAgent')
 
-# litellm.success_callback = ['langfuse']
-# litellm.failure_callback = ['langfuse']
+litellm.success_callback = ['langfuse']
+litellm.failure_callback = ['langfuse']
 
 # litellm._turn_on_debug()
 
