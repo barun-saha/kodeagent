@@ -145,6 +145,13 @@ def my_tool(param1: str) -> str:
 Module imports and all variables should be inside the tool function. If you're using `CodeActAgent`, KodeAgent will execute the tool function in isolation.
 
 
+## 🔭 Observability
+
+KodeAgent logs the LLM calls and usage using [Langfuse](https://langfuse.com/). The LiteLLM calls set the trace ID to the task ID. The model name as well as the response format and retry attempts for the generations are also logged (see the screenshot below). To enable tracing, create your Langfuse account and set the `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_HOST` environment variables. Read more about [Langfuse integration with LiteLLM](https://docs.litellm.ai/docs/observability/langfuse_integration).
+
+<img width="1488" height="814" alt="KodeAgent trace on Langfuse dashboard" src="https://github.com/user-attachments/assets/78390575-9d12-4ca3-aac3-5eff084c88f0" />
+
+
 ## ⊷ Sequence Diagram for CodeAct Agent (via CodeRabbit)
 ```mermaid
 sequenceDiagram
@@ -181,7 +188,7 @@ To run unit tests, use:
 python -m pytest .\tests\unit -v --cov --cov-report=html
 ```
 
-The current test coverage is 86.
+The current test coverage is 86%.
 
 For integration tests involving calls to APIs, use:
 ```bash
