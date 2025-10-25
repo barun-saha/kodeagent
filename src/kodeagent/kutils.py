@@ -125,7 +125,19 @@ async def call_llm(
             with attempt:
                 # Use the asynchronous litellm call
                 response = await litellm.acompletion(
-                    **params, metadata={'trace_id': str(trace_id)}
+                    **params,
+                    metadata={
+                        'trace_id': str(trace_id),
+                        'trace_name': 'kodeagent',
+                        'generation_name': 'kodeagent-generation',
+                        'generation_metadata': {
+                            'response_format': (
+                                response_format.__name__ if response_format else 'None'
+                            ),
+                            'attempt': attempt.retry_state.attempt_number,
+                        },
+                        'tags': [model_name],
+                    }
                 )
 
                 # Check for empty content
