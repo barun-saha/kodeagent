@@ -1,0 +1,6 @@
+# docs/requirements.txt
+sphinx
+sphinx-rtd-theme
+myst-parser
+linkify-it-py
+pydata_sphinx_theme
