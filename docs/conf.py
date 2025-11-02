@@ -1,3 +1,9 @@
+"""
+Sphinx configuration file for the KodeAgent documentation.
+This file sets up Sphinx to generate documentation from the source code
+located in the 'src' directory, and includes support for Markdown files
+using the MyST parser.
+"""
 import os
 import sys
 
@@ -5,8 +11,8 @@ import sys
 # Crucial: This tells Sphinx to look in 'src' to find the 'kodeagent' package.
 sys.path.insert(0, os.path.abspath('../src'))
 
-# --- Project information ---------------------------------------------------
-project = 'KodeAgent'  # <--- Set this to your desired name (e.g., 'KodeAgent')
+# --- Project information ---
+project = 'KodeAgent'
 copyright = '2025, Barun Saha'
 author = 'Barun Saha'
 
@@ -14,9 +20,8 @@ author = 'Barun Saha'
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.napoleon',    # Converts Google/NumPy style docstrings
-    'sphinx_rtd_theme',
+    'sphinx.ext.autosummary',
     'myst_parser',            # Enables Markdown support (.md files)
-    'sphinx.ext.autosummary', # <--- Add this extension
 ]
 autosummary_generate = True
 
@@ -28,11 +33,11 @@ templates_path = ['_templates']
 
 # Configure MyST to allow cross-referencing and nested structure
 myst_enable_extensions = [
-    "deflist",
-    "html_image",
-    "linkify",
-    "replacements",
-    "html_admonition"
+    'deflist',
+    'html_image',
+    'linkify',
+    'replacements',
+    'html_admonition'
 ]
 source_suffix = {
     '.rst': 'restructuredtext',
