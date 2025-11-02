@@ -22,6 +22,8 @@ for task in [
         print_response(response, only_final=True)
 ```
 
+The `print_response` function displays the agent's responses using a rich format. Setting `only_final=True` ensures that only the final response is printed. Otherwise, the intermediate streaming responses from the agent are also shown.
+
 You can also create a CodeAct agent:
 
 ```python
@@ -38,3 +40,5 @@ agent = CodeActAgent(
     pip_packages='ddgs~=9.5.2;"markitdown[all]";',
 )
 ```
+
+The `run_env` parameter specifies the environment where the agent's code will execute. Setting it to `'host'` allows the agent to run code directly on the host machine. You can also use `'e2b'` to run the code on [E2B sandbox](https://e2b.dev/).
