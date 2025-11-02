@@ -19,8 +19,9 @@ author = 'Barun Saha'
 # --- General configuration ---
 extensions = [
     'sphinx.ext.autodoc',
-    'sphinx.ext.napoleon',    # Converts Google/NumPy style docstrings
     'sphinx.ext.autosummary',
+    'sphinx.ext.napoleon',    # Converts Google/NumPy style docstrings
+    'sphinx.ext.viewcode',
     'myst_parser',            # Enables Markdown support (.md files)
 ]
 autosummary_generate = True
@@ -44,7 +45,6 @@ source_suffix = {
     '.md': 'markdown',
 }
 
-# ... other project information (project, author, release)
 html_theme = 'pydata_sphinx_theme'
-
 master_doc = 'index'
+html_show_sourcelink = True
