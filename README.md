@@ -143,7 +143,7 @@ def my_tool(param1: str) -> str:
 ```
 
 Module imports and all variables should be inside the tool function. If you're using `CodeActAgent`, KodeAgent will execute the tool function in isolation.
-
+For further details, refer to the [API documentation](https://kodeagent.readthedocs.io/en/latest/).
 
 ## 🔭 Observability
 

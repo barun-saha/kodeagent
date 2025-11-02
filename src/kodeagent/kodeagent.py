@@ -1,6 +1,6 @@
 """
 A minimalistic approach to building AI agents.
-Implements ReAct and CodeActAgent. Supports multi-agent via SupervisorAgent.
+Implements ReAct and CodeAct agents, supported by Planner and Observer.
 """
 import ast
 import asyncio
@@ -340,7 +340,7 @@ class Observer:
             )
             # Parse the structured response
             observation = ObserverResponse.model_validate_json(observation_response)
-            print(f'Observer (iteration {iteration}): {observation.model_dump_json()}')
+            # print(f'Observer (iteration {iteration}): {observation.model_dump_json()}')
 
             # Return the correction message if a problem is detected
             if not observation.is_progressing or observation.is_in_loop:
@@ -361,7 +361,7 @@ class Observer:
 
         except Exception as e:
             # Fallback for LLM or parsing errors
-            print(f'LLM Observer failed: {e}')
+            logger.exception('LLM Observer failed: %s', str(e))
             return None
 
         return None
@@ -828,7 +828,7 @@ class ReActAgent(Agent):
                     ChatMessage(role='user', content=f'Observation: {correction_msg}')
                 )
                 yield self.response(rtype='log', value=correction_msg, channel='observer')
-            print('-' * 30)
+            # print('-' * 30)
 
         if not self.final_answer_found:
             failure_msg = f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
@@ -915,7 +915,7 @@ class ReActAgent(Agent):
             except Exception as ex:
                 # This can happen if the LLM response is not valid JSON
                 logger.error('LLM response validation error in _record_thought(). Retrying...')
-                print('HISTORY:', '\n'.join([str(m) for m in self.formatted_history_for_llm()]))
+                # print('HISTORY:', '\n'.join([str(m) for m in self.formatted_history_for_llm()]))
 
                 await asyncio.sleep(random.uniform(0.5, 1.0))
 
