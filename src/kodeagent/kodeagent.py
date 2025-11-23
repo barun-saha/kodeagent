@@ -622,23 +622,55 @@ class Agent(ABC):
 
     def get_tools_description(self, tools: Optional[list[Any]] = None) -> str:
         """
-        Generate a description of all the tools available to the agent.
+        Generate a description of all the tools available to the agent. Required args are marked.
 
         Args:
-            tools: Optional list of tools to describe. If not provided, uses the agent's tools.
+            tools: Optional list of tools to describe. If None, describes all available tools.
 
         Returns:
-            A description of the requested or all available tools.
+            A formatted string describing each tool, its parameters, and example usage.
         """
         description = ''
         filtered_tool_names = {t.name for t in (tools or self.tools)}
+
         for t in self.tools:
             if t.name in filtered_tool_names:
-                description += f'- Tool name: {t.name}'
-                # description += f'\n  -
-                # Schema: {t.args_schema.model_json_schema()}'
-                description += f'\n- Tool description: {t.description}'
-                description += '\n---\n'
+                description += f'### Tool: {t.name}\n'
+                description += f'**Description:** {t.description}\n'
+
+                # Extract and highlight required parameters
+                if hasattr(t, 'args_schema') and t.args_schema:
+                    schema = t.args_schema.model_json_schema()
+                    properties = schema.get('properties', {})
+                    required = schema.get('required', [])
+
+                    if properties:
+                        description += '**Parameters:**\n'
+                        for param_name, param_info in properties.items():
+                            param_desc = param_info.get('description', 'No description')
+                            param_type = param_info.get('type', 'any')
+                            is_required = param_name in required
+                            req_marker = '**[REQUIRED]**' if is_required else '[optional]'
+
+                            description += f'  - `{param_name}` ({param_type}) {req_marker}: {param_desc}\n'
+
+                    # Add usage example
+                    if required:
+                        example_args = {param: f"<{param}_value>" for param in required}
+                        # Convert to JSON string and escape for display
+                        args_json = json.dumps(example_args)
+                        # Escape the quotes for the outer JSON structure
+                        args_escaped = args_json.replace('"', '\\"')
+
+                        description += '**Example usage:**\n'
+                        description += '```json\n'
+                        description += '{\n'
+                        description += f'  "action": "{t.name}",\n'
+                        description += f'  "args": "{args_escaped}"\n'
+                        description += '}\n'
+                        description += '```\n'
+
+                description += '\n---\n\n'
 
         return description
 
