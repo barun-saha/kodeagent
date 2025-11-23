@@ -1138,10 +1138,13 @@ class CodeRunner:
         """
         self.allowed_imports: set[str] = set(allowed_imports)
         self.env: CODE_ENV_NAMES = env
-        self.pip_packages: list[str] = re.split('[,;]', pip_packages) if pip_packages else []
+        if pip_packages and len(pip_packages.strip()) > 0:
+            self.pip_packages: list[str] = re.split('[,;]', pip_packages)
+        else:
+            self.pip_packages = []
         self.default_timeout = timeout
         self.local_modules_to_copy = []
-        self.pip_packages_str = ' '.join(self.pip_packages)
+        self.pip_packages_str = ' '.join(self.pip_packages) if self.pip_packages else None
         self.env_vars_to_set = env_vars_to_set
 
     def check_imports(self, code) -> set[Union[str]]:
