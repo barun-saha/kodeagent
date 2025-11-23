@@ -1,5 +1,5 @@
 litellm~=1.80.0
-pydantic~=2.11.3
+pydantic~=2.12.4
 python-dotenv~=1.2.1
 e2b-code-interpreter~=1.5.2
 requests~=2.32.5
