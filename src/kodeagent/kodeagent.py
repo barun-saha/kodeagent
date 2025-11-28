@@ -1357,7 +1357,7 @@ class CodeRunner:
         imported_modules = set()
 
         # Check for dangerous builtins
-        dangerous = {'exec', 'eval', '__import__', 'compile', 'open'}
+        dangerous = {'exec', 'eval', '__import__', 'compile'}
         for node in ast.walk(tree):
             if isinstance(node, ast.Name) and node.id in dangerous:
                 raise Exception(f'Forbidden builtin: {node.id}')
