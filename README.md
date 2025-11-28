@@ -2,10 +2,10 @@
 
 KodeAgent: A minimalistic approach to building AI agents.
 
-[![pypi](https://img.shields.io/pypi/v/kodeagent.svg)](https://img.shields.io/pypi/v/kodeagent.svg)
+[![pypi](https://img.shields.io/pypi/v/kodeagent.svg)](https://pypi.org/project/kodeagent/)
 [![codecov](https://codecov.io/gh/barun-saha/kodeagent/branch/main/graph/badge.svg)](https://codecov.io/gh/barun-saha/kodeagent)
 [![Documentation Status](https://readthedocs.org/projects/kodeagent/badge/?version=latest)](https://kodeagent.readthedocs.io/en/latest/?badge=latest)
-[![License: MIT](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 
 ## ✅ Why KodeAgent?
