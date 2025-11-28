@@ -1741,7 +1741,7 @@ async def main():
         name='Simple agent',
         model_name=model_name,
         tools=[dtools.calculator, dtools.search_web, dtools.extract_file_contents_as_markdown,],
-        max_iterations=3,
+        max_iterations=5,
         litellm_params=litellm_params,
         filter_tools_for_task=False
     )

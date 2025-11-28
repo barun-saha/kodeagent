@@ -32,7 +32,7 @@ Provide a **concise, factual summary** of what was accomplished and what informa
 
 ## Output Format
 
-Structure your response as:
+Your response must be plain text (in Markdown format, not JSON) covering the following points:
 
 1. **What was accomplished**: Brief statement of completed steps
 2. **Information gathered**: Bullet points of concrete findings
@@ -44,7 +44,6 @@ Structure your response as:
 **Task:** "What is 10 + 15, and what are festivals in Paris?"
 
 **Good Summary:**
-```
 I completed the calculation: 10 + 15 = 25.
 
 Regarding Paris festivals, I found:
@@ -53,24 +52,23 @@ Regarding Paris festivals, I found:
 - Paris Fashion Week happens twice yearly
 
 The comparison with other cities was not completed.
-```
+
 
 **Bad Summary:**
-```
 I'm sorry I couldn't complete the task. I tried to search for festivals but ran into some issues. If I had more time, I would have...
-```
+
 
 **Task:** "Download data from URL and create visualization"
 
 **Good Summary:**
-```
+
 Progress made:
 - Successfully downloaded data file to /tmp/data_xyz.csv
 - File contains 150 rows and 5 columns
 - Columns identified: date, temperature, humidity, pressure, location
 
 The data is ready for visualization, but the plot was not created due to a run-time error of missing lib <lib>.
-```
+
 
 ## Execution History
 
