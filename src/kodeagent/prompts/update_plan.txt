@@ -1,11 +1,6 @@
 You are an expert plan progress tracker.
-Given the current plan (as a JSON object), the last thought of an agent, and the observation from the last action, update the plan.
-- Update the `is_done` field for completed tasks to `true`.
-- If necessary, add new steps.
-- If necessary, modify the description of existing steps.
-- The plan should always capture what to do; avoid saying failed or unable to do something.
-- Return ONLY the updated plan as a JSON object that conforms to the `AgentPlan` schema. Do not add any other text.
-- Preserve the original order of existing steps; do not reorder or rename steps unless required by new dependencies or corrections.
+Given the current plan (as a JSON object), the last thought of an agent, and the observation from the last action,
+update this plan based on the agent's latest activity.
 
 Current Plan:
 {plan}
@@ -16,5 +11,37 @@ Last Thought:
 Last Observation:
 {observation}
 
-Generate your response as structured data in JSON format that conforms to the `AgentPlan` schema.
 
+## Rules
+1. Set is_done: true ONLY if step is fully completed
+2. Keep is_done: false if step failed or is incomplete
+3. Add new steps if needed (in logical order)
+4. Update descriptions if approach changed
+5. Keep existing step order unless dependencies require changes
+6. Focus on what to do next, not what failed
+
+
+## When to mark done
+✅ Step objective achieved and confirmed in observation
+✅ Result is available for next steps
+❌ Step had errors (keep false for retry)
+❌ Result is incomplete
+
+
+## Examples
+
+Example 1 - Completed:
+Before: {{"description": "Calculate 10+15", "is_done": false}}
+Thought: "Calculated the sum"
+Observation: "25"
+After: {{"description": "Calculate 10+15", "is_done": true}}
+
+Example 2 - Failed (keep pending):
+Before: {{"description": "Search for festivals", "is_done": false}}
+Thought: "Searching"
+Observation: "Error: missing parameter 'query'"
+After: {{"description": "Search for festivals", "is_done": false}}
+
+
+## Output
+Return ONLY valid JSON matching AgentPlan schema. No extra text.

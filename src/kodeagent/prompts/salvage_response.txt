@@ -1,14 +1,83 @@
-You attempted the following task and reached the step limit. Provide a concise, progress-focused recap.
+You are summarizing the progress made on an incomplete task.
 
-## Task
+
+## Situation
+
+You attempted to solve the following task but reached the iteration limit before completing it.
+
+**Task:**
 {task}
 
-## Task Files
+**Associated Files:**
 {task_files}
 
-However, you have performed some steps and gathered some information. Based on the history of your attempts, provide a concise summary of what you have managed to accomplish. List any facts, data, or partial solutions you have found.
 
-Do not apologize or mention your failure. Your response should focus only on the useful information you have gathered that might help the user.
+## Your Goal
 
-## History
+Provide a **concise, factual summary** of what was accomplished and what information was gathered.
+
+
+## Guidelines
+
+**DO:**
+- ✅ List concrete facts, data, or results obtained (completed steps or partial solutions)
+- ✅ Include specific numbers, names, or findings
+- ✅ Be direct and factual, organize clearly
+
+**DON'T:**
+- ❌ Apologize for failure, make excuses, or blame tools/errors
+- ❌ Include your thought process or attempts
+- ❌ Suggest what could have been done differently
+
+
+## Output Format
+
+Structure your response as:
+
+1. **What was accomplished**: Brief statement of completed steps
+2. **Information gathered**: Bullet points of concrete findings
+3. **Partial results**: Any intermediate calculations or data
+
+
+## Examples
+
+**Task:** "What is 10 + 15, and what are festivals in Paris?"
+
+**Good Summary:**
+```
+I completed the calculation: 10 + 15 = 25.
+
+Regarding Paris festivals, I found:
+- Bastille Day is celebrated on July 14th
+- Fête de la Musique occurs in June
+- Paris Fashion Week happens twice yearly
+
+The comparison with other cities was not completed.
+```
+
+**Bad Summary:**
+```
+I'm sorry I couldn't complete the task. I tried to search for festivals but ran into some issues. If I had more time, I would have...
+```
+
+**Task:** "Download data from URL and create visualization"
+
+**Good Summary:**
+```
+Progress made:
+- Successfully downloaded data file to /tmp/data_xyz.csv
+- File contains 150 rows and 5 columns
+- Columns identified: date, temperature, humidity, pressure, location
+
+The data is ready for visualization, but the plot was not created due to a run-time error of missing lib <lib>.
+```
+
+## Execution History
+
 {history}
+
+
+## Your Summary
+
+Based on the history above, provide a concise summary of useful information gathered.
+Focus only on facts and findings that could help the user.
