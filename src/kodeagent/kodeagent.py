@@ -1624,7 +1624,7 @@ class CodeActAgent(ReActAgent):
             return CodeActChatMessage(
                 role='assistant',
                 thought=thought,
-                code=code,
+                code=None,
                 final_answer=final_answer,
                 task_successful=task_successful
             )
@@ -1637,11 +1637,10 @@ class CodeActAgent(ReActAgent):
                 final_answer=None,
                 task_successful=False
             )
-        else:
-            raise ValueError(
-                f"Could not extract valid Code or Answer from response. "
-                f"Text: {text[:300]}..."
-            )
+
+        raise ValueError(
+            f"Could not extract valid Code or Answer from response. Text: {text[:300]}..."
+        )
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think step for CodeAct agent."""
@@ -1683,7 +1682,7 @@ class CodeActAgent(ReActAgent):
                 code = code.replace('```', '').strip()
                 code = f'{self.tools_source_code}\n\n{code}'
 
-                stdout, stderr, exit_status = self.code_runner.run(self.task.id, code)
+                stdout, stderr, exit_status = self.code_runner.run(code, self.task.id)
                 observation = f'{stdout}\n{stderr}'.strip()
                 msg = ChatMessage(role='tool', content=observation)
                 self.add_to_history(msg)
