@@ -236,8 +236,8 @@ async def test_react_agent_run_with_tool_error():
 
         # Check for error responses - look in step responses
         error_responses = [
-            r for r in responses 
-            if r.get("type") == "step" and r.get("metadata") and r["metadata"].get("is_error")
+            r for r in responses
+            if r.get('type') == 'step' and r.get('metadata') and r['metadata'].get('is_error')
         ]
         assert len(error_responses) > 0, "Expected at least one error response"
         assert any('Error' in str(r['value']) or 'error' in str(r['value']) for r in error_responses)
@@ -304,6 +304,7 @@ def test_clear_history(react_agent):
 def mock_e2b():
     """Fixture to mock E2B sandbox."""
     class MockSandbox:
+        """Mock E2B Sandbox class."""
         async def run_python(self, code: str, **kwargs):
             if 'datetime' in code:
                 return {'output': 'September 6, 2025'}
@@ -2422,26 +2423,6 @@ Successful: true
     assert msg.task_successful is True
 
 
-def test_parse_text_response_codeact_with_answer():
-    """Test parse_text_response CodeAct with answer."""
-    agent = CodeActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        run_env='host',
-        allowed_imports=['datetime']
-    )
-
-    text_response = """
-Thought: Done
-Answer: The date is 2024-01-01
-Successful: true
-"""
-    msg = agent.parse_text_response(text_response)
-    assert msg.thought == 'Done'
-    assert msg.final_answer == 'The date is 2024-01-01'
-    assert msg.task_successful is True
-
-
 @pytest.mark.asyncio
 async def test_act_with_missing_args():
     """Test _act with missing args - should be caught by validation."""
@@ -2587,3 +2568,553 @@ async def test_update_plan_with_history():
 
         assert agent.planner.plan is not None
         assert agent.planner.plan.steps[0].is_done
+
+
+def test_read_prompt_file_not_found():
+    """Test _read_prompt with non-existent file."""
+    from kodeagent.kodeagent import _read_prompt
+
+    with pytest.raises(FileNotFoundError) as exc_info:
+        _read_prompt('nonexistent_file.txt')
+    assert 'not found' in str(exc_info.value)
+
+
+def test_read_prompt_error():
+    """Test _read_prompt with read error."""
+    from kodeagent.kodeagent import _read_prompt
+
+    with patch('builtins.open', side_effect=PermissionError('Access denied')):
+        with pytest.raises(RuntimeError) as exc_info:
+            _read_prompt('system/react.txt')
+        assert 'Error reading prompt file' in str(exc_info.value)
+
+
+def test_llm_vision_support():
+    """Test llm_vision_support function."""
+    from kodeagent.kodeagent import llm_vision_support
+
+    # Test with known models
+    models = ['gpt-4-vision-preview', 'gpt-4o', 'claude-3-opus']
+    results = llm_vision_support(models)
+    assert isinstance(results, list)
+    assert len(results) == len(models)
+
+
+def test_print_response():
+    """Test print_response function."""
+    from kodeagent.kodeagent import print_response
+
+    # Test with final response
+    response = {
+        'type': 'final',
+        'value': 'Test answer',
+        'channel': 'test',
+        'metadata': {}
+    }
+    print_response(response, only_final=True)
+
+    # Test with log response
+    log_response = {
+        'type': 'log',
+        'value': 'Test log',
+        'channel': 'test',
+        'metadata': {}
+    }
+    print_response(log_response, only_final=False)
+
+    # Test with step response
+    step_response = {
+        'type': 'step',
+        'value': 'Test step',
+        'channel': 'test',
+        'metadata': {}
+    }
+    print_response(step_response, only_final=False)
+
+
+@pytest.mark.asyncio
+async def test_chat_with_exception():
+    """Test _chat method with exception handling."""
+    agent = ReActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        tools=[calculator]
+    )
+    agent._run_init('Test task')
+
+    # Mock LLM to raise exception on all attempts
+    with patch('kodeagent.kutils.call_llm', side_effect=Exception('LLM error')):
+        with pytest.raises(Exception):
+            await agent._chat(response_format=ReActChatMessage)
+
+
+def test_code_runner_unsupported_env():
+    """Test CodeRunner with unsupported environment."""
+    runner = CodeRunner(env='unsupported_env', allowed_imports=['os'])
+
+    code = 'print("hello")'
+    with pytest.raises(ValueError) as exc_info:
+        runner.run(code, task_id='test-123')
+    assert 'Unsupported code execution env' in str(exc_info.value)
+
+
+def test_code_runner_dangerous_builtins_compile():
+    """Test CodeRunner with compile builtin."""
+    runner = CodeRunner(env='host', allowed_imports=['os'])
+
+    code = 'compile("print(1)", "<string>", "exec")'
+    with pytest.raises(Exception) as exc_info:
+        runner.check_imports(code)
+    assert 'Forbidden builtin' in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_run_with_summarize_progress_false():
+    """Test agent run with summarize_progress_on_failure=False."""
+
+    def llm_side_effect(*args, **kwargs):
+        if kwargs.get('response_format') == AgentPlan:
+            return '{"steps": [{"description": "Test step", "is_done": false}]}'
+        if kwargs.get('response_format') == ObserverResponse:
+            return '{"is_progressing": true, "is_in_loop": false, "reasoning": "ok", "correction_message": null}'
+        # Return response that doesn't finish
+        return '{"role": "assistant", "thought": "thinking", "action": "calculator", "args": "{\\"expression\\": \\"2+2\\"}", "task_successful": false, "final_answer": null}'
+
+    with patch('kodeagent.kutils.call_llm', side_effect=llm_side_effect):
+        agent = ReActAgent(
+            name='test_agent',
+            model_name=MODEL_NAME,
+            tools=[calculator],
+            max_iterations=1
+        )
+
+        responses = []
+        async for response in agent.run('Test task', summarize_progress_on_failure=False):
+            responses.append(response)
+
+        # Should have final response without summary
+        final_responses = [r for r in responses if r['type'] == 'final']
+        assert len(final_responses) > 0
+        assert 'summary of my progress' not in str(final_responses[0]['value']).lower()
+
+
+@pytest.mark.asyncio
+async def test_act_with_empty_args_string():
+    """Test _act with empty args string - should be caught by validation."""
+    agent = ReActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        tools=[calculator]
+    )
+    agent._run_init('Calculate')
+
+    # Empty/whitespace args should fail validation
+    with pytest.raises(pydantic_core.ValidationError):
+        ReActChatMessage(
+            role='assistant',
+            thought='Using calculator',
+            action='calculator',
+            args='   ',  # Empty/whitespace args - will be normalized to None
+            task_successful=False,
+            final_answer=None
+        )
+
+
+def test_react_chat_message_args_with_list():
+    """Test ReActChatMessage args validation with list instead of dict."""
+    with pytest.raises(pydantic_core.ValidationError) as exc_info:
+        ReActChatMessage(
+            role='assistant',
+            thought='test',
+            action='calculator',
+            args='["item1", "item2"]',  # List instead of dict
+            task_successful=False,
+            final_answer=None
+        )
+    assert 'must be a JSON object' in str(exc_info.value)
+
+
+def test_react_chat_message_task_successful_with_action():
+    """Test ReActChatMessage validation - task_successful must be False for actions."""
+    with pytest.raises(pydantic_core.ValidationError):
+        ReActChatMessage(
+            role='assistant',
+            thought='test',
+            action='calculator',
+            args='{"expression": "2+2"}',
+            task_successful=True,  # Should be False for intermediate steps
+            final_answer=None
+        )
+
+
+def test_codeact_chat_message_task_successful_with_code():
+    """Test CodeActChatMessage validation - task_successful must be False with code."""
+    with pytest.raises(pydantic_core.ValidationError):
+        CodeActChatMessage(
+            role='assistant',
+            thought='test',
+            code='print("hello")',
+            task_successful=True,  # Should be False when executing code
+            final_answer=None
+        )
+
+
+def test_react_chat_message_finish_with_args():
+    """Test ReActChatMessage validation - FINISH cannot have args."""
+    with pytest.raises(pydantic_core.ValidationError):
+        ReActChatMessage(
+            role='assistant',
+            thought='test',
+            action='FINISH',
+            args='{"something": "value"}',  # Should be None for FINISH
+            task_successful=True,
+            final_answer='Done'
+        )
+
+
+def test_react_chat_message_action_without_args():
+    """Test ReActChatMessage validation - action requires args."""
+    with pytest.raises(pydantic_core.ValidationError):
+        ReActChatMessage(
+            role='assistant',
+            thought='test',
+            action='calculator',
+            args=None,  # Should have args for non-FINISH action
+            task_successful=False,
+            final_answer=None
+        )
+
+
+@pytest.mark.asyncio
+async def test_observer_with_correction_and_tools():
+    """Test Observer with correction message and tool names."""
+    mock_response = (
+        '{"is_progressing": false, "is_in_loop": true,'
+        ' "reasoning": "Stuck in loop",'
+        ' "correction_message": "Try different tool"}'
+    )
+
+    with patch('kodeagent.kutils.call_llm', return_value=mock_response):
+        observer = Observer(
+            model_name=MODEL_NAME,
+            tool_names={'calculator', 'search_web', 'download_file'},
+            threshold=2
+        )
+
+        task = Task(description='Test', files=None)
+        correction = await observer.observe(
+            iteration=3,
+            task=task,
+            history='test history',
+            plan_before='Plan before',
+            plan_after='Plan after'
+        )
+
+        assert correction is not None
+        assert 'CRITICAL FOR COURSE CORRECTION' in correction
+        assert 'Try different tool' in correction
+        # Should include tool names
+        assert 'calculator' in correction or 'TOOL' in correction
+
+
+@pytest.mark.asyncio
+async def test_planner_update_plan_with_no_existing_plan():
+    """Test planner update when plan doesn't exist."""
+    planner = Planner(model_name=MODEL_NAME)
+
+    # No plan exists
+    assert planner.plan is None
+
+    # Update should not crash
+    await planner.update_plan(
+        thought='test',
+        observation='test',
+        task_id='test-123'
+    )
+
+    # Plan should still be None
+    assert planner.plan is None
+
+
+def test_agent_msg_idx_of_new_task():
+    """Test agent msg_idx_of_new_task tracking."""
+    agent = ReActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        tools=[calculator]
+    )
+
+    # Initially 0
+    assert agent.msg_idx_of_new_task == 0
+
+    # Add some messages
+    agent.add_to_history(ChatMessage(role='user', content='First task'))
+    agent.add_to_history(ChatMessage(role='assistant', content='Response'))
+
+    # Start new task
+    agent._run_init('Second task')
+
+    # msg_idx should still be 0 (it's set in run(), not _run_init())
+    assert agent.msg_idx_of_new_task == 0
+
+
+def test_code_runner_with_local_modules():
+    """Test CodeRunner with local modules to copy."""
+    runner = CodeRunner(env='host', allowed_imports=['os'])
+
+    # Test local_modules_to_copy attribute
+    assert hasattr(runner, 'local_modules_to_copy')
+    assert isinstance(runner.local_modules_to_copy, list)
+
+
+def test_parse_text_response_with_no_action_or_answer():
+    """Test parse_text_response with neither action nor answer."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+
+    text_response = """
+Thought: Just thinking
+"""
+    with pytest.raises(ValueError) as exc_info:
+        agent.parse_text_response(text_response)
+    assert 'Could not extract valid Action or Answer' in str(exc_info.value)
+
+
+def test_parse_text_response_with_invalid_args_json():
+    """Test parse_text_response with invalid JSON in args."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+
+    text_response = """
+Thought: Calculate
+Action: calculator
+Args: {invalid json}
+"""
+    with pytest.raises(ValueError) as _:
+        agent.parse_text_response(text_response)
+    # Should fail during args validation
+
+
+def test_codeact_parse_text_response_code_without_markdown():
+    """Test CodeAct parse_text_response with code not in markdown."""
+    agent = CodeActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        run_env='host',
+        allowed_imports=['datetime']
+    )
+
+    # Code without markdown blocks - needs valid Action+Args for parent parser
+    text_response = """
+Thought: Getting date
+Action: code_execution
+Args: {"language": "python"}
+Code: from datetime import datetime
+print(datetime.now())
+"""
+    msg = agent.parse_text_response(text_response)
+    assert isinstance(msg, CodeActChatMessage)
+    assert msg.code is not None
+    # Code should be extracted even without markdown
+    assert 'datetime' in msg.code
+
+
+@pytest.mark.asyncio
+async def test_get_relevant_tools_with_empty_response():
+    """Test get_relevant_tools when LLM returns empty string."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator, search_web])
+    agent._run_init('Test task')
+
+    with patch('kodeagent.kutils.call_llm', return_value=''):
+        tools = await agent.get_relevant_tools('Test task')
+        # Should return empty list when no tools specified
+        assert len(tools) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_relevant_tools_with_whitespace():
+    """Test get_relevant_tools with whitespace in response."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator, search_web])
+    agent._run_init('Test task')
+
+    with patch('kodeagent.kutils.call_llm', return_value='  calculator  ,  search_web  '):
+        tools = await agent.get_relevant_tools('Test task')
+        assert len(tools) == 2
+        tool_names = {t.name for t in tools}
+        assert 'calculator' in tool_names
+        assert 'search_web' in tool_names
+
+
+def test_formatted_history_with_final_answer():
+    """Test formatted_history_for_llm with final answer message."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+    agent.add_to_history(ReActChatMessage(
+        role='assistant',
+        thought='Done',
+        action='FINISH',
+        args=None,
+        task_successful=True,
+        final_answer='The answer is 42'
+    ))
+
+    formatted = agent.formatted_history_for_llm()
+    assert len(formatted) > 0
+    # Should have assistant message with content
+    assert any(m.get('role') == 'assistant' and m.get('content') for m in formatted)
+
+
+def test_codeact_formatted_history_with_final_answer(codeact_agent_factory):
+    """Test CodeAct formatted_history_for_llm with final answer."""
+    agent = codeact_agent_factory()
+    agent.add_to_history(CodeActChatMessage(
+        role='assistant',
+        thought='Done',
+        code=None,
+        task_successful=True,
+        final_answer='The result is 42'
+    ))
+
+    formatted = agent.formatted_history_for_llm()
+    assert len(formatted) > 0
+    # Should have assistant message with content
+    assert any(m.get('role') == 'assistant' and m.get('content') for m in formatted)
+
+
+@pytest.mark.asyncio
+async def test_record_thought_with_args_cleaning():
+    """Test _record_thought with args that need cleaning."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+    agent._run_init('Test task')
+
+    # Response with args that need cleaning (extra whitespace, etc)
+    response_json = '''
+    {
+        "role": "assistant",
+        "thought": "test",
+        "action": "calculator",
+        "args": "  {\\"expression\\": \\"2+2\\"}  ",
+        "task_successful": false,
+        "final_answer": null
+    }
+    '''
+
+    with patch('kodeagent.kutils.call_llm', return_value=response_json):
+        msg = await agent._record_thought(ReActChatMessage)
+        assert msg is not None
+        assert msg.args is not None
+
+
+def test_agent_filter_tools_for_task_attribute():
+    """Test agent filter_tools_for_task attribute."""
+    agent1 = ReActAgent(
+        name='agent1',
+        model_name=MODEL_NAME,
+        tools=[calculator],
+        filter_tools_for_task=True
+    )
+    assert agent1.filter_tools_for_task is True
+
+    agent2 = ReActAgent(
+        name='agent2',
+        model_name=MODEL_NAME,
+        tools=[calculator],
+        filter_tools_for_task=False
+    )
+    assert agent2.filter_tools_for_task is False
+
+
+@pytest.mark.asyncio
+async def test_act_with_tool_args_not_dict():
+    """Test _act when tool args parse to non-dict - should be caught by validation."""
+    agent = ReActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        tools=[calculator]
+    )
+    agent._run_init('Calculate')
+
+    # Args that parse to a list should fail validation
+    with pytest.raises(pydantic_core.ValidationError):
+        ReActChatMessage(
+            role='assistant',
+            thought='Using calculator',
+            action='calculator',
+            args='["not", "a", "dict"]',  # List instead of dict
+            task_successful=False,
+            final_answer=None
+        )
+
+
+def test_observer_threshold_none():
+    """Test Observer with threshold=None."""
+    observer = Observer(model_name=MODEL_NAME, tool_names={'calculator'}, threshold=None)
+    assert observer.threshold is None
+
+
+def test_planner_get_formatted_plan_empty():
+    """Test planner get_formatted_plan with empty plan."""
+    planner = Planner(model_name=MODEL_NAME)
+    planner.plan = AgentPlan(steps=[])
+
+    formatted = planner.get_formatted_plan()
+    assert formatted == ''
+
+
+def test_task_model_fields():
+    """Test Task model has all expected fields."""
+    task = Task(description='Test')
+    assert hasattr(task, 'id')
+    assert hasattr(task, 'description')
+    assert hasattr(task, 'files')
+    assert hasattr(task, 'result')
+    assert hasattr(task, 'is_finished')
+    assert hasattr(task, 'is_error')
+
+
+def test_agent_response_format_class():
+    """Test Agent response_format_class class variable."""
+    assert hasattr(Agent, 'response_format_class')
+    assert Agent.response_format_class == ChatMessage
+    assert ReActAgent.response_format_class == ReActChatMessage
+    assert CodeActAgent.response_format_class == CodeActChatMessage
+
+
+@pytest.mark.asyncio
+async def test_codeact_act_with_code_stripping():
+    """Test CodeActAgent _act with code that needs stripping."""
+    agent = CodeActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        run_env='host',
+        allowed_imports=['datetime']
+    )
+    agent._run_init('Test')
+
+    # Code with various Markdown formats
+    msg = CodeActChatMessage(
+        role='assistant',
+        thought='Test',
+        code='```python\nprint("hello")\n```',
+        task_successful=False,
+        final_answer=None
+    )
+    agent.add_to_history(msg)
+
+    responses = []
+    async for response in agent._act():
+        responses.append(response)
+
+    assert len(responses) > 0
+
+
+def test_codeact_tools_source_code_empty():
+    """Test CodeActAgent with no tools."""
+    agent = CodeActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        run_env='host',
+        tools=[],
+        allowed_imports=['datetime']
+    )
+
+    # Should have base imports but no tool functions
+    assert 'from typing import *' in agent.tools_source_code
+    assert 'def ' not in agent.tools_source_code or agent.tools_source_code.count('def ') == 0

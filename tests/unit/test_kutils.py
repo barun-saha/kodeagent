@@ -294,7 +294,7 @@ async def test_call_llm_failure_after_all_retries(monkeypatch):
     monkeypatch.setattr('kodeagent.kutils.litellm.acompletion', dummy_acompletion)
 
     with patch.object(logger, 'exception'):
-        with pytest.raises(ValueError, match='Failed to get a valid response from LLM after multiple retries.'):
+        with pytest.raises(ValueError, match='Failed to get a valid response from LLM after multiple retries'):
             await call_llm(
                 'model', {}, [{'role': 'user', 'content': 'hi'}]
             )
