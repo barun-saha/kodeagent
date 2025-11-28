@@ -6,6 +6,7 @@ import base64
 import logging
 import mimetypes
 import os
+import re
 from typing import Optional, Any, Type
 
 import litellm
@@ -308,3 +309,38 @@ def combine_user_messages(messages: list) -> list:
         else:
             combined.append(msg)
     return combined
+
+
+def clean_json_string(json_str: str) -> str:
+    """
+    Clean and repair common JSON formatting issues from LLM responses.
+
+    Args:
+        json_str: Potentially malformed JSON string
+
+    Returns:
+        Cleaned JSON string
+    """
+    if not json_str or not isinstance(json_str, str):
+        return json_str
+
+    # Remove Markdown code blocks
+    json_str = re.sub(r'^```json\s*', '', json_str, flags=re.MULTILINE)
+    json_str = re.sub(r'^```\s*', '', json_str, flags=re.MULTILINE)
+    json_str = json_str.strip()
+
+    # Try to find the actual JSON object: look for the first { and last }
+    start_idx = json_str.find('{')
+    end_idx = json_str.rfind('}')
+
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        json_str = json_str[start_idx:end_idx + 1]
+
+    # Remove trailing quotes/whitespace
+    json_str = re.sub(r'[\'"\s]*$', '', json_str)
+
+    # Fix common escaping issues
+    # Sometimes LLMs add extra backslashes or quotes
+    json_str = json_str.replace("\\'", "'")  # Fix over-escaped single quotes
+
+    return json_str.strip()

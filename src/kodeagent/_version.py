@@ -1,6 +1,6 @@
 """Single-source package version for KodeAgent.
 
-Update the __version__ string here *before* making a release on GitHub.
+Update the __version__ string here BEFORE making a release on GitHub.
 """
 
-__version__ = '0.2.1'
+__version__ = '0.3.0'

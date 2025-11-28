@@ -2,7 +2,6 @@
 A minimalistic approach to building AI agents.
 Implements ReAct and CodeAct agents, supported by Planner and Observer.
 """
-import ast
 import asyncio
 import inspect
 import json
@@ -10,10 +9,7 @@ import logging
 import os
 import random
 import re
-import shutil
-import subprocess as sp
 import sys
-import tempfile
 import uuid
 import warnings
 from abc import ABC, abstractmethod
@@ -28,6 +24,7 @@ from typing import (
     Type,
     TypedDict,
     Union,
+    ClassVar,
 )
 
 import json_repair
@@ -37,12 +34,14 @@ import rich
 from dotenv import load_dotenv
 
 from . import kutils as ku
-from . import tools
+from . import tools as dtools
 
 
 load_dotenv()
 
 warnings.simplefilter('once', UserWarning)
+warnings.filterwarnings('ignore', message='.*Pydantic serializer warnings.*')
+
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -54,11 +53,21 @@ logger = logging.getLogger('KodeAgent')
 litellm.success_callback = ['langfuse']
 litellm.failure_callback = ['langfuse']
 
-# litellm._turn_on_debug()
-
 
 def _read_prompt(filename: str) -> str:
-    """Reads a prompt from the prompts directory."""
+    """
+    Reads a prompt from the `prompts` directory.
+
+    Args:
+        filename: Name of the prompt file to read.
+
+    Returns:
+        The content of the prompt file as a string.
+
+    Raises:
+        FileNotFoundError: If the prompt file does not exist.
+        RuntimeError: If there is an error reading the file.
+    """
     prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', filename)
 
     try:
@@ -81,23 +90,34 @@ UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')
 OBSERVATION_PROMPT = _read_prompt('observation.txt')
 SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
 RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
-# Unused currently
-CONTEXTUAL_SUMMARY_PROMPT = _read_prompt('contextual_summary.txt')
 
-
-# The different types of senders of messages
 MESSAGE_ROLES = Literal['user', 'assistant', 'system', 'tool']
-# The different types of updates emitted by an agent
 AGENT_RESPONSE_TYPES = Literal['step', 'final', 'log']
+CODE_ENV_NAMES = Literal['host', 'docker', 'e2b']
+
+# Regex for message parsing from LLM response text (case-insensitive, multiline)
+THOUGHT_MATCH = re.compile(
+    r'Thought:\s*(.+?)(?=\n(?:Action|Answer|Code):|$)',
+    re.DOTALL | re.IGNORECASE
+)
+ACTION_MATCH = re.compile(r'Action:\s*(\w+)', re.IGNORECASE)
+ARGS_MATCH = re.compile(r'Args:\s*(\{.+?\})', re.DOTALL | re.IGNORECASE)
+ANSWER_MATCH = re.compile(r'Answer:\s*(.+?)(?=\nSuccessful:|$)', re.DOTALL | re.IGNORECASE)
+SUCCESS_MATCH = re.compile(r'Successful:\s*(true|false)', re.IGNORECASE)
+CODE_MATCH = re.compile(r'Code:\s*```(?:python)?\s*(.+?)\s*```', re.DOTALL | re.IGNORECASE)
+
+CODE_ACT_PSEUDO_TOOL_NAME = 'code_execution'
 
 
 class Task(pyd.BaseModel):
-    """
-    Task to be solved by an agent.
-    """
-    id: str = pyd.Field(description='Auto-generated task ID', default_factory=uuid.uuid4)
+    """Task to be solved by an agent."""
+    id: str = pyd.Field(
+        description='Auto-generated task ID', default_factory=lambda: str(uuid.uuid4())
+    )
     description: str = pyd.Field(description='Task description')
-    files: Optional[list[str]] = pyd.Field(description='A list of file paths or URLs')
+    files: Optional[list[str]] = pyd.Field(
+        description='A list of file paths or URLs', default=None
+    )
     result: Optional[Any] = pyd.Field(description='Task result', default=None)
     is_finished: bool = pyd.Field(
         description='Whether the task has finished running', default=False
@@ -119,9 +139,7 @@ class AgentPlan(pyd.BaseModel):
 
 
 class ObserverResponse(pyd.BaseModel):
-    """
-    The response from the observer after analyzing the agent's behavior.
-    """
+    """The response from the observer after analyzing the agent's behavior."""
     is_progressing: bool = pyd.Field(
         description='True if the agent is making meaningful progress on the plan'
     )
@@ -135,11 +153,7 @@ class ObserverResponse(pyd.BaseModel):
 
 
 class ChatMessage(pyd.BaseModel):
-    """
-    Generic chat message. This is primarily intended to internal and tool usage.
-    Agents shouldn't ask an LLM to respond in this format. In particular, Gemini would fail
-    because of `Any`.
-    """
+    """Generic chat message."""
     role: MESSAGE_ROLES = pyd.Field(description='Role of the message sender')
     content: Any = pyd.Field(description='Content of the message')
     files: Optional[list[str]] = pyd.Field(
@@ -150,51 +164,161 @@ class ChatMessage(pyd.BaseModel):
 
 class ReActChatMessage(ChatMessage):
     """
-    Messages for the ReAct agent. Do not set the `content` field.
+    Messages for the ReAct agent with built-in validation.
+    Combines functionality of ReActAgentResponse and ReActChatMessage.
     """
-    # The content field will not be used by this message (but the LLM can still assign a value)
-    # Higher versions of Pydantic allows to exclude the field altogether
-    content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True)
+    content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True, default=None)
     thought: str = pyd.Field(description='Thoughts behind the tool use')
-    action: Optional[str] = pyd.Field(
-        description='Name of the tool to use; `None` when `final_answer` is available'
+    action: str = pyd.Field(
+        description=(
+            "Name of the tool to use from available tools, or 'FINISH' to provide final answer. "
+            "Must be exact tool name as listed in Available Tools section."
+        )
     )
-    # Gemini complains about empty objects if `args` is defined as dict,
-    # hence string type for compatibility
     args: Optional[str] = pyd.Field(
-        description='Tool arguments as JSON string; `None` when `final_answer` is available'
+        default=None,
+        description=(
+            "Tool arguments as JSON string; `None` when `final_answer` is available. "
+            "Must be valid JSON with double quotes."
+        )
     )
     final_answer: Optional[str] = pyd.Field(
-        description='Final answer for the task; set only in the final step', default=None
+        description='Final answer for the task; set only in the final step',
+        default=None
     )
-    task_successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
+    task_successful: bool = pyd.Field(
+        description='Task completed or failed?',
+        default=False
+    )
+
+    @pyd.field_validator('args')
+    @classmethod
+    def validate_args_json(cls, v: Optional[str]) -> Optional[str]:
+        """
+        Validate that args is valid JSON and normalize it.
+
+        Args:
+            v: The args string to validate.
+
+        Returns:
+            The normalized JSON string if valid, else None.
+        """
+        if v is None:
+            return None
+
+        v = v.strip()
+        if not v:
+            return None
+
+        # Clean and validate JSON
+        v = ku.clean_json_string(v)
+        try:
+            # Validate it's parseable
+            parsed = json.loads(v)
+            # Ensure it's a dict
+            if not isinstance(parsed, dict):
+                raise ValueError(f'args must be a JSON object (dict), got {type(parsed)}')
+            # Return normalized JSON string
+            return json.dumps(parsed)
+        except JSONDecodeError as e:
+            try:
+                v = json_repair.repair_json(v)
+                parsed = json.loads(v)
+                if not isinstance(parsed, dict):
+                    raise ValueError(f'args must be a JSON object (dict), got {type(parsed)}')
+                return json.dumps(parsed)
+            except Exception:
+                raise ValueError(
+                    f'args must be valid JSON object string. Received: {v[:100]}... Error: {e}'
+                )
+
+    @pyd.model_validator(mode='after')
+    def validate_mutual_exclusivity(self):
+        """Ensure tool call and final answer are mutually exclusive."""
+        is_finish = self.action == 'FINISH'
+        has_final_answer = self.final_answer is not None
+        has_args = self.args is not None
+
+        if self.action != 'FINISH':
+            if has_final_answer:
+                raise ValueError(
+                    "Cannot have both action (tool call) and final_answer. "
+                    "Use action='FINISH' when providing final_answer."
+                )
+            if self.task_successful:
+                raise ValueError(
+                    'task_successful must be False for intermediate tool calls'
+                )
+            if not has_args:
+                raise ValueError(
+                    f"args must be provided when using tool '{self.action}'"
+                )
+        elif is_finish:
+            if not has_final_answer:
+                raise ValueError(
+                    "final_answer must be provided when action is 'FINISH'"
+                )
+            if has_args:
+                raise ValueError(
+                    "args must be None when action is 'FINISH'"
+                )
+        return self
+
+    @property
+    def is_final(self) -> bool:
+        """Check if this is a final answer."""
+        return self.action == 'FINISH' and self.final_answer is not None
 
 
 class CodeActChatMessage(ChatMessage):
     """
-    Messages for the CodeActAgent. The `final_answer` and `task_successful` fields are "mutually
-    exclusive" to `thought` and `code`. If code is available, final_answer and `content` need
-    to be empty (and task_successful False); if final_answer is available, code must be empty (and
-    task_successful True).
+    Messages for the CodeActAgent with built-in validation.
+    Combines functionality of CodeActAgentResponse and CodeActChatMessage.
     """
-    # The content field will not be used by this message (but the LLM can still assign a value)
-    # Higher versions of Pydantic allows to exclude the field altogether
-    content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True)
+    content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True, default=None)
     thought: str = pyd.Field(description='Thoughts behind the code')
     code: Optional[str] = pyd.Field(
-        description='Python code with tool use to run; `None` when `task_successful` is true'
+        default=None,
+        description='Python code with tool use to run; `None` when providing final answer'
     )
     final_answer: Optional[str] = pyd.Field(
-        description='Final answer for the task; set only in the final step', default=None
+        description='Final answer for the task; set only in the final step',
+        default=None
     )
-    task_successful: bool = pyd.Field(description='Task completed or failed? (initially False)')
+    task_successful: bool = pyd.Field(
+        description='Task completed or failed?',
+        default=False
+    )
+
+    @pyd.model_validator(mode='after')
+    def validate_mutual_exclusivity(self):
+        """Ensure code execution and final answer are mutually exclusive."""
+        has_code = self.code is not None and self.code.strip()
+        has_final_answer = self.final_answer is not None
+
+        if has_code and has_final_answer:
+            raise ValueError(
+                'Cannot have both code and final_answer. '
+                'Provide either code for execution or final_answer to conclude.'
+            )
+        if not has_code and not has_final_answer:
+            raise ValueError(
+                'Must provide either code for execution or final_answer to conclude'
+            )
+        if has_code and self.task_successful:
+            raise ValueError(
+                'task_successful must be False when executing code (intermediate step)'
+            )
+        return self
+
+    @property
+    def is_final(self) -> bool:
+        """Check if this is a final answer."""
+        return self.final_answer is not None
 
 
 class AgentResponse(TypedDict):
-    """
-    Streaming response sent by an agent in the course of solving a task. The receiver can decide
-    what to do with the response based on its type.
-    """
+    """Streaming response sent by an agent in the course of solving a task."""
     type: AGENT_RESPONSE_TYPES
     channel: Optional[str]
     value: Any
@@ -202,19 +326,14 @@ class AgentResponse(TypedDict):
 
 
 class Planner:
-    """
-    Given a task, generate and maintain a step-by-step plan to solve it.
-    This class is stateful and holds the current plan.
-    """
+    """Given a task, generate and maintain a step-by-step plan to solve it."""
     def __init__(self, model_name: str, litellm_params: Optional[dict] = None):
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
         self.plan: Optional[AgentPlan] = None
 
     async def create_plan(self, task: Task, agent_type: str) -> AgentPlan:
-        """
-        Create a plan to solve the given task and store it.
-        """
+        """Create a plan to solve the given task and store it."""
         messages = ku.make_user_message(
             text_content=AGENT_PLAN_PROMPT.format(
                 agent_type=agent_type,
@@ -234,9 +353,7 @@ class Planner:
         return self.plan
 
     async def update_plan(self, thought: str, observation: str, task_id: str):
-        """
-        Update the plan based on the last thought and observation.
-        """
+        """Update the plan based on the last thought and observation."""
         if not self.plan:
             return
 
@@ -267,9 +384,7 @@ class Planner:
         return [step for step in self.plan.steps if not step.is_done]
 
     def get_formatted_plan(self, scope: Literal['all', 'done', 'pending'] = 'all') -> str:
-        """
-        Convert the agent's plan into a markdown checklist.
-        """
+        """Convert the agent's plan into a markdown checklist."""
         if not self.plan or not self.plan.steps:
             return ''
 
@@ -288,11 +403,7 @@ class Planner:
 
 
 class Observer:
-    """
-    Monitors an agent's behavior to detect issues like loops or stalled plans.
-    If a problem is detected, it can generate a corrective message to be injected
-    into the agent's history to prompt a change in behavior.
-    """
+    """Monitors an agent's behavior to detect issues like loops or stalled plans."""
     def __init__(
             self,
             model_name: str,
@@ -314,16 +425,13 @@ class Observer:
             plan_before: Optional[str | AgentPlan],
             plan_after: Optional[str | AgentPlan],
     ) -> Optional[str]:
-        """
-        Observe the agent's state and return a corrective message if a problem is detected.
-        """
-        if (iteration <= 1) or (self.threshold < 0) or (
-                iteration - self.last_correction_iteration < self.threshold
-        ):
+        """Observe the agent's state and return a corrective message if a problem is detected."""
+        if self.threshold is None or iteration <= 1:
+            return None
+        if iteration - self.last_correction_iteration < self.threshold:
             return None
 
         try:
-            # Use the LLM to analyze the state and provide feedback
             tool_names = '\n'.join(sorted(list(self.tool_names)))
             prompt = OBSERVATION_PROMPT.format(
                 task=task.description,
@@ -338,11 +446,8 @@ class Observer:
                 messages=[{'role': 'user', 'content': prompt}],
                 response_format=ObserverResponse,
             )
-            # Parse the structured response
             observation = ObserverResponse.model_validate_json(observation_response)
-            # print(f'Observer (iteration {iteration}): {observation.model_dump_json()}')
 
-            # Return the correction message if a problem is detected
             if not observation.is_progressing or observation.is_in_loop:
                 self.last_correction_iteration = iteration
                 msg = (
@@ -360,7 +465,6 @@ class Observer:
                 return correction
 
         except Exception as e:
-            # Fallback for LLM or parsing errors
             logger.exception('LLM Observer failed: %s', str(e))
             return None
 
@@ -372,10 +476,10 @@ class Observer:
 
 
 class Agent(ABC):
-    """
-    An abstract agent. This should serve as the base class for all types of agents.
-    All subclasses must override at least the `run()` method.
-    """
+    """An abstract agent. Base class for all types of agents."""
+
+    response_format_class: ClassVar[Type[pyd.BaseModel]] = ChatMessage
+
     def __init__(
             self,
             name: str,
@@ -386,18 +490,6 @@ class Agent(ABC):
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
     ):
-        """
-        Initialize an agent.
-
-        Args:
-            name: The name of the agent.
-            description: Description of the agent's capabilities or scope. Recommended to have.
-            model_name: The name of the LLM to be used.
-            tools: A list of tools available to the agent.
-            litellm_params: Optional parameters for LiteLLM.
-            max_iterations: Maximum number of iterations for task solving.
-            filter_tools_for_task: Whether to filter tools based on task relevance.
-        """
         self.id = uuid.uuid4()
         self.name: str = name
         self.description = description
@@ -429,7 +521,6 @@ class Agent(ABC):
             f'Agent: {self.name} ({self.id}); LLM: {self.model_name}; Tools: {self.tools}'
         )
 
-
     @property
     def current_plan(self) -> Optional[str]:
         """Returns the current plan for the task."""
@@ -442,16 +533,7 @@ class Agent(ABC):
             task_description: str,
             task_files: Optional[list[str]] = None,
     ) -> list[Any]:
-        """
-        Calls an LLM to determine which tools are relevant for the given task.
-
-        Args:
-            task_description: The task description.
-            task_files: Optional list of files associated with the task.
-
-        Returns:
-            A list of relevant tools or all tools, in case of error.
-        """
+        """Calls an LLM to determine which tools are relevant for the given task."""
         tool_descriptions = self.get_tools_description()
         prompt = RELEVANT_TOOLS_PROMPT.format(
             task_description=task_description,
@@ -483,26 +565,22 @@ class Agent(ABC):
             files: Optional[list[str]] = None,
             task_id: Optional[str] = None
     ):
-        """
-        Initialize the running of a task by an agent.
-        """
-        # self.add_to_history(ChatMessage(role='user', content=description))
+        """Initialize the running of a task by an agent."""
         self.task = Task(description=description, files=files)
         if task_id:
             self.task.id = task_id
-        # self.msg_idx_of_new_task = len(self.messages)
         self.final_answer_found = False
         if self.planner:
             self.planner.plan = None
         self.observer.reset()
 
+    @abstractmethod
+    def parse_text_response(self, text: str) -> ChatMessage:
+        """Parse a text response from the LLM into a ChatMessage."""
+
     async def salvage_response(self) -> str:
         """
-        When an agent fails to find an answer in the stipulated number of steps, this method
-        can be called to salvage what little information could be gathered.
-
-        Returns:
-            A response from the LLM based on the task and the history.
+        When an agent fails to find an answer, salvage what information could be gathered.
         """
         prompt = SALVAGE_RESPONSE_PROMPT.format(
             task=self.task.description,
@@ -518,13 +596,7 @@ class Agent(ABC):
         return salvaged_response
 
     def trace(self) -> str:
-        """
-        Provide a trace of the agent's activities for the current task.
-        The trace can be used for debugging.
-
-        Returns:
-            A string trace of the agent's thoughts, actions, and observations.
-        """
+        """Provide a trace of the agent's activities for the current task."""
         trace_log = []
         for msg in self.messages[self.msg_idx_of_new_task:]:
             if isinstance(msg, ReActChatMessage):
@@ -546,18 +618,7 @@ class Agent(ABC):
             files: Optional[list[str]] = None,
             task_id: Optional[str] = None
     ) -> AsyncIterator[AgentResponse]:
-        """
-        Execute a task using the agent.
-
-        Args:
-            task: A description of the task.
-            files: An optional list of file paths or URLs.
-            task_id: (Optional) An ID for the task, if provided by the caller.
-
-        Yields:
-            An update from the agent.
-        """
-
+        """Execute a task using the agent."""
 
     def response(
             self,
@@ -566,55 +627,49 @@ class Agent(ABC):
             channel: Optional[str] = None,
             metadata: Optional[dict[str, Any]] = None
     ) -> AgentResponse:
-        """
-        Prepare a response to be sent by the agent. The calling method must yield this response.
-
-        Note: `response` is not made a static method so that only the agents can invoke it.
-
-        Args:
-            rtype: The type of the response.
-            value: The response value (content).
-            channel: Optional channel (e.g., the method name that generated this response).
-            metadata: Optional metadata.
-
-        Returns:
-            The agent's response.
-        """
+        """Prepare a response to be sent by the agent."""
         return {'type': rtype, 'channel': channel, 'value': value, 'metadata': metadata}
 
     @abstractmethod
     def formatted_history_for_llm(self) ->list[dict]:
-        """
-        Generate a formatted list of chat history messages to send to an LLM.
+        """Generate a formatted list of chat history messages to send to an LLM."""
 
-        Returns:
-            A list of messages with different roles.
+    async def _chat(self, response_format: Optional[Type[pyd.BaseModel]] = None) -> Optional[str]:
         """
-
-    async def _chat(self, response_format: Optional[Type[pyd.BaseModel]] = None) -> str:
-        """
-        Interact with the LLM using the agent's message history, which consists of messages with
-        different roles: user, assistant, system, and tool. Use the `call_llm` function.
+        Interact with the LLM using the agent's message history.
+        Enhanced with retry logic for structured output failures.
         """
         formatted_messages = self.formatted_history_for_llm()
-        # print('\n\nCHAT MESSAGES:\n', '\n'.join([str(msg) for msg in formatted_messages]), '\n\n')
-        chat_response: str = await ku.call_llm(
-            model_name=self.model_name,
-            litellm_params=self.litellm_params,
-            messages=formatted_messages,
-            response_format=response_format,
-            trace_id=self.task.id if self.task else None
-        )
 
-        return chat_response or ''
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                chat_response: str = await ku.call_llm(
+                    model_name=self.model_name,
+                    litellm_params=self.litellm_params,
+                    messages=formatted_messages,
+                    response_format=response_format,
+                    trace_id=self.task.id if self.task else None
+                )
+                return chat_response or ''
+
+            except Exception as e:
+                logger.warning(f'LLM call failed (attempt {attempt + 1}/{max_retries}): {e}')
+
+                if attempt < max_retries - 1:
+                    # Add feedback to help LLM correct itself
+                    await asyncio.sleep(random.uniform(0.5, 1.5))
+                    feedback = (
+                        f"Error: Previous response had issues: {str(e)}. "
+                        f"Please ensure your response follows the exact JSON schema provided. "
+                        f"[Timestamp={datetime.now()}]"
+                    )
+                    formatted_messages.append({'role': 'user', 'content': feedback})
+                else:
+                    raise
 
     def add_to_history(self, message: ChatMessage):
-        """
-        Add a chat message, generated by user, AI, or tool, to the agent's message history.
-
-        Args:
-            message: The message. Must be a valid `ChatMessage` instance.
-        """
+        """Add a chat message to the agent's message history."""
         assert isinstance(message, ChatMessage), (
             f'add_to_history() expects a `ChatMessage`; got `{type(message)}`'
         )
@@ -622,34 +677,62 @@ class Agent(ABC):
 
     def get_tools_description(self, tools: Optional[list[Any]] = None) -> str:
         """
-        Generate a description of all the tools available to the agent.
+        Generate a description of all the tools available to the agent. Required args are marked.
 
         Args:
-            tools: Optional list of tools to describe. If not provided, uses the agent's tools.
+            tools: Optional list of tools to describe. If None, describes all available tools.
 
         Returns:
-            A description of the requested or all available tools.
+            A formatted string describing each tool, its parameters, and example usage.
         """
         description = ''
         filtered_tool_names = {t.name for t in (tools or self.tools)}
+
         for t in self.tools:
             if t.name in filtered_tool_names:
-                description += f'- Tool name: {t.name}'
-                # description += f'\n  -
-                # Schema: {t.args_schema.model_json_schema()}'
-                description += f'\n- Tool description: {t.description}'
-                description += '\n---\n'
+                description += f'### Tool: {t.name}\n'
+                description += f'**Description:** {t.description}\n'
+
+                # Extract and highlight required parameters
+                if hasattr(t, 'args_schema') and t.args_schema:
+                    schema = t.args_schema.model_json_schema()
+                    properties = schema.get('properties', {})
+                    required = schema.get('required', [])
+
+                    if properties:
+                        description += '**Parameters:**\n'
+                        for param_name, param_info in properties.items():
+                            param_desc = param_info.get('description', 'No description')
+                            param_type = param_info.get('type', 'any')
+                            is_required = param_name in required
+                            req_marker = '**[REQUIRED]**' if is_required else '[optional]'
+                            description += (
+                                f'  - `{param_name}` ({param_type}) {req_marker}: {param_desc}\n'
+                            )
+
+                    # Add usage example
+                    if required:
+                        example_args = {param: f"<{param}_value>" for param in required}
+                        # Convert to JSON string and escape for display
+                        args_json = json.dumps(example_args)
+                        # Escape the quotes for the outer JSON structure
+                        args_escaped = args_json.replace('"', '\\"')
+
+                        description += '**Example usage:**\n'
+                        description += '```json\n'
+                        description += '{\n'
+                        description += f'  "action": "{t.name}",\n'
+                        description += f'  "args": "{args_escaped}"\n'
+                        description += '}\n'
+                        description += '```\n'
+
+                description += '\n---\n\n'
 
         return description
 
     @property
     def purpose(self) -> str:
-        """
-        Describe the name, purpose of, and tools available to an agent.
-
-        Returns:
-             A text description of the agent.
-        """
+        """Describe the name, purpose of, and tools available to an agent."""
         description = f'Name: {self.name}\nDescription: {self.description or "N/A"}'
         description += f'\nTools available to this agent (`{self.name}`):'
         description += f'\n{self.get_tools_description()}'
@@ -657,28 +740,18 @@ class Agent(ABC):
         return description
 
     def get_history(self, start_idx: int = 0) -> str:
-        """
-        Get a formatted string representation of all the messages.
-
-        Args:
-            start_idx: The start index of messages to consider (default 0).
-
-        Returns:
-            A sequence of the messages showing their role and content.
-        """
+        """Get a formatted string representation of all the messages."""
         return '\n'.join([f'[{msg.role}]: {msg.content}' for msg in self.messages[start_idx:]])
 
     def clear_history(self):
-        """
-        Clear the agent's message history.
-        """
+        """Clear the agent's message history."""
         self.messages = []
 
 
 class ReActAgent(Agent):
-    """
-    Reasoning and Acting agent with thought-action-observation loop.
-    """
+    """Reasoning and Acting agent with thought-action-observation loop."""
+    response_format_class: ClassVar[Type[pyd.BaseModel]] = ReActChatMessage
+
     def __init__(
             self,
             name: str,
@@ -689,17 +762,6 @@ class ReActAgent(Agent):
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
     ):
-        """
-        Instantiate a ReAct agent.
-
-        Args:
-            name: The name of the agent.
-            description: Description of the agent's capabilities or scope. Recommended to have.
-            model_name: The name of the LLM to be used (use names from LiteLLM).
-            tools: The tools available to the agent.
-            litellm_params: Optional parameters for LiteLLM.
-            max_iterations: The maximum number of steps that the agent should try to solve a task.
-        """
         super().__init__(
             name=name,
             model_name=model_name,
@@ -715,11 +777,19 @@ class ReActAgent(Agent):
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
 
     async def _update_plan(self):
-        """
-        Update the plan based on the last thought and observation.
-        """
-        last_thought = ''
-        last_observation = ''
+        """Update the plan based on the last thought and observation."""
+        # Find last thought/observation pair explicitly
+        last_thought = None
+        last_observation = None
+
+        for msg in reversed(self.messages):
+            if not last_observation and msg.role == 'tool':
+                last_observation = msg.content
+            elif not last_thought and isinstance(msg, (ReActChatMessage, CodeActChatMessage)):
+                last_thought = msg.thought
+            if last_thought and last_observation:
+                break
+
         if len(self.messages) > 1:
             if isinstance(self.messages[-2], (ReActChatMessage, CodeActChatMessage)):
                 last_thought = self.messages[-2].thought
@@ -738,18 +808,7 @@ class ReActAgent(Agent):
             task_id: Optional[str] = None,
             summarize_progress_on_failure: bool = True,
     ) -> AsyncIterator[AgentResponse]:
-        """
-        Solve a task using ReAct's TAO loop.
-
-        Args:
-            task: A description of the task.
-            files: An optional list of file paths or URLs.
-            task_id: (Optional) An ID for the task, if provided by the caller.
-            summarize_progress_on_failure: Whether to summarize the progress made on task failure.
-
-        Yields:
-            An update from the agent.
-        """
+        """Solve a task using ReAct's TAO loop."""
         self._run_init(task, files, task_id)
         self.clear_history()
 
@@ -766,7 +825,7 @@ class ReActAgent(Agent):
                     role='system',
                     content=CODE_ACT_SYSTEM_PROMPT.format(
                         tools=self.get_tools_description(),
-                        authorized_imports='\n'.join(self.allowed_imports)
+                        authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports])
                     )
                 )
             )
@@ -795,7 +854,7 @@ class ReActAgent(Agent):
 
         for idx in range(self.max_iterations):
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
-            # The thought & observation will get appended to the list of messages
+
             async for update in self._think():
                 yield update
             async for update in self._act():
@@ -815,7 +874,6 @@ class ReActAgent(Agent):
                     )
                 )
 
-            # The observer checks for issues and suggests corrections
             correction_msg = await self.observer.observe(
                 task=self.task,
                 history='\n'.join([str(msg) for msg in self.messages]),
@@ -828,7 +886,6 @@ class ReActAgent(Agent):
                     ChatMessage(role='user', content=f'Observation: {correction_msg}')
                 )
                 yield self.response(rtype='log', value=correction_msg, channel='observer')
-            # print('-' * 30)
 
         if not self.final_answer_found:
             failure_msg = f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
@@ -845,161 +902,226 @@ class ReActAgent(Agent):
                 channel='run',
                 metadata={'final_answer_found': False}
             )
-            # trace_info = self.trace()
-            # if trace_info:
-            #     print(trace_info)
 
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
         else:
-            # Update the plan one last time after the final answer is found
             if self.planner.plan:
                 await self._update_plan()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
-        """
-        Think about the next step to be taken to solve the given task.
-
-        The LLM is prompted with the available tools and the TAO sequence so far. Based on them,
-        the LLM will suggest the next action. "Think" of ReAct is also "Observe."
-
-        Yields:
-            Update from the think step.
-        """
-        if self.filter_tools_for_task:
-            relevant_tools = await self.get_relevant_tools(
-                task_description=self.task.description, task_files=self.task.files
-            )
-        else:
-            relevant_tools = self.tools
-
+        """Think about the next step using the new structured response format."""
         thought = await self._record_thought(ReActChatMessage)
         yield self.response(rtype='step', value=thought, channel='_think')
 
     async def _record_thought(
             self,
-            response_format_class: Type[ChatMessage]
-    ) -> Optional[ChatMessage]:
+            response_format_class: Type[pyd.BaseModel]
+    ) -> Optional[Union[ReActChatMessage, CodeActChatMessage]]:
         """
-        Utility method covering the common aspects of the "think" step of the T*O loop.
-
-        Args:
-            response_format_class: The type of message used by this agent.
-
-        Returns:
-            A message of the `response_format_class` type.
+        Record the agent's thought with improved error handling and fallback parsing.
+        Now returns ChatMessage directly instead of separate Response class.
         """
-        # Sometimes the LLM does not generate a valid JSON response based on the given format
-        # class. It returns a plain text response instead, which leads to a validation error.
-        # To handle this, we will retry the LLM call up to 3 times,
-        # attempting to parse the response as JSON each time.
         for attempt in range(3):
             try:
                 thought_response: str = await self._chat(response_format=response_format_class)
-                # print(f'{response_format_class=}, {thought_response=}')
 
                 try:
-                    json.loads(thought_response)
-                except JSONDecodeError:
-                    thought_response = json_repair.repair_json(thought_response)
+                    thought_response_cleaned = ku.clean_json_string(thought_response)
 
-                msg: response_format_class = response_format_class.model_validate_json(
-                    thought_response
-                )
-                msg.role = 'assistant'
-                msg.content = msg.final_answer
+                    try:
+                        parsed_json = json.loads(thought_response_cleaned)
+                    except JSONDecodeError as e:
+                        logger.warning(f'Initial JSON parse failed: {e}. Attempting repair...')
+                        thought_response_cleaned = json_repair.repair_json(
+                            thought_response_cleaned)
+                        parsed_json = json.loads(thought_response_cleaned)
+
+                    if 'args' in parsed_json and isinstance(parsed_json['args'], str):
+                        parsed_json['args'] = ku.clean_json_string(parsed_json['args'])
+
+                    # Handle mutual exclusivity violations
+                    if response_format_class == ReActChatMessage:
+                        has_action = parsed_json.get('action') and parsed_json[
+                            'action'] != 'FINISH'
+                        has_final_answer = parsed_json.get('final_answer')
+
+                        if has_action and has_final_answer:
+                            logger.warning(
+                                f"LLM provided both action ('{parsed_json['action']}') and"
+                                f" final_answer. Keeping action, removing final_answer."
+                            )
+                            parsed_json['final_answer'] = None
+                            parsed_json['task_successful'] = False
+
+                    elif response_format_class == CodeActChatMessage:
+                        has_code = parsed_json.get('code')
+                        has_final_answer = parsed_json.get('final_answer')
+
+                        if has_code and has_final_answer:
+                            logger.warning(
+                                "LLM provided both code and final_answer. "
+                                "Keeping code, removing final_answer."
+                            )
+                            parsed_json['final_answer'] = None
+                            parsed_json['task_successful'] = False
+
+                    thought_response_cleaned = json.dumps(parsed_json)
+
+                    # Validate and create message directly
+                    msg = response_format_class.model_validate_json(thought_response_cleaned)
+                    msg.role = 'assistant'  # Set role
+
+                    logger.debug('Successfully parsed structured JSON response')
+
+                except (JSONDecodeError, pyd.ValidationError) as parse_error:
+                    logger.warning(
+                        f'Structured parsing failed: {type(parse_error).__name__}: {parse_error}. '
+                        f'Falling back to text parsing...'
+                    )
+
+                    try:
+                        msg = self.parse_text_response(thought_response)
+                        msg.role = 'assistant'
+                        logger.info('Successfully parsed response using text fallback')
+
+                    except Exception as text_error:
+                        logger.error(f'Text parsing also failed: {text_error}')
+                        raise ValueError(
+                            f'Both structured and text parsing failed. '
+                            f'Structured error: {parse_error}. '
+                            f'Text parsing error: {text_error}'
+                        ) from text_error
+
                 self.add_to_history(msg)
-                # print('\n\n\n\n\nHISTORY SO FAR:\n')
-                # print('\n'.join([str(msg) for msg in self.messages]))
                 return msg
 
-            except Exception as ex:
-                # This can happen if the LLM response is not valid JSON
-                logger.error('LLM response validation error in _record_thought(). Retrying...')
-                # print('HISTORY:', '\n'.join([str(m) for m in self.formatted_history_for_llm()]))
+            except ValueError as ex:
+                logger.error(f'Parsing error in _record_thought (attempt {attempt + 1}/3): {ex}')
 
-                await asyncio.sleep(random.uniform(0.5, 1.0))
-
-                if attempt == 0:
-                    # Add an explicit observation to the prompt's message history
-                    # Add timestamp to avoid potential cached responses
+                if attempt < 2:
+                    await asyncio.sleep(random.uniform(0.5, 1.0))
                     feedback_message = (
-                        '!Error: Parsing failed because you did not generate the response'
-                        ' following the given JSON schema!!! Please ensure your response is'
-                        ' a valid JSON object that follows the specified schema.'
-                        f' [Timestamp={datetime.now()}]'
+                        f'!Parsing Error: {str(ex)}. '
+                        'Please ensure your response follows the required format. '
+                        f'[Timestamp={datetime.now()}]'
                     )
                     self.add_to_history(ChatMessage(role='user', content=feedback_message))
-                continue
+                else:
+                    logger.error('Failed to parse response after 3 attempts')
+                    return None
+
+            except Exception as ex:
+                logger.exception(
+                    f'Unexpected error in _record_thought (attempt {attempt + 1}/3): {ex}')
+
+                if attempt < 2:
+                    await asyncio.sleep(random.uniform(0.5, 1.0))
+                    feedback_message = (
+                        f'!Error: {type(ex).__name__}: {str(ex)}. '
+                        f'[Timestamp={datetime.now()}]'
+                    )
+                    self.add_to_history(ChatMessage(role='user', content=feedback_message))
+                else:
+                    logger.error('Failed after 3 attempts due to unexpected errors')
+                    return None
 
         return None
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
         """
         Take action based on the agent's previous thought.
-
-        The LLM has suggested an action. This method will identify the tool suggested and
-        execute it.
-
-        Yields:
-            Updates from the acting step.
+        Now handles explicit FINISH action with proper error handling.
         """
         prev_msg: ReActChatMessage = self.messages[-1]  # type: ignore
-        if (
-                hasattr(prev_msg, 'final_answer') and prev_msg.final_answer == ''
-                and (prev_msg.action == '' or prev_msg.args == '' or prev_msg.thought == '')
-        ):
+
+        # Check for malformed response
+        if not hasattr(prev_msg, 'thought') or not prev_msg.thought:
             self.add_to_history(
                 ChatMessage(
-                    role='tool',
+                    role='user',
                     content=(
-                        '* Error: incorrect response generated. Must have values for the `answer`'
-                        ' or the `action`, `args`, and `thought` fields. Please respond strictly'
-                        ' following the ReActChatMessage schema.'
+                        '* Error: Response must have a valid `thought` field. '
+                        'Please respond strictly following the schema.'
                     )
                 )
             )
             return
 
+        # Check if this is a final answer
         if hasattr(prev_msg, 'final_answer') and prev_msg.final_answer:
-            # The final answer has been found!
             self.final_answer_found = True
             self.task.is_finished = True
-            self.task.is_error = prev_msg.task_successful
-            # Do NOT add another ChatMessage to history here; it's already added in _record_thought
+            self.task.is_error = not prev_msg.task_successful
+
             yield self.response(
                 rtype='final',
-                value=prev_msg,
+                value=prev_msg.final_answer,
                 channel='_act',
                 metadata={'final_answer_found': prev_msg.task_successful}
             )
         else:
-            # No answer yet, keep tool calling
+            # Tool execution
+            tool_name = prev_msg.action
+            tool_args = prev_msg.args
+            tool_args_dict = {}
+
+            # Validate tool call has required fields
+            if not tool_name or not tool_args:
+                error_msg = 'Error: Both action and args must be provided for tool calls.'
+                # CRITICAL: Use role='tool' instead of role='user' to maintain conversation format
+                self.add_to_history(ChatMessage(role='tool', content=error_msg))
+                yield self.response(
+                    rtype='step',
+                    value=error_msg,
+                    channel='_act',
+                    metadata={'is_error': True}
+                )
+                return
+
             try:
-                tool_name, tool_args = prev_msg.action, prev_msg.args
+                # CRITICAL: Parse the JSON string into a dictionary
+                # The args field is a JSON string, not a dict
                 tool_args = tool_args.strip().strip('`').strip()
                 if tool_args.startswith('json'):
                     tool_args = tool_args[4:].strip()
 
                 try:
-                    tool_args = json.loads(tool_args)
+                    tool_args_dict = json.loads(tool_args)
                 except JSONDecodeError:
-                    tool_args = json_repair.loads(tool_args)
+                    logger.warning('JSON decode failed, attempting repair...')
+                    tool_args_dict = json_repair.loads(tool_args)
 
+                # Validate it's actually a dictionary
+                if not isinstance(tool_args_dict, dict):
+                    error_msg = f'Tool args must be a dict, got {type(tool_args_dict).__name__}'
+                    self.add_to_history(ChatMessage(role='tool', content=error_msg))
+                    yield self.response(
+                        rtype='step',
+                        value=error_msg,
+                        channel='_act',
+                        metadata={'is_error': True}
+                    )
+                    return
+
+                # Execute tool
                 if tool_name in self.tool_names:
-                    result = self.tool_name_to_func[tool_name](**tool_args)
-                    self.add_to_history(ChatMessage(role='tool', content=result))
+                    result = self.tool_name_to_func[tool_name](**tool_args_dict)
+                    # FIXED: Always use role='tool' for tool results
+                    self.add_to_history(ChatMessage(role='tool', content=str(result)))
                     yield self.response(
                         rtype='step',
                         value=result,
                         channel='_act',
-                        metadata={'tool': tool_name, 'args': tool_args}
+                        metadata={'tool': tool_name, 'args': tool_args_dict}
                     )
                 else:
                     result = (
-                        f'Incorrect tool name generated: {tool_name}!'
-                        ' Please suggest a correct tool name from the provided list.'
+                        f'Error: Tool "{tool_name}" not found! '
+                        f'Available tools: {", ".join(sorted(self.tool_names))}. '
+                        'Please use an exact tool name from the list.'
                     )
-                    self.add_to_history(ChatMessage(role='user', content=result))
+                    # Use role='tool' for tool errors too
+                    self.add_to_history(ChatMessage(role='tool', content=result))
                     yield self.response(
                         rtype='step',
                         value=result,
@@ -1008,7 +1130,15 @@ class ReActAgent(Agent):
                     )
 
             except Exception as ex:
-                error_msg = f'*** An error occurred while taking the suggested action: {ex}'
+                error_msg = (
+                    f'*** Error: Tool execution failed: {type(ex).__name__}: {str(ex)}\n'
+                    f'Tool: {tool_name}\n'
+                    f'Args provided: {tool_args_dict}\n'
+                    f'Please check the tool signature and try again with correct arguments.'
+                )
+                logger.exception(error_msg)
+                # Use role='tool' to maintain proper conversation structure
+                self.add_to_history(ChatMessage(role='tool', content=error_msg))
                 yield self.response(
                     rtype='step',
                     value=error_msg,
@@ -1016,20 +1146,119 @@ class ReActAgent(Agent):
                     metadata={'is_error': True}
                 )
 
+    def parse_text_response(self, text: str) -> ReActChatMessage:
+        """
+        Parse text-based response when structured output fails.
+        Uses regex to extract components from free-form text.
+
+        This is a FALLBACK for when JSON parsing completely fails.
+        It only handles text format like:
+            Thought: ...
+            Action: ...
+            Args: {...}
+        OR
+            Thought: ...
+            Answer: ...
+            Successful: true/false
+
+        Args:
+            text: The raw text response from the LLM
+
+        Returns:
+            Parsed structured response
+
+        Raises:
+            ValueError: If unable to parse required fields
+        """
+        logger.info('Falling back to text-based regex parsing')
+
+        # Extract thought - REQUIRED
+        thought_match = THOUGHT_MATCH.search(text)
+        if not thought_match:
+            raise ValueError(
+                f"Could not extract 'Thought:' field from response. "
+                f"Response must start with reasoning. Text: {text[:200]}..."
+            )
+        thought = thought_match.group(1).strip()
+
+        # Parse ReAct response
+        action_match = ACTION_MATCH.search(text)
+        action = action_match.group(1).strip() if action_match else None
+        args = None
+
+        # Try to extract and validate args
+        args_match = ARGS_MATCH.search(text)
+        if args_match:
+            args_str = args_match.group(1).strip()
+            args = ku.clean_json_string(args_str)
+            # Validate it's actually valid JSON
+            try:
+                json.loads(args)
+            except (JSONDecodeError, Exception) as e:
+                logger.warning(f'Args extraction failed, invalid JSON: {e}')
+                args = None
+
+        # Extract final answer and success status
+        answer_match = ANSWER_MATCH.search(text)
+        success_match = SUCCESS_MATCH.search(text)
+        final_answer = answer_match.group(1).strip() if answer_match else None
+        task_successful = success_match.group(1).lower() == 'true' if success_match else False
+
+        # Validation: Must have either (action + args) OR final_answer
+        if final_answer:
+            # This is a final answer
+            return ReActChatMessage(
+                role='assistant',
+                thought=thought,
+                action='FINISH',
+                args=None,
+                final_answer=final_answer,
+                task_successful=task_successful
+            )
+
+        if action:
+            # This is a tool call
+            if action == 'FINISH':
+                raise ValueError(
+                    f"Action is 'FINISH' but no Answer field found. "
+                    f"Text: {text[:200]}..."
+                )
+            if not args:
+                raise ValueError(
+                    f"Action '{action}' specified but no valid Args found. "
+                    f"Text: {text[:200]}..."
+                )
+            return ReActChatMessage(
+                role='assistant',
+                thought=thought,
+                action=action,
+                args=args,
+                final_answer=None,
+                task_successful=False
+            )
+        else:
+            raise ValueError(
+                f"Could not extract valid Action or Answer from response. "
+                f"Text: {text[:300]}..."
+            )
+
     def formatted_history_for_llm(self) ->list[dict]:
+        """Format message history for LLM with proper tool call structure."""
         formatted_messages = []
         last_tool_call_id = None
+        pending_tool_call = False  # Track if we're expecting a tool response
 
         for msg in self.messages:
             d = msg.model_dump()
             role = d.get('role')
-            # Handle assistant tool call (ReActChatMessage with action/tool use)
+
+            # Handle assistant tool call
             if role == 'assistant' and (
                     hasattr(msg, 'action') and getattr(msg, 'action', None)
             ) and not getattr(msg, 'final_answer', None):
-                # This is a tool call, not a final answer
                 tool_call_id = f'call_{uuid.uuid4().hex[:8]}'
                 last_tool_call_id = tool_call_id
+                pending_tool_call = True
                 formatted_messages.append({
                     'role': 'assistant',
                     'content': None,
@@ -1039,22 +1268,21 @@ class ReActAgent(Agent):
                             'type': 'function',
                             'function': {
                                 'name': getattr(msg, 'action'),
-                                'arguments': getattr(msg, 'args')
+                                'arguments': getattr(msg, 'args', '{}')
                             }
                         }
                     ]
                 })
 
             elif role == 'tool':
-                # Attach tool_call_id if available
                 tool_msg = {'role': 'tool', 'content': str(d.get('content', ''))}
                 if last_tool_call_id:
                     tool_msg['tool_call_id'] = last_tool_call_id
                     last_tool_call_id = None
+                    pending_tool_call = False
                 formatted_messages.append(tool_msg)
+
             elif role == 'assistant':
-                # Final answer or normal assistant message
-                # If final_answer is present, use it as content
                 if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
                     formatted_messages.append(
                         {'role': 'assistant', 'content': getattr(msg, 'final_answer')}
@@ -1063,28 +1291,34 @@ class ReActAgent(Agent):
                     formatted_messages.append(
                         {'role': 'assistant', 'content': d.get('content', '')}
                     )
+
             elif role == 'user':
                 usr_msgs = ku.make_user_message(
                     text_content=d.get('content', ''),
                     files=d.get('files', None)
                 )
                 formatted_messages.extend(usr_msgs)
+
             else:
                 # system
                 formatted_messages.append({'role': role, 'content': d.get('content', '')})
+
+        # Safety check: if we have a pending tool call without response, add a placeholder
+        if pending_tool_call and last_tool_call_id:
+            logger.warning(
+                'Found tool_call without corresponding tool response, adding placeholder')
+            formatted_messages.append({
+                'role': 'tool',
+                'tool_call_id': last_tool_call_id,
+                'content': 'Error: Tool execution was interrupted'
+            })
 
         formatted_messages = ku.combine_user_messages(formatted_messages)
         return formatted_messages
 
 
-# The environments where LLM-generated code can be executed
-CODE_ENV_NAMES = Literal['host', 'docker', 'e2b']
-
-
 class CodeRunner:
-    """
-    Run Python code generated by an LLM in a given environment.
-    """
+    """Run Python code generated by an LLM in a given environment."""
     def __init__(
             self,
             env: CODE_ENV_NAMES,
@@ -1106,25 +1340,27 @@ class CodeRunner:
         """
         self.allowed_imports: set[str] = set(allowed_imports)
         self.env: CODE_ENV_NAMES = env
-        self.pip_packages: list[str] = re.split('[,;]', pip_packages) if pip_packages else []
+        if pip_packages and len(pip_packages.strip()) > 0:
+            self.pip_packages: list[str] = re.split('[,;]', pip_packages)
+        else:
+            self.pip_packages = []
         self.default_timeout = timeout
         self.local_modules_to_copy = []
-        self.pip_packages_str = ' '.join(self.pip_packages)
+        self.pip_packages_str = ' '.join(self.pip_packages) if self.pip_packages else None
         self.env_vars_to_set = env_vars_to_set
 
     def check_imports(self, code) -> set[Union[str]]:
-        """
-        Check whether there is any module imported in a given source code outside the allowed
-        Python modules.
+        """Check for disallowed imports in code."""
+        import ast
 
-        Args:
-            code: The source code to scan.
-
-        Returns:
-            A (possibly empty) set of module names that are disallowed.
-        """
         tree = ast.parse(code)
         imported_modules = set()
+
+        # Check for dangerous builtins
+        dangerous = {'exec', 'eval', '__import__', 'compile'}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in dangerous:
+                raise Exception(f'Forbidden builtin: {node.id}')
 
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -1133,23 +1369,22 @@ class CodeRunner:
             elif isinstance(node, ast.ImportFrom):
                 imported_modules.add(node.module)
 
-        # Find any disallowed imports
         disallowed = imported_modules - self.allowed_imports
-
         return disallowed
 
-    def run(self, source_code: str) -> tuple[str, str, int]:
+    def run(self, source_code: str, task_id: str) -> tuple[str, str, int]:
         """
-        Run Python code in a pre-specified environment.
-        Do not return the stdout or stderr as `None`, since that would get converted to the string
-        'None'. Instead, set them to empty strings when required.
+        Run Python code in pre-specified environment.
 
         Args:
-            source_code: The Python code to run.
+            source_code: The Python source code to execute.
+            task_id: Unique task identifier for tracking.
 
         Returns:
-            The stdout, stderr, and the process return code (0 if no error).
+            A tuple of (stdout, stderr, return_code).
         """
+        import ast
+
         try:
             ast.parse(source_code)
         except SyntaxError as se:
@@ -1170,6 +1405,10 @@ class CodeRunner:
             )
 
         if self.env == 'host':
+            import shutil
+            import subprocess as sp
+            import tempfile
+
             warnings.warn(
                 'You are running LLM-generated code on your host. This could be potentially'
                 ' dangerous! Please consider using a different code runner environment.',
@@ -1179,9 +1418,8 @@ class CodeRunner:
                     mode='w+t', suffix='.py', delete=False, encoding='utf-8'
             ) as code_file:
                 code_file.write(source_code)
-                code_file.close()  # Close the file before execution
+                code_file.close()
 
-                # Copy the local dependency modules
                 for a_file in self.local_modules_to_copy:
                     shutil.copy2(
                         os.path.join(os.path.dirname(__file__), a_file),
@@ -1199,7 +1437,6 @@ class CodeRunner:
                 return result.stdout, result.stderr, result.returncode
 
         elif self.env =='e2b':
-            # Run the code on an E2B sandbox
             try:
                 import e2b_code_interpreter as e2b
             except ModuleNotFoundError:
@@ -1209,19 +1446,16 @@ class CodeRunner:
                 )
                 sys.exit(-1)
 
-            running_sandboxes = e2b.Sandbox.list()
-            logger.info('%d E2B sandboxes are running', len(running_sandboxes))
-            if running_sandboxes:
-                sbx = e2b.Sandbox.connect(running_sandboxes[0].sandbox_id)
-            else:
-                sbx = e2b.Sandbox(
-                    timeout=self.default_timeout + 15,
-                    envs=self.env_vars_to_set or {},
-                )
-                if self.pip_packages_str:
-                    sbx.commands.run(f'pip install {self.pip_packages_str}')
+            # Do not reuse existing sandboxes due to security reasons, as they may relate to
+            # other tasks/users. Always create a fresh sandbox.
+            sbx = e2b.Sandbox(
+                timeout=self.default_timeout + 15,
+                envs=self.env_vars_to_set or {},
+                metadata={'task_id': task_id}  # Track ownership
+            )
+            if self.pip_packages_str:
+                sbx.commands.run(f'pip install {self.pip_packages_str}')
 
-            # Copy the local dependency modules
             for a_file in self.local_modules_to_copy:
                 with open(
                         os.path.join(os.path.dirname(__file__), a_file),
@@ -1245,14 +1479,9 @@ class CodeRunner:
 
 
 class CodeActAgent(ReActAgent):
-    """
-    CodeAct is somewhat like ReAct but uses the Thought-Code-Observation loop rather than
-    the Thought-Action-Observation loop. In the TCO loop, Python code is written to invoke
-    tools, print & capture the results, and observe the results.
+    """CodeAct agent using Thought-Code-Observation loop."""
+    response_format_class: ClassVar[Type[pyd.BaseModel]] = CodeActChatMessage
 
-    CodeActAgent will retain most of the functionality from ReActAgent. Only the prompt formatting,
-    `_think(), and the `_act()` steps will change.
-    """
     def __init__(
             self,
             name: str,
@@ -1268,24 +1497,6 @@ class CodeActAgent(ReActAgent):
             env_vars_to_set: Optional[dict[str, str]] = None,
             filter_tools_for_task: bool = False,
     ):
-        """
-        Instantiate a CodeActAgent.
-
-        Args:
-            name: The name of the agent.
-            description: Description of the agent's capabilities or scope. Recommended to have.
-            model_name: The name of the LLM to be used (use names from LiteLLM).
-            tools: The tools available to the agent.
-            run_env: The code execution environment. `host` means code will be run on the system
-             where you create this agent. `e2b` means code will be run on an E2B sandbox. You will
-             need an E2B API key.
-            litellm_params: Optional parameters for LiteLLM.
-            max_iterations: The maximum number of steps that the agent should try to solve a task.
-            allowed_imports: A list of Python modules that the agent is allowed to import.
-            pip_packages: Optional Python libs to be installed with `pip` [for E2B].
-            timeout: Code execution timeout (default 30s).
-            env_vars_to_set: Optional environment variables to set in the code execution.
-        """
         super().__init__(
             name=name,
             model_name=model_name,
@@ -1295,8 +1506,6 @@ class CodeActAgent(ReActAgent):
             description=description,
             filter_tools_for_task=filter_tools_for_task,
         )
-        # Combine the source code of all tools into one place
-        # TODO Somehow dynamically identify and include the modules used by the tools
         self.tools_source_code: str = 'from typing import *\n\n'
 
         if tools:
@@ -1308,7 +1517,6 @@ class CodeActAgent(ReActAgent):
         if not allowed_imports:
             allowed_imports = []
 
-        # The following imports are allowed by default
         self.allowed_imports = allowed_imports + ['datetime', 'typing', 'mimetypes']
         self.code_runner = CodeRunner(
             env=run_env,
@@ -1319,23 +1527,17 @@ class CodeActAgent(ReActAgent):
         )
 
     def formatted_history_for_llm(self) ->list[dict]:
-        """
-        Generate a list of messages (dicts) with different roles to be sent to an LLM.
-
-        Returns:
-            A list of messages for LLM.
-        """
+        """Generate formatted message history for LLM."""
         formatted_messages = []
         last_tool_call_id = None
 
         for msg in self.messages:
             d = msg.model_dump()
             role = d.get('role')
-            # Handle assistant tool call (CodeActChatMessage with action/tool use)
+
             if role == 'assistant' and (
                     hasattr(msg, 'code') and getattr(msg, 'code', None)
             ) and not getattr(msg, 'final_answer', None):
-                # This is a tool call, not a final answer
                 tool_call_id = f'call_{uuid.uuid4().hex[:8]}'
                 last_tool_call_id = tool_call_id
                 formatted_messages.append({
@@ -1346,7 +1548,7 @@ class CodeActAgent(ReActAgent):
                             'id': tool_call_id,
                             'type': 'function',
                             'function': {
-                                'name': 'code_execution',
+                                'name': CODE_ACT_PSEUDO_TOOL_NAME,
                                 'arguments': json.dumps({
                                     "code": getattr(msg, 'code')
                                 })
@@ -1356,15 +1558,13 @@ class CodeActAgent(ReActAgent):
                 })
 
             elif role == 'tool':
-                # Attach tool_call_id if available
                 tool_msg = {'role': 'tool', 'content': str(d.get('content', ''))}
                 if last_tool_call_id:
                     tool_msg['tool_call_id'] = last_tool_call_id
                     last_tool_call_id = None
                 formatted_messages.append(tool_msg)
+
             elif role == 'assistant':
-                # Final answer or normal assistant message
-                # If final_answer is present, use it as content
                 if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
                     formatted_messages.append(
                         {'role': 'assistant', 'content': getattr(msg, 'final_answer')}
@@ -1373,88 +1573,116 @@ class CodeActAgent(ReActAgent):
                     formatted_messages.append(
                         {'role': 'assistant', 'content': d.get('content', '')}
                     )
+
             elif role == 'user':
                 usr_msgs = ku.make_user_message(
                     text_content=d.get('content', ''),
                     files=d.get('files', None)
                 )
                 formatted_messages.extend(usr_msgs)
+
             else:
-                # system
                 formatted_messages.append({'role': role, 'content': d.get('content', '')})
 
         formatted_messages = ku.combine_user_messages(formatted_messages)
         return formatted_messages
 
-    async def _think(self) -> AsyncIterator[AgentResponse]:
+    def parse_text_response(self, text: str) -> CodeActChatMessage:
         """
-        Think about the next step to be taken to solve the given task.
+        Uses regex to extract components from free-form text and parse into messages.
 
-        The LLM is prompted with the available tools and the TCO sequence so far. Based on them,
-        the LLM will suggest the next action/code.
+        Returns:
+            Parsed structured response
 
-        Yields:
-            Update from the thing step.
+        Raises:
+            ValueError: If unable to parse required fields
         """
-        if self.filter_tools_for_task:
-            relevant_tools = await self.get_relevant_tools(
-                task_description=self.task.description, task_files=self.task.files
+        react_msg: ReActChatMessage = super().parse_text_response(text)
+        thought = react_msg.thought
+        final_answer = react_msg.final_answer
+        task_successful = react_msg.task_successful
+
+        # Parse CodeAct response
+        code_match = CODE_MATCH.search(text)
+        code = code_match.group(1).strip() if code_match else None
+
+        # Also try to find code without markdown blocks
+        if not code:
+            code_alt_match = re.search(
+                r'Code:\s*(.+?)(?=\n(?:Thought|Answer):|$)',
+                text,
+                re.DOTALL | re.IGNORECASE
             )
-        else:
-            relevant_tools = self.tools
+            if code_alt_match:
+                code = code_alt_match.group(1).strip()
+                code = code.strip('`').strip()
+            else:
+                code = None
 
+        # Validation: Must have either code OR final_answer
+        if final_answer:
+            return CodeActChatMessage(
+                role='assistant',
+                thought=thought,
+                code=None,
+                final_answer=final_answer,
+                task_successful=task_successful
+            )
+
+        if code:
+            return CodeActChatMessage(
+                role='assistant',
+                thought=thought,
+                code=code,
+                final_answer=None,
+                task_successful=False
+            )
+
+        raise ValueError(
+            f"Could not extract valid Code or Answer from response. Text: {text[:300]}..."
+        )
+
+    async def _think(self) -> AsyncIterator[AgentResponse]:
+        """Think step for CodeAct agent."""
         msg = await self._record_thought(CodeActChatMessage)
         yield self.response(rtype='step', value=msg, channel='_think')
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
-        """
-        Code action based on CodeActAgent's previous thought.
-
-        The LLM has suggested code. This method will run the code.
-
-        Yields:
-            Updates from the acting step.
-        """
+        """Execute code based on CodeActAgent's previous thought."""
         prev_msg: CodeActChatMessage = self.messages[-1]  # type: ignore
 
-        if (
-                not hasattr(prev_msg, 'final_answer') or (
-                    not prev_msg.final_answer and (not prev_msg.code or not prev_msg.thought)
-                )
-        ):
+        if not hasattr(prev_msg, 'thought') or not prev_msg.thought:
             self.add_to_history(
                 ChatMessage(
                     role='user',
                     content=(
-                        '* Error: incorrect response generated. Must have values for the'
-                        ' `final_answer` or the `thought` and `code` fields. Please respond '
-                        ' strictly following the CodeActChatMessage schema.'
+                        '* Error: Response must have a valid `thought` field. '
+                        'Please respond strictly following the schema.'
                     )
                 )
             )
             return
 
         if hasattr(prev_msg, 'final_answer') and prev_msg.final_answer:
-            # The final answer has been found!
             self.final_answer_found = True
             self.task.is_finished = True
-            self.task.is_error = prev_msg.task_successful
-            # Do NOT add another ChatMessage to history here; it's already added in _record_thought
+            self.task.is_error = not prev_msg.task_successful
+
             yield self.response(
                 rtype='final',
-                value=prev_msg,
+                value=prev_msg.final_answer,
                 channel='_act',
                 metadata={'final_answer_found': prev_msg.task_successful}
             )
         else:
-            # No answer yet, keep tool calling
             try:
                 code = prev_msg.code.strip()
                 code = code.replace('```py', '')
+                code = code.replace('```python', '')
                 code = code.replace('```', '').strip()
                 code = f'{self.tools_source_code}\n\n{code}'
 
-                stdout, stderr, exit_status = self.code_runner.run(code)
+                stdout, stderr, exit_status = self.code_runner.run(code, self.task.id)
                 observation = f'{stdout}\n{stderr}'.strip()
                 msg = ChatMessage(role='tool', content=observation)
                 self.add_to_history(msg)
@@ -1466,7 +1694,8 @@ class CodeActAgent(ReActAgent):
                 )
 
             except Exception as ex:
-                error_msg = f'*** An error occurred while running the code: {ex}'
+                error_msg = f'*** Error running code: {type(ex).__name__}: {str(ex)}'
+                logger.exception(error_msg)
                 self.add_to_history(ChatMessage(role='user', content=error_msg))
                 yield self.response(
                     rtype='step',
@@ -1477,15 +1706,7 @@ class CodeActAgent(ReActAgent):
 
 
 def llm_vision_support(model_names: list[str]) -> list[bool]:
-    """
-    Utility function to check whether images can be used with given LLMs.
-
-    Args:
-        model_names: A list of LLM names.
-
-    Returns:
-        A list of booleans, containing `True` or `False` for each model.
-    """
+    """Check whether images can be used with given LLMs."""
     status = [litellm.supports_vision(model=model) for model in model_names]
     for model, value in zip(model_names, status):
         print(f'- Vision supported by {model}: {value}')
@@ -1494,20 +1715,11 @@ def llm_vision_support(model_names: list[str]) -> list[bool]:
 
 
 def print_response(response: AgentResponse, only_final: bool = True):
-    """
-    A utility function to print agent's response in a terminal, optionally with colors.
-
-    Args:
-        response: A response obtained from an agent.
-        only_final: If `True`, only print the final response from the agent. Otherwise, print
-         all responses, including intermediate steps and logs.
-         
-    """
-
+    """Print agent's response in terminal with colors."""
     if response['type'] == 'final':
         msg = (
-            response['value'].content
-            if isinstance(response['value'], ChatMessage) else response['value']
+            response['value']
+            if isinstance(response['value'], str) else response['value']
         )
         rich.print(f'[blue][bold]Agent[/bold]: {msg}[/blue]\n')
 
@@ -1519,70 +1731,30 @@ def print_response(response: AgentResponse, only_final: bool = True):
 
 
 async def main():
-    """
-    Demonstrate the use of ReActAgent and CodeActAgent.
-    """
+    """Demonstrate the use of ReActAgent and CodeActAgent."""
     litellm_params = {'temperature': 0, 'timeout': 30}
     model_name = 'gemini/gemini-2.0-flash-lite'
-
-    # response = await call_llm(
-    #     model_name=model_name,
-    #     litellm_params=litellm_params,
-    #     messages=[
-    #         {'role': 'system',
-    #          'content': 'You are an expert, helpful agent designed to solve complex tasks using a set of specialized tools.\n\n\n## Core Directives\n\n1.  **Process:** Your process is a strict `Thought` -> `Action` -> `Observation` cycle. Repeat this cycle until the task is complete.\n2.  **Progression:** Each step must meaningfully advance the task. Never repeat a failed attempt without a clear modification. Do not call the same tool with the same arguments twice.\n3.  **Final Answer:** When the task is complete, you must provide the final answer using the structured format below.\n\n\nStrictly adhere to the following Thought-Action sequence:\nThought: Based on the current task status, what is the next logical step to take?\nAction: tool name (one of aforementioned tool names)\nArgs: the input arguments to the tool, in a JSON format representing the kwargs (e.g. {"input": "hello world", "num_beams": 5})\n\n\n## Final Answer Format\n\n* **For a successful task:**\n\n`Thought: I have enough information to answer. I will use the user\'s language.`\n`Answer: <Your final answer in the user\'s language>`\n`Successful: True`\n\n* **For a failed task:**\n\n`Thought: I cannot answer the question with the provided tools/information.`\n`Answer: <Your explanation in the user\'s language>`\n`Successful: False`\n\n\n## Examples\n\nHere are some examples of good and bad practices to help you understand the expected format and behavior using **notional** tasks and tools.\n\n---\n[Task: What color is the sky in this picture? (Image: camera.jpg)]\nThought: The user has provided an image file and wants to know the color of the sky. I have the image directly available to me. Since this is a basic visual analysis task, I will use my innate abilities to answer instead of using a tool.\nAnswer: The sky in the picture is blue.\nSuccessful: True\n\n---\n[Task: Which city has the highest population: Guangzhou or Shanghai?]\n\nThought: The current language of the user is: English. I need to get the populations for both cities and compare them. I will start with Guangzhou and use the tool `web_search`.\nAction: web_search\nArgs: {"query": "Guangzhou population"}\nObservation: [\'Guangzhou has a population of 15 million inhabitants as of 2021.\']\n\nThought: I have the population for Guangzhou. Now I need to find the population of Shanghai using `web_search`.\nAction: web_search\nArgs: {"query": "Shanghai population"}\nObservation: [\'Shanghai population 26 million (2019)\']\n\nThought: Based on the search results from the previous steps, I know that Shanghai has a population of 26 million and Guangzhou has 15 million. So Shanghai has the highest population.\nAnswer: Based on the search results, Shanghai has the highest population.\nSuccessful: True\n\n---\n[Task: Generate a video of the moon.]\n\nThought: The user has asked to generate a video of the moon. Unfortunately, I neither have the innate ability nor any tool that can generate a video. So, I can\'t solve this task.\nAnswer: Unfortunately, I lack the ability to solve this task. May I help you with something else?\nSuccessful: False\n\n---\n[Task: Generate an image of the oldest person in this document.]\n\nThought: The current language of the user is: English. I will begin by identifying the oldest person mentioned in the document using the `document_qa tool`. I only need to print the answer, not the entire document.\nAction: document_qa\nArgs: {"question": "Who is the oldest person mentioned?"}\nObservation: The oldest person in the document is John Doe, a 55 year old lumberjack living in Newfoundland.\n\nThought: Based on the given document, John Doe (55) is the oldest person. He lives in Newfoundland, Canada. As my next logical step, I\'ll use the `image_generator` tool to generate his portrait.\nAction: image_generator\nArgs: {"prompt": "A portrait of John Doe, a 55-year-old man living in Canada."}\nObservation: image.png\n\nThought: Based on the given document, John Doe (55) is the oldest person. I have also generated his portrait and saved it in the image.png file.\nAnswer: An image of the oldest person has been generated and saved as `image.png`.\nSuccessful: True\n\n\n## Tools\n\nYou have access to the following specialized tools:\n- Tool name: calculator\n- Tool description: A simple calculator tool that can evaluate basic arithmetic expressions.\nThe expression must contain only the following allowed mathematical symbols:\ndigits, +, -, *, /, ., (, )\n\nThe ^ symbol, for example, is not allowed. For exponent, use **.\nIn case the expression has any invalid symbol, the function returns `None`.\n\nArgs:\n    expression (str): The arithmetic expression as a string.\n\nReturns:\n    The numerical result or `None` in case an incorrect arithmetic expression is provided\n     or any other error occurs.\n---\n- Tool name: search_web\n- Tool description: Search the Web using DuckDuckGo. The input should be a search query.\nUse this tool when you need to answer questions about current events and general web search.\nIt returns (as Markdown text) the top search results with titles, links, and optional\ndescriptions.\nNOTE: The returned URLs can be visited using the `extract_as_markdown` tool to retrieve\nthe contents the respective pages.\n\nArgs:\n    query: The query string.\n    max_results: Maximum no. of search results (links) to return.\n    show_description: If `True`, includes the description of each search result.\n     Default is `False`.\n\nReturns:\n     The search results.\n---\n- Tool name: extract_file_contents_as_markdown\n- Tool description: Always use this tool to extract the contents of HTML files (.html), PDF files (.pdf),\nWord documents (.docx), and Excel spreadsheets (.xlsx) as Markdown text. No other file type\nis supported. The input can point to a URL or a local file path.\nThe extracted text can be used for analysis with LLMs.\nThis tool can directly work with URLs, so no need to download the files using\n`file_download` separately.\nNOTE: The output returned by this function can be long and may involve lots of quote marks.\n\nArgs:\n    url_or_file_path: URL or Path to a .html, .pdf, .docx, or .xlsx file.\n    scrub_links: Defaults to `True`, which removes all links from the extracted Markdown text.\n     Set it to `False` if you want to retain the links in the text.\n    max_length: If set, limit the output to the first `max_length` characters. This can be used\n     to truncate the output but doing so can also lead to loss of information.\n\nReturns:\n    The content of the file in Markdown format.\n---\n\n\n\n## Guidelines & Constraints\n\n- Always generate a Thought-Action sequence.\n- Use tools only when needed and only those listed.\n- Always use the correct arguments for tools.\n'},
-    #         {'role': 'user',
-    #          'content': 'Task: What is four plus seven? Also, what are the festivals in Paris? How they differ from Kolkata?\n\nPlan:\n- [ ] Calculate the sum of four and seven.\n- [ ] Identify the festivals celebrated in Paris.\n- [ ] Identify the festivals celebrated in Kolkata.\n- [ ] Compare the festivals in Paris and Kolkata, highlighting their differences.'},
-    #         # ReAct
-    #         # {'role': 'assistant', 'content': None, 'tool_calls': [
-    #         #     {'id': 'call_6b5e8ec0', 'type': 'function',
-    #         #      'function': {'name': 'calculator', 'arguments': '{"expression": "4 + 7"}'}}]},
-    #         # CodeAct equivalent
-    #         {
-    #             "role": "assistant",
-    #             "content": "Thought: I need to calculate 4 + 7 and fetch festivals in Paris and Kolkata.\nCode:\n```python\nresult = calculator(expression=\"4 + 7\")\n```\n",
-    #             "tool_calls": [
-    #                 {
-    #                     "id": "call_6b5e8ec0",
-    #                     "type": "code_execution",
-    #                     "function": {
-    #                         "name": "code",  # or "python" depending on framework
-    #                         "arguments": json.dumps({
-    #                           "code": "result = calculator(expression=\"4 + 7\")"
-    #                         })
-    #                     }
-    #                 }
-    #             ]
-    #         },
-    #         {'role': 'tool', 'content': '11', 'tool_call_id': 'call_6b5e8ec0'}
-    #     ]
-    # )
-    # print(response)
-    # return
+    # model_name = 'openai/gpt-4.1-mini'
 
     agent = ReActAgent(
         name='Simple agent',
         model_name=model_name,
-        tools=[tools.calculator, tools.search_web, tools.extract_file_contents_as_markdown,],
+        tools=[dtools.calculator, dtools.search_web, dtools.extract_file_contents_as_markdown,],
         max_iterations=5,
         litellm_params=litellm_params,
         filter_tools_for_task=False
     )
     # agent = CodeActAgent(
-    #     name='Web agent',
+    #     name='Simple agent',
     #     model_name=model_name,
-    #     tools=[
-    #         tools.search_web, tools.search_arxiv, tools.extract_file_contents_as_markdown,
-    #         tools.download_file, tools.get_youtube_transcript,
-    #     ],
-    #     run_env='host',
-    #     max_iterations=5,
+    #     tools=[dtools.calculator, dtools.search_web, dtools.extract_file_contents_as_markdown,],
+    #     max_iterations=7,
     #     litellm_params=litellm_params,
+    #     run_env='host',
     #     allowed_imports=[
-    #         'os', 're', 'time', 'random', 'requests', 'tempfile',
-    #         'ddgs', 'markitdown', 'youtube_transcript_api', 'arxiv',
+    #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs', 'markitdown'
     #     ],
-    #     pip_packages='ddgs~=9.5.2;"markitdown[all]";',
+    #     pip_packages=None,
     #     filter_tools_for_task=False
     # )
 
@@ -1607,13 +1779,12 @@ async def main():
         ),
     ]
 
-
     print(f'{agent.__class__.__name__} demo\n')
 
     for task, img_urls in the_tasks:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in agent.run(task, files=img_urls):
-            print_response(response)
+            print_response(response, only_final=True)
 
         if agent.current_plan:
             print(f'Plan:\n{agent.current_plan}')
@@ -1623,7 +1794,5 @@ async def main():
 
 
 if __name__ == '__main__':
-    # For Windows; in case of Unicode error with PDF extraction
     os.environ['PYTHONUTF8'] = '1'
-
     asyncio.run(main())
