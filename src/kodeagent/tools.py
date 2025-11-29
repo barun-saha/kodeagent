@@ -71,9 +71,9 @@ def calculator(expression: str) -> Union[float, None]:
     Raises:
         ValueError: If the expression contains invalid characters.
     """
-    import re
     import ast
     import operator
+    import re
 
     # Clean the expression
     expression = expression.replace("'", "").replace('^', '**')

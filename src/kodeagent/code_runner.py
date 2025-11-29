@@ -10,8 +10,14 @@ from . import kutils as ku
 
 
 CODE_ENV_NAMES = Literal['host', 'docker', 'e2b']
+"""Allowed code execution environment names."""
+DEFAULT_ALLOWED_IMPORTS = {
+    'ast', 'operator', 're',  # calculator
+}
+""" Default allowed imports for code execution."""
 # Check for the use of dangerous builtins
-DANGEROUS_IMPORTS = {'exec', 'eval', '__import__', 'compile'}
+DANGEROUS_BUILTINS = {'exec', 'eval', '__import__', 'compile'}
+"""Dangerous built-in functions that are not allowed in code execution."""
 
 logger = ku.get_logger()
 
@@ -45,7 +51,7 @@ class CodeRunner:
             env_vars_to_set: Optional environment variables to set in the code execution
              environment (E2B only).
         """
-        self.allowed_imports: set[str] = set(allowed_imports)
+        self.allowed_imports: set[str] = set(allowed_imports).union(DEFAULT_ALLOWED_IMPORTS)
         self.env: CODE_ENV_NAMES = env
         if pip_packages and len(pip_packages.strip()) > 0:
             self.pip_packages: list[str] = re.split('[,;]', pip_packages)
@@ -72,7 +78,7 @@ class CodeRunner:
         imported_modules = set()
 
         for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and node.id in DANGEROUS_IMPORTS:
+            if isinstance(node, ast.Name) and node.id in DANGEROUS_BUILTINS:
                 raise CodeSecurityError(f'Forbidden builtin: {node.id}')
 
         for node in ast.walk(tree):

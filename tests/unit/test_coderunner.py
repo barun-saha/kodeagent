@@ -276,3 +276,18 @@ from requests import get
     assert 'requests' in disallowed
     assert 'os' not in disallowed
     assert 'datetime' not in disallowed
+
+
+def test_code_runner_default_allowed_imports():
+    """DEFAULT_ALLOWED_IMPORTS should be available even if not passed in."""
+    runner = CodeRunner(env='host', allowed_imports=[])
+
+    code = "import re\ncompiled = re.compile(r'abc')"
+    disallowed = runner.check_imports(code)
+
+    assert 're' not in disallowed, "Default allowed import 're' should be permitted"
+
+    code = 'import math'
+    disallowed = runner.check_imports(code)
+
+    assert 'math' in disallowed, 'Non-default import should still be disallowed'
