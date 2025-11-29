@@ -66,7 +66,6 @@ def test_run_code_host_warning_and_files():
         assert mock_remove.call_count == 1
 
 
-@patch.dict(sys.modules, {}, clear=True)
 def test_run_code_e2b_execution_error():
     """Test E2B execution when the code itself fails."""
     mock_e2b = MagicMock()
@@ -114,7 +113,6 @@ def test_code_runner_pip_parsing_logic():
     assert runner_none.pip_packages == []
 
 
-@patch.dict(sys.modules, {}, clear=True)
 def test_run_code_e2b_pip_install_skipped_without_packages():
     """No pip command should run when pip_packages_str is falsy."""
     mock_e2b = MagicMock()
