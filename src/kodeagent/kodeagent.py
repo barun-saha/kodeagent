@@ -1114,7 +1114,7 @@ class CodeActAgent(ReActAgent):
         self.code_runner = CodeRunner(
             env=run_env,
             allowed_imports=self.allowed_imports,
-            pip_packages=pip_packages,
+            pip_packages=self.pip_packages,
             timeout=timeout,
             env_vars_to_set=env_vars_to_set,
         )
@@ -1345,11 +1345,11 @@ async def main():
     #     tools=[dtools.calculator, dtools.search_web, dtools.extract_file_contents_as_markdown,],
     #     max_iterations=7,
     #     litellm_params=litellm_params,
-    #     run_env='host',
+    #     run_env='e2b',
     #     allowed_imports=[
     #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs', 'markitdown'
     #     ],
-    #     pip_packages=None,
+    #     pip_packages='ddgs~=9.5.2;',
     #     filter_tools_for_task=False
     # )
 
