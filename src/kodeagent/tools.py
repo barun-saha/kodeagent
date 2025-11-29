@@ -67,26 +67,64 @@ def calculator(expression: str) -> Union[float, None]:
     Returns:
         The numerical result or `None` in case an incorrect arithmetic expression is provided
          or any other error occurs.
+
+    Raises:
+        ValueError: If the expression contains invalid characters.
     """
     import re
+    import ast
+    import operator
 
-    # Tools should be self-contained, including the imports
-    # This allows their usage in an isolated environment
-    # That is why, we import `re` and compute the regex inside this tool definition, not outside
+    # Clean the expression
     expression = expression.replace("'", "").replace('^', '**')
 
     # Define a regex pattern for valid mathematical expressions
-    # It's important to define it inside the tool so that the function is complete by itself
     calculator_regex = re.compile(r'^[\d+\-*/().\s]+$')
 
-    if calculator_regex.match(expression) is not None:
-        try:
-            # Evaluate the expression safely
-            result = eval(expression)
-            return result
-        except Exception as e:
-            return None
-    else:
+    if calculator_regex.match(expression) is None:
+        return None
+
+    try:
+        # Parse the expression into an AST
+        node = ast.parse(expression, mode='eval').body
+
+        # Define allowed operations
+        allowed_operators = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+            ast.Pow: operator.pow,
+            ast.USub: operator.neg,
+            ast.UAdd: operator.pos,
+        }
+
+        def eval_node(node):
+            """Recursively evaluate the AST node."""
+            if isinstance(node, ast.Constant):  # Python 3.8+
+                return node.value
+            elif isinstance(node, ast.Num):  # Python 3.7 and earlier
+                return node.n
+            elif isinstance(node, ast.BinOp):  # Binary operation
+                op_type = type(node.op)
+                if op_type not in allowed_operators:
+                    raise ValueError(f'Operator {op_type} not allowed')
+                left = eval_node(node.left)
+                right = eval_node(node.right)
+                return allowed_operators[op_type](left, right)
+            elif isinstance(node, ast.UnaryOp):  # Unary operation
+                op_type = type(node.op)
+                if op_type not in allowed_operators:
+                    raise ValueError(f'Operator {op_type} not allowed')
+                operand = eval_node(node.operand)
+                return allowed_operators[op_type](operand)
+            else:
+                raise ValueError(f'Unsupported node type: {type(node)}')
+
+        result = eval_node(node)
+        return float(result)
+
+    except Exception as e:
         return None
 
 
