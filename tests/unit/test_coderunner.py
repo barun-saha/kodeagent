@@ -114,6 +114,47 @@ def test_code_runner_pip_parsing_logic():
     assert runner_none.pip_packages == []
 
 
+@patch.dict(sys.modules, {}, clear=True)
+def test_run_code_e2b_pip_install_skipped_without_packages():
+    """No pip command should run when pip_packages_str is falsy."""
+    mock_e2b = MagicMock()
+    mock_sbx = MagicMock()
+    mock_e2b.Sandbox.create.return_value.__enter__.return_value = mock_sbx
+    mock_exec = MagicMock()
+    mock_exec.logs.stdout = []
+    mock_exec.logs.stderr = []
+    mock_exec.error = None
+    mock_sbx.run_code.return_value = mock_exec
+
+    with patch.dict(sys.modules, {'e2b_code_interpreter': mock_e2b}):
+        runner = CodeRunner(env='e2b', allowed_imports=[], pip_packages='')
+        runner.run("print('hi')", task_id='pip-skip')
+
+    mock_sbx.commands.run.assert_not_called()
+
+
+def test_run_code_e2b_pip_install_runs_with_packages():
+    """pip install should run and local files should be uploaded when packages exist."""
+    mock_e2b = MagicMock()
+    mock_sbx = MagicMock()
+    mock_e2b.Sandbox.create.return_value.__enter__.return_value = mock_sbx
+    mock_exec = MagicMock()
+    mock_exec.logs.stdout = []
+    mock_exec.logs.stderr = []
+    mock_exec.error = None
+    mock_sbx.run_code.return_value = mock_exec
+
+    with patch.dict(sys.modules, {'e2b_code_interpreter': mock_e2b}):
+        runner = CodeRunner(env='e2b', allowed_imports=[], pip_packages='uvicorn')
+        runner.local_modules_to_copy = ['dummy.py']
+
+        with patch('kodeagent.code_runner.open', mock_open(read_data='print("x")'), create=True):
+            runner.run("print('hi')", task_id='pip-run')
+
+    mock_sbx.commands.run.assert_called_once_with('pip install uvicorn')
+    mock_sbx.files.write.assert_called_once_with('/home/user/dummy.py', 'print("x")')
+
+
 def test_run_code_e2b_module_missing():
     """Test that missing e2b module raises SystemExit."""
     # We simulate the module being missing by setting it to None in sys.modules
