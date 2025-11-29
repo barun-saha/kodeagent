@@ -303,6 +303,14 @@ You can import and use ONLY the following standard Python libraries in your code
 
 {authorized_imports}
 
+
+## DANGEROUS Builtins
+
+Your code must NOT use the following builtins:
+
+'exec', 'eval', '__import__', 'compile'
+
+
 **Usage:**
 - Import at the start of each code block: `import datetime`
 - These are the ONLY libraries allowed
