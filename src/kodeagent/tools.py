@@ -124,7 +124,7 @@ def calculator(expression: str) -> Union[float, None]:
         result = eval_node(node)
         return float(result)
 
-    except Exception as e:
+    except Exception:
         return None
 
 

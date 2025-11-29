@@ -76,56 +76,79 @@ class TestCalculator:
 
     def test_basic_arithmetic(self):
         """Test basic arithmetic operations."""
-        assert calculator("2 + 3") == 5.0
-        assert calculator("10 - 4") == 6.0
-        assert calculator("3 * 4") == 12.0
-        assert calculator("15 / 3") == 5.0
+        assert calculator('2 + 3') == 5.0
+        assert calculator('10 - 4') == 6.0
+        assert calculator('3 * 4') == 12.0
+        assert calculator('15 / 3') == 5.0
 
     def test_complex_expressions(self):
         """Test complex expressions with parentheses."""
-        assert calculator("(2 + 3) * 4") == 20.0
-        assert calculator("10 / (2 + 3)") == 2.0
-        assert calculator("((5 + 3) * 2) - 4") == 12.0
+        assert calculator('(2 + 3) * 4') == 20.0
+        assert calculator('10 / (2 + 3)') == 2.0
+        assert calculator('((5 + 3) * 2) - 4') == 12.0
 
     def test_exponentiation(self):
         """Test exponentiation with **."""
-        assert calculator("2 ** 3") == 8.0
-        assert calculator("5 ** 2") == 25.0
+        assert calculator('2 ** 3') == 8.0
+        assert calculator('5 ** 2') == 25.0
 
     def test_caret_conversion(self):
         """Test that ^ is converted to **."""
-        assert calculator("2 ^ 3") == 8.0
+        assert calculator('2 ^ 3') == 8.0
 
     def test_negative_numbers(self):
         """Test unary minus."""
-        assert calculator("-5 + 3") == -2.0
-        assert calculator("10 + (-5)") == 5.0
+        assert calculator('-5 + 3') == -2.0
+        assert calculator('10 + (-5)') == 5.0
 
     def test_decimal_numbers(self):
         """Test decimal arithmetic."""
-        assert calculator("2.5 + 3.5") == 6.0
-        assert calculator("10.5 / 2") == 5.25
+        assert calculator('2.5 + 3.5') == 6.0
+        assert calculator('10.5 / 2') == 5.25
 
     def test_invalid_characters(self):
         """Test that invalid characters return None."""
-        assert calculator("2 + a") is None
-        assert calculator("import os") is None
+        assert calculator('2 + a') is None
+        assert calculator('import os') is None
         assert calculator("__import__('os')") is None
         assert calculator("2 + 3; print('hello')") is None
 
     def test_invalid_syntax(self):
         """Test that invalid syntax returns None."""
-        assert calculator("2 + + 3") == 5.0  # This is valid syntax; 2 + (+3)
-        assert calculator("(2 + 3") is None
-        assert calculator("2 +") is None
+        assert calculator('2 + + 3') == 5.0  # This is valid syntax; 2 + (+3)
+        assert calculator('(2 + 3') is None
+        assert calculator('2 +') is None
 
     def test_division_by_zero(self):
         """Test division by zero returns None."""
-        assert calculator("5 / 0") is None
+        assert calculator('5 / 0') is None
 
     def test_quote_removal(self):
         """Test that quotes are removed from expression."""
         assert calculator("'2 + 3'") == 5.0
+
+    def test_calculator_handles_basic_expression(self):
+        """Covers Constant/Num and BinOp happy-path."""
+        result = calculator('2 + 3 * 4 - 5 / 2')
+        assert result == pytest.approx(11.5)
+
+    def test_calculator_supports_unary_plus_and_minus(self):
+        """Exercises the UnaryOp branch when the operator *is* allowed."""
+        # -(-4) -> 4 ; +3 -> 3 ; result should be 7.0 as float
+        result = calculator('-(-4) + +3')
+        assert result == pytest.approx(7.0)
+
+    def test_calculator_rejects_disallowed_binary_operator(self):
+        """Triggers the BinOp branch that raises for unsupported operators."""
+        assert calculator('2 << 1') is None  # ast.LShift is not in allowed_operators
+
+    def test_calculator_rejects_disallowed_unary_operator(self):
+        """Triggers the UnaryOp branch that raises for unsupported operators."""
+        assert calculator('~5') is None  # ast.Invert should be rejected
+
+    def test_calculator_rejects_function_calls(self):
+        """Exercises the final 'else' branch (unsupported node types)."""
+        assert calculator('abs(-5)') is None
 
 
 class TestSearchWeb:
