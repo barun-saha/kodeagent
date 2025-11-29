@@ -200,31 +200,30 @@ class CodeRunner:
             )
             sys.exit(-1)
 
-        # Do not reuse existing sandboxes due to security reasons, as they may relate to
-        # other tasks/users. Always create a fresh sandbox.
-        sbx = e2b.Sandbox(
-            timeout=self.default_timeout + 15,
-            envs=self.env_vars_to_set or {},
-            metadata={'task_id': task_id}  # Track ownership
-        )
-        if self.pip_packages_str:
-            sbx.commands.run(f'pip install {self.pip_packages_str}')
+        # Do not reuse existing sandboxes due to security reasons, as they may leak other tasks
+        with e2b.Sandbox.create(
+                timeout=self.default_timeout + 15,
+                envs=self.env_vars_to_set or {},
+                metadata={'task_id': task_id}
+        ) as sbx:
+            if self.pip_packages_str:
+                sbx.commands.run(f'pip install {self.pip_packages_str}')
 
-        for a_file in self.local_modules_to_copy:
-            with open(
-                    os.path.join(os.path.dirname(__file__), a_file),
-                    'r',
-                    encoding='utf-8'
-            ) as py_file:
-                sbx.files.write(f'/home/user/{a_file}', py_file.read())
-                logger.info('Copied file %s...', a_file)
+            for a_file in self.local_modules_to_copy:
+                with open(
+                        os.path.join(os.path.dirname(__file__), a_file),
+                        'r',
+                        encoding='utf-8'
+                ) as py_file:
+                    sbx.files.write(f'/home/user/{a_file}', py_file.read())
+                    logger.info('Copied file %s...', a_file)
 
-        logger.info('E2B sandbox info: %s', sbx.get_info())
-        execution = sbx.run_code(code=source_code, timeout=self.default_timeout)
-        std_out: str = '\n'.join(execution.logs.stdout)
-        std_err: str = '\n'.join(execution.logs.stderr)
-        if execution.error:
-            std_err += f'\n{execution.error.name}\n{execution.error.value}'
-        ret_code: int = -1 if execution.error else 0
+            logger.info('E2B sandbox info: %s', sbx.get_info())
+            execution = sbx.run_code(code=source_code, timeout=self.default_timeout)
+            std_out: str = '\n'.join(execution.logs.stdout)
+            std_err: str = '\n'.join(execution.logs.stderr)
+            if execution.error:
+                std_err += f'\n{execution.error.name}\n{execution.error.value}'
+            ret_code: int = -1 if execution.error else 0
 
         return std_out, std_err, ret_code
