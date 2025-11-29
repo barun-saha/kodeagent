@@ -4,7 +4,7 @@ E2B sandbox execution. Also, defines custom exceptions for security and environm
 """
 import re
 import warnings
-from typing import Optional, Union, Literal
+from typing import Optional, Literal
 
 from . import kutils as ku
 
@@ -56,7 +56,7 @@ class CodeRunner:
         self.pip_packages_str = ' '.join(self.pip_packages) if self.pip_packages else None
         self.env_vars_to_set = env_vars_to_set
 
-    def check_imports(self, code) -> set[Union[str]]:
+    def check_imports(self, code: str) -> set[str]:
         """
         Check for disallowed imports in code.
 

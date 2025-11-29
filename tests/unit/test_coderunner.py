@@ -203,7 +203,7 @@ def test_run_code_e2b_file_copying():
             mocked_file.assert_called_with(
                 # We can't easily predict the full path (os.path.dirname),
                 # so we check if it ended with the filename we expect.
-                pytest.approx(match_path('my_helper.py')),
+                match_path('my_helper.py'),
                 'r',
                 encoding='utf-8'
             )
