@@ -21,7 +21,6 @@ from kodeagent import (
     Observer,
     ObserverResponse,
     Agent,
-    CodeRunner,
     AgentResponse
 )
 from kodeagent.tools import (
@@ -825,94 +824,6 @@ def test_agent_subclass(mock_llm):
     assert len(agent.tool_name_to_func) == 0
 
 
-def test_code_runner_initialization():
-    """Test CodeRunner initialization and configuration."""
-    runner = CodeRunner(
-        env='host',
-        allowed_imports=['os', 'datetime'],
-        pip_packages='requests==2.31.0',
-        timeout=45,
-        env_vars_to_set={'TEST_VAR': 'test_value'}
-    )
-    assert runner.env == 'host'
-    assert 'os' in runner.allowed_imports
-    assert 'datetime' in runner.allowed_imports
-    assert runner.pip_packages == ['requests==2.31.0']
-    assert runner.default_timeout == 45
-    assert runner.env_vars_to_set == {'TEST_VAR': 'test_value'}
-
-
-def test_code_runner_check_imports():
-    """Test import checking functionality of CodeRunner."""
-    runner = CodeRunner(env='host', allowed_imports=['os', 'datetime'])
-
-    # Test allowed imports
-    code_with_allowed = """
-import os
-from datetime import datetime
-print('test')
-"""
-    assert len(runner.check_imports(code_with_allowed)) == 0
-
-    # Test disallowed imports
-    code_with_disallowed = """
-import os
-import requests
-from flask import Flask
-"""
-    disallowed = runner.check_imports(code_with_disallowed)
-    assert 'requests' in disallowed
-    assert 'flask' in disallowed
-
-
-def test_code_runner_syntax_error():
-    """Test CodeRunner handling of syntax errors."""
-    runner = CodeRunner(env='host', allowed_imports=['os'])
-    code_with_syntax_error = '''
-print('Hello'
-print('World')  # Missing parenthesis above
-'''
-    _, stderr, exit_code = runner.run(task_id='task-1234', source_code=code_with_syntax_error)
-    assert exit_code != 0
-    assert 'SyntaxError' in stderr
-
-
-def test_code_runner():
-    """Test the CodeRunner's code execution functionality."""
-    # Initialize CodeRunner with host environment and basic allowed imports
-    runner = CodeRunner(env='host', allowed_imports=['math', 'datetime'], timeout=5)
-
-    # Test successful code execution
-    code = '''
-import math
-result = math.sqrt(16)
-print(f"Square root is {result}")
-'''
-    stdout, stderr, return_code = runner.run(task_id='task-1234', source_code=code)
-    assert return_code == 0
-    assert 'Square root is 4.0' in stdout
-    assert stderr == ''
-
-    # Test disallowed imports
-    code_with_unauthorized_import = '''
-import os
-os.getcwd()
-'''
-    stdout, stderr, return_code = runner.run(
-        task_id='task-1234', source_code=code_with_unauthorized_import
-    )
-    assert return_code != 0
-    assert 'disallowed' in stderr.lower()
-
-    # Test syntax error handling
-    invalid_code = '''
-print("Hello
-'''
-    stdout, stderr, return_code = runner.run(task_id='task-1234', source_code=invalid_code)
-    assert return_code != 0
-    assert 'SyntaxError' in stderr
-
-
 @pytest.mark.asyncio
 async def test_observer_analyze():
     """Test Observer's analysis of agent behavior."""
@@ -1353,31 +1264,6 @@ def test_run_init():
     assert agent.final_answer_found is False
 
 
-def test_code_runner_multiple_pip_packages():
-    """Test CodeRunner with multiple pip packages."""
-    runner = CodeRunner(
-        env='host',
-        allowed_imports=['os'],
-        pip_packages='requests==2.31.0;numpy==1.24.0',
-        timeout=30
-    )
-
-    assert len(runner.pip_packages) == 2
-    assert 'requests==2.31.0' in runner.pip_packages
-    assert 'numpy==1.24.0' in runner.pip_packages
-
-
-def test_code_runner_disallowed_imports_error():
-    """Test CodeRunner returns error for disallowed imports."""
-    runner = CodeRunner(env='host', allowed_imports=['os'], timeout=30)
-
-    code = 'import subprocess\nsubprocess.run(["ls"])'
-    stdout, stderr, exit_code = runner.run(task_id='task-1234', source_code=code)
-
-    assert exit_code != 0
-    assert 'disallowed' in stderr.lower()
-
-
 @pytest.mark.asyncio
 async def test_observer_with_negative_threshold():
     """Test Observer with None threshold (disabled)."""
@@ -1552,18 +1438,6 @@ async def test_codeact_code_execution_with_markdown():
     assert len(responses) > 0
 
 
-def test_code_runner_with_env_vars():
-    """Test CodeRunner with environment variables."""
-    runner = CodeRunner(
-        env='host',
-        allowed_imports=['os'],
-        timeout=30,
-        env_vars_to_set={'MY_VAR': 'test_value'}
-    )
-
-    assert runner.env_vars_to_set == {'MY_VAR': 'test_value'}
-
-
 def test_planner_with_litellm_params():
     """Test Planner initialization with litellm_params."""
     params = {'temperature': 0.5, 'max_tokens': 500}
@@ -1615,25 +1489,6 @@ async def test_act_with_malformed_response():
 
     # Should handle gracefully
     assert len(responses) >= 0
-
-
-def test_code_runner_pip_packages_parsing():
-    """Test CodeRunner pip packages parsing with different separators."""
-    # Test with semicolon
-    runner1 = CodeRunner(
-        env='host',
-        allowed_imports=['os'],
-        pip_packages='pkg1==1.0;pkg2==2.0'
-    )
-    assert len(runner1.pip_packages) == 2
-
-    # Test with comma
-    runner2 = CodeRunner(
-        env='host',
-        allowed_imports=['os'],
-        pip_packages='pkg1==1.0,pkg2==2.0'
-    )
-    assert len(runner2.pip_packages) == 2
 
 
 def test_agent_tool_name_to_func_mapping():
@@ -2058,31 +1913,6 @@ async def test_get_relevant_tools_error_handling():
         assert len(tools) == 2
 
 
-def test_code_runner_with_no_pip_packages():
-    """Test CodeRunner with no pip packages."""
-    runner = CodeRunner(
-        env='host',
-        allowed_imports=['os'],
-        pip_packages=None,
-        timeout=30
-    )
-
-    assert runner.pip_packages == []
-    assert runner.pip_packages_str is None
-
-
-def test_code_runner_with_empty_pip_packages():
-    """Test CodeRunner with empty pip packages string."""
-    runner = CodeRunner(
-        env='host',
-        allowed_imports=['os'],
-        pip_packages='',
-        timeout=30
-    )
-
-    assert runner.pip_packages == []
-
-
 def test_chat_message_model_dump():
     """Test ChatMessage model_dump."""
     msg = ChatMessage(
@@ -2234,47 +2064,6 @@ async def test_salvage_response_with_history():
     with patch('kodeagent.kutils.call_llm', return_value=mock_response):
         result = await agent.salvage_response()
         assert 'calculated' in result
-
-
-def test_code_runner_check_imports_with_from_import():
-    """Test CodeRunner import checking with from imports."""
-    runner = CodeRunner(env='host', allowed_imports=['os', 'datetime'])
-
-    code = """
-from os import path
-from datetime import datetime
-from requests import get
-"""
-    disallowed = runner.check_imports(code)
-    assert 'requests' in disallowed
-    assert 'os' not in disallowed
-    assert 'datetime' not in disallowed
-
-
-def test_code_runner_check_imports_with_aliases():
-    """Test CodeRunner import checking with aliases."""
-    runner = CodeRunner(env='host', allowed_imports=['os', 'datetime'])
-
-    code = """
-import os as operating_system
-import requests as req
-"""
-    disallowed = runner.check_imports(code)
-    assert 'requests' in disallowed
-    assert 'os' not in disallowed
-
-
-def test_code_runner_check_dangerous_builtins():
-    """Test CodeRunner checking for dangerous builtins."""
-    runner = CodeRunner(env='host', allowed_imports=['os'])
-
-    code = """
-exec('print("dangerous")')
-"""
-    # The check_imports method raises an exception for dangerous builtins
-    with pytest.raises(Exception) as exc_info:
-        runner.check_imports(code)
-    assert 'Forbidden builtin' in str(exc_info.value)
 
 
 def test_codeact_tools_source_code():
@@ -2515,24 +2304,6 @@ async def test_codeact_act_with_exception():
         responses.append(response)
 
     assert len(responses) > 0
-    # Should capture the exception
-
-
-def test_code_runner_forbidden_builtins():
-    """Test CodeRunner with forbidden builtins."""
-    runner = CodeRunner(env='host', allowed_imports=['os'])
-
-    # Test eval - should raise exception during check_imports
-    code = 'eval("1+1")'
-    with pytest.raises(Exception) as exc_info:
-        runner.check_imports(code)
-    assert 'Forbidden builtin' in str(exc_info.value)
-
-    # Test __import__
-    code = '__import__("os")'
-    with pytest.raises(Exception) as exc_info:
-        runner.check_imports(code)
-    assert 'Forbidden builtin' in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -2646,26 +2417,6 @@ async def test_chat_with_exception():
     with patch('kodeagent.kutils.call_llm', side_effect=Exception('LLM error')):
         with pytest.raises(Exception):
             await agent._chat(response_format=ReActChatMessage)
-
-
-def test_code_runner_unsupported_env():
-    """Test CodeRunner with unsupported environment."""
-    runner = CodeRunner(env='unsupported_env', allowed_imports=['os'])
-
-    code = 'print("hello")'
-    with pytest.raises(ValueError) as exc_info:
-        runner.run(code, task_id='test-123')
-    assert 'Unsupported code execution env' in str(exc_info.value)
-
-
-def test_code_runner_dangerous_builtins_compile():
-    """Test CodeRunner with compile builtin."""
-    runner = CodeRunner(env='host', allowed_imports=['os'])
-
-    code = 'compile("print(1)", "<string>", "exec")'
-    with pytest.raises(Exception) as exc_info:
-        runner.check_imports(code)
-    assert 'Forbidden builtin' in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -2856,15 +2607,6 @@ def test_agent_msg_idx_of_new_task():
 
     # msg_idx should still be 0 (it's set in run(), not _run_init())
     assert agent.msg_idx_of_new_task == 0
-
-
-def test_code_runner_with_local_modules():
-    """Test CodeRunner with local modules to copy."""
-    runner = CodeRunner(env='host', allowed_imports=['os'])
-
-    # Test local_modules_to_copy attribute
-    assert hasattr(runner, 'local_modules_to_copy')
-    assert isinstance(runner.local_modules_to_copy, list)
 
 
 def test_parse_text_response_with_no_action_or_answer():

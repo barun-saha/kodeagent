@@ -14,14 +14,54 @@ import pydantic as pyd
 import requests
 from tenacity import wait_random_exponential, AsyncRetrying, stop_after_attempt
 
+
+LOGGERS_TO_SUPPRESS = [
+    'asyncio',
+    'cookie_store',
+    'hpack',
+    'httpx',
+    'httpcore',
+    'langfuse',
+    'LiteLLM',
+    'litellm',
+    'openai',
+    'pdfminer',
+    'primp',
+    'rquest',
+    'urllib3',
+    'urllib3.connectionpool',
+]
+
+for _lg in LOGGERS_TO_SUPPRESS:
+    logger_obj = logging.getLogger(_lg)
+    logger_obj.setLevel(logging.WARNING)
+    # Prevent these logs from propagating to the root logger
+    logger_obj.propagate = False
+
+# Capture warnings from the warnings module (optional, helps centralize output)
+if hasattr(logging, 'captureWarnings'):
+    logging.captureWarnings(True)
+
+
+def get_logger(name: Optional[str] = 'KodeAgent') -> logging.Logger:
+    """
+    Get a logger for KodeAgent.
+
+    Returns:
+        A logger instance.
+    """
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logging.getLogger('LiteLLM').setLevel(logging.WARNING)
+    logging.getLogger('langfuse').disabled = True
+
+    return logging.getLogger(name)
+
+
 # Get a logger for the current module
 logger = logging.getLogger('KodeAgent')
-logger.setLevel(logging.WARNING)
-
-# Configure logging format
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 
 
 def is_it_url(path: str) -> bool:
