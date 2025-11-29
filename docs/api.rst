@@ -7,6 +7,8 @@ API Reference
    :nosignatures:
    :caption: Core Modules and Classes
 
+   kodeagent.code_runner
    kodeagent.kodeagent
    kodeagent.kutils
+   kodeagent.models
    kodeagent.tools

@@ -76,7 +76,7 @@ for task in [
         print_response(response, only_final=True)
 ```
 
-You can also create a CodeAct agent:
+You can also create a CodeAct agent, which will execute Python code to use the tools. For example:
 
 ```python
 from kodeagent import CodeActAgent, search_web, extract_file_contents_as_markdown
@@ -140,7 +140,7 @@ def my_tool(param1: str) -> str:
         str: Description of the return value.
     """
     # Tool implementation here
-    return "result"
+    return 'result'
 ```
 
 Module imports and all variables should be inside the tool function. If you're using `CodeActAgent`, KodeAgent will execute the tool function in isolation.
@@ -188,8 +188,6 @@ To run unit tests, use:
 ```bash
 python -m pytest .\tests\unit -v --cov --cov-report=html
 ```
-
-The current test coverage is 86%.
 
 For integration tests involving calls to APIs, use:
 ```bash

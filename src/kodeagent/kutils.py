@@ -14,14 +14,83 @@ import pydantic as pyd
 import requests
 from tenacity import wait_random_exponential, AsyncRetrying, stop_after_attempt
 
+
+LOGGERS_TO_SUPPRESS = [
+    'asyncio',
+    'cookie_store',
+    'hpack',
+    'httpx',
+    'httpcore',
+    'langfuse',
+    'LiteLLM',
+    'litellm',
+    'openai',
+    'pdfminer',
+    'primp',
+    'rquest',
+    'urllib3',
+    'urllib3.connectionpool',
+]
+
+for _lg in LOGGERS_TO_SUPPRESS:
+    logger_obj = logging.getLogger(_lg)
+    logger_obj.setLevel(logging.WARNING)
+    # Prevent these logs from propagating to the root logger
+    logger_obj.propagate = False
+
+# Capture warnings from the warnings module (optional, helps centralize output)
+if hasattr(logging, 'captureWarnings'):
+    logging.captureWarnings(True)
+
+
+def get_logger(name: Optional[str] = 'KodeAgent') -> logging.Logger:
+    """
+    Get a logger for KodeAgent.
+
+    Returns:
+        A logger instance.
+    """
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logging.getLogger('LiteLLM').setLevel(logging.WARNING)
+    logging.getLogger('langfuse').disabled = True
+
+    return logging.getLogger(name)
+
+
 # Get a logger for the current module
 logger = logging.getLogger('KodeAgent')
-logger.setLevel(logging.WARNING)
 
-# Configure logging format
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+
+def read_prompt(filename: str) -> str:
+    """
+    Reads a prompt from the `prompts` directory.
+
+    Args:
+        filename: Name of the prompt file to read.
+
+    Returns:
+        The content of the prompt file as a string.
+
+    Raises:
+        FileNotFoundError: If the prompt file does not exist.
+        RuntimeError: If there is an error reading the file.
+    """
+    prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', filename)
+
+    try:
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError as fnfe:
+        raise FileNotFoundError(
+            f'Prompt file `{filename}` not found in the prompts directory: {prompt_path}'
+        ) from fnfe
+    except Exception as e:
+        raise RuntimeError(
+            f'Error reading prompt file `{filename}`: {e}'
+        ) from e
 
 
 def is_it_url(path: str) -> bool:

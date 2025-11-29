@@ -5,11 +5,9 @@ Implements ReAct and CodeAct agents, supported by Planner and Observer.
 import asyncio
 import inspect
 import json
-import logging
 import os
 import random
 import re
-import sys
 import uuid
 import warnings
 from abc import ABC, abstractmethod
@@ -22,7 +20,6 @@ from typing import (
     Callable,
     Any,
     Type,
-    TypedDict,
     Union,
     ClassVar,
 )
@@ -35,6 +32,18 @@ from dotenv import load_dotenv
 
 from . import kutils as ku
 from . import tools as dtools
+from .code_runner import CodeRunner, CODE_ENV_NAMES
+from .models import (
+    AgentPlan,
+    AgentResponse,
+    ChatMessage,
+    CodeActChatMessage,
+    PlanStep,
+    ObserverResponse,
+    ReActChatMessage,
+    Task,
+    AGENT_RESPONSE_TYPES
+)
 
 
 load_dotenv()
@@ -42,58 +51,19 @@ load_dotenv()
 warnings.simplefilter('once', UserWarning)
 warnings.filterwarnings('ignore', message='.*Pydantic serializer warnings.*')
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logging.getLogger('LiteLLM').setLevel(logging.WARNING)
-logging.getLogger('langfuse').disabled = True
-logger = logging.getLogger('KodeAgent')
-
 litellm.success_callback = ['langfuse']
 litellm.failure_callback = ['langfuse']
 
-
-def _read_prompt(filename: str) -> str:
-    """
-    Reads a prompt from the `prompts` directory.
-
-    Args:
-        filename: Name of the prompt file to read.
-
-    Returns:
-        The content of the prompt file as a string.
-
-    Raises:
-        FileNotFoundError: If the prompt file does not exist.
-        RuntimeError: If there is an error reading the file.
-    """
-    prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', filename)
-
-    try:
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except FileNotFoundError as fnfe:
-        raise FileNotFoundError(
-            f'Prompt file `{filename}` not found in the prompts directory: {prompt_path}'
-        ) from fnfe
-    except Exception as e:
-        raise RuntimeError(
-            f'Error reading prompt file `{filename}`: {e}'
-        ) from e
+logger = ku.get_logger()
 
 
-REACT_SYSTEM_PROMPT = _read_prompt('system/react.txt')
-CODE_ACT_SYSTEM_PROMPT = _read_prompt('system/codeact.txt')
-AGENT_PLAN_PROMPT = _read_prompt('agent_plan.txt')
-UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')
-OBSERVATION_PROMPT = _read_prompt('observation.txt')
-SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
-RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
-
-MESSAGE_ROLES = Literal['user', 'assistant', 'system', 'tool']
-AGENT_RESPONSE_TYPES = Literal['step', 'final', 'log']
-CODE_ENV_NAMES = Literal['host', 'docker', 'e2b']
+REACT_SYSTEM_PROMPT = ku.read_prompt('system/react.txt')
+CODE_ACT_SYSTEM_PROMPT = ku.read_prompt('system/codeact.txt')
+AGENT_PLAN_PROMPT = ku.read_prompt('agent_plan.txt')
+UPDATE_PLAN_PROMPT = ku.read_prompt('update_plan.txt')
+OBSERVATION_PROMPT = ku.read_prompt('observation.txt')
+SALVAGE_RESPONSE_PROMPT = ku.read_prompt('salvage_response.txt')
+RELEVANT_TOOLS_PROMPT = ku.read_prompt('relevant_tools.txt')
 
 # Regex for message parsing from LLM response text (case-insensitive, multiline)
 THOUGHT_MATCH = re.compile(
@@ -107,222 +77,6 @@ SUCCESS_MATCH = re.compile(r'Successful:\s*(true|false)', re.IGNORECASE)
 CODE_MATCH = re.compile(r'Code:\s*```(?:python)?\s*(.+?)\s*```', re.DOTALL | re.IGNORECASE)
 
 CODE_ACT_PSEUDO_TOOL_NAME = 'code_execution'
-
-
-class Task(pyd.BaseModel):
-    """Task to be solved by an agent."""
-    id: str = pyd.Field(
-        description='Auto-generated task ID', default_factory=lambda: str(uuid.uuid4())
-    )
-    description: str = pyd.Field(description='Task description')
-    files: Optional[list[str]] = pyd.Field(
-        description='A list of file paths or URLs', default=None
-    )
-    result: Optional[Any] = pyd.Field(description='Task result', default=None)
-    is_finished: bool = pyd.Field(
-        description='Whether the task has finished running', default=False
-    )
-    is_error: bool = pyd.Field(
-        description='Whether the task execution resulted in any error', default=False
-    )
-
-
-class PlanStep(pyd.BaseModel):
-    """A single step in an agent's plan."""
-    description: str = pyd.Field(description='A brief description of the step')
-    is_done: bool = pyd.Field(description='Whether the step has been completed', default=False)
-
-
-class AgentPlan(pyd.BaseModel):
-    """A structured plan for an agent to follow."""
-    steps: list[PlanStep] = pyd.Field(description='List of steps to accomplish the task')
-
-
-class ObserverResponse(pyd.BaseModel):
-    """The response from the observer after analyzing the agent's behavior."""
-    is_progressing: bool = pyd.Field(
-        description='True if the agent is making meaningful progress on the plan'
-    )
-    is_in_loop: bool = pyd.Field(
-        description='True if the agent is stuck in a repetitive loop'
-    )
-    reasoning: str = pyd.Field(description='A short reason for the assessment (max 15--20 words)')
-    correction_message: Optional[str] = pyd.Field(
-        description='A specific, actionable feedback to help the agent self-correct'
-    )
-
-
-class ChatMessage(pyd.BaseModel):
-    """Generic chat message."""
-    role: MESSAGE_ROLES = pyd.Field(description='Role of the message sender')
-    content: Any = pyd.Field(description='Content of the message')
-    files: Optional[list[str]] = pyd.Field(
-        description='Optional list of file paths or URLs associated with the message',
-        default=None
-    )
-
-
-class ReActChatMessage(ChatMessage):
-    """
-    Messages for the ReAct agent with built-in validation.
-    Combines functionality of ReActAgentResponse and ReActChatMessage.
-    """
-    content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True, default=None)
-    thought: str = pyd.Field(description='Thoughts behind the tool use')
-    action: str = pyd.Field(
-        description=(
-            "Name of the tool to use from available tools, or 'FINISH' to provide final answer. "
-            "Must be exact tool name as listed in Available Tools section."
-        )
-    )
-    args: Optional[str] = pyd.Field(
-        default=None,
-        description=(
-            "Tool arguments as JSON string; `None` when `final_answer` is available. "
-            "Must be valid JSON with double quotes."
-        )
-    )
-    final_answer: Optional[str] = pyd.Field(
-        description='Final answer for the task; set only in the final step',
-        default=None
-    )
-    task_successful: bool = pyd.Field(
-        description='Task completed or failed?',
-        default=False
-    )
-
-    @pyd.field_validator('args')
-    @classmethod
-    def validate_args_json(cls, v: Optional[str]) -> Optional[str]:
-        """
-        Validate that args is valid JSON and normalize it.
-
-        Args:
-            v: The args string to validate.
-
-        Returns:
-            The normalized JSON string if valid, else None.
-        """
-        if v is None:
-            return None
-
-        v = v.strip()
-        if not v:
-            return None
-
-        # Clean and validate JSON
-        v = ku.clean_json_string(v)
-        try:
-            # Validate it's parseable
-            parsed = json.loads(v)
-            # Ensure it's a dict
-            if not isinstance(parsed, dict):
-                raise ValueError(f'args must be a JSON object (dict), got {type(parsed)}')
-            # Return normalized JSON string
-            return json.dumps(parsed)
-        except JSONDecodeError as e:
-            try:
-                v = json_repair.repair_json(v)
-                parsed = json.loads(v)
-                if not isinstance(parsed, dict):
-                    raise ValueError(f'args must be a JSON object (dict), got {type(parsed)}')
-                return json.dumps(parsed)
-            except Exception:
-                raise ValueError(
-                    f'args must be valid JSON object string. Received: {v[:100]}... Error: {e}'
-                )
-
-    @pyd.model_validator(mode='after')
-    def validate_mutual_exclusivity(self):
-        """Ensure tool call and final answer are mutually exclusive."""
-        is_finish = self.action == 'FINISH'
-        has_final_answer = self.final_answer is not None
-        has_args = self.args is not None
-
-        if self.action != 'FINISH':
-            if has_final_answer:
-                raise ValueError(
-                    "Cannot have both action (tool call) and final_answer. "
-                    "Use action='FINISH' when providing final_answer."
-                )
-            if self.task_successful:
-                raise ValueError(
-                    'task_successful must be False for intermediate tool calls'
-                )
-            if not has_args:
-                raise ValueError(
-                    f"args must be provided when using tool '{self.action}'"
-                )
-        elif is_finish:
-            if not has_final_answer:
-                raise ValueError(
-                    "final_answer must be provided when action is 'FINISH'"
-                )
-            if has_args:
-                raise ValueError(
-                    "args must be None when action is 'FINISH'"
-                )
-        return self
-
-    @property
-    def is_final(self) -> bool:
-        """Check if this is a final answer."""
-        return self.action == 'FINISH' and self.final_answer is not None
-
-
-class CodeActChatMessage(ChatMessage):
-    """
-    Messages for the CodeActAgent with built-in validation.
-    Combines functionality of CodeActAgentResponse and CodeActChatMessage.
-    """
-    content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True, default=None)
-    thought: str = pyd.Field(description='Thoughts behind the code')
-    code: Optional[str] = pyd.Field(
-        default=None,
-        description='Python code with tool use to run; `None` when providing final answer'
-    )
-    final_answer: Optional[str] = pyd.Field(
-        description='Final answer for the task; set only in the final step',
-        default=None
-    )
-    task_successful: bool = pyd.Field(
-        description='Task completed or failed?',
-        default=False
-    )
-
-    @pyd.model_validator(mode='after')
-    def validate_mutual_exclusivity(self):
-        """Ensure code execution and final answer are mutually exclusive."""
-        has_code = self.code is not None and self.code.strip()
-        has_final_answer = self.final_answer is not None
-
-        if has_code and has_final_answer:
-            raise ValueError(
-                'Cannot have both code and final_answer. '
-                'Provide either code for execution or final_answer to conclude.'
-            )
-        if not has_code and not has_final_answer:
-            raise ValueError(
-                'Must provide either code for execution or final_answer to conclude'
-            )
-        if has_code and self.task_successful:
-            raise ValueError(
-                'task_successful must be False when executing code (intermediate step)'
-            )
-        return self
-
-    @property
-    def is_final(self) -> bool:
-        """Check if this is a final answer."""
-        return self.final_answer is not None
-
-
-class AgentResponse(TypedDict):
-    """Streaming response sent by an agent in the course of solving a task."""
-    type: AGENT_RESPONSE_TYPES
-    channel: Optional[str]
-    value: Any
-    metadata: Optional[dict[str, Any]]
 
 
 class Planner:
@@ -1315,167 +1069,6 @@ class ReActAgent(Agent):
 
         formatted_messages = ku.combine_user_messages(formatted_messages)
         return formatted_messages
-
-
-class CodeRunner:
-    """Run Python code generated by an LLM in a given environment."""
-    def __init__(
-            self,
-            env: CODE_ENV_NAMES,
-            allowed_imports: list[str],
-            pip_packages: Optional[str] = None,
-            timeout: int = 30,
-            env_vars_to_set: Optional[dict[str, str]] = None
-    ):
-        """
-        Create an environment to run Python code.
-
-        Args:
-            env: The code execution environment. Must be a string from `CODE_ENV_NAMES`.
-            allowed_imports: A list of Python modules that are allowed to be imported.
-            pip_packages: Optional Python libs to be installed by `pip` [E2B].
-            timeout: Code execution timeout (default 30s).
-            env_vars_to_set: Optional environment variables to set in the code execution
-             environment (E2B only).
-        """
-        self.allowed_imports: set[str] = set(allowed_imports)
-        self.env: CODE_ENV_NAMES = env
-        if pip_packages and len(pip_packages.strip()) > 0:
-            self.pip_packages: list[str] = re.split('[,;]', pip_packages)
-        else:
-            self.pip_packages = []
-        self.default_timeout = timeout
-        self.local_modules_to_copy = []
-        self.pip_packages_str = ' '.join(self.pip_packages) if self.pip_packages else None
-        self.env_vars_to_set = env_vars_to_set
-
-    def check_imports(self, code) -> set[Union[str]]:
-        """Check for disallowed imports in code."""
-        import ast
-
-        tree = ast.parse(code)
-        imported_modules = set()
-
-        # Check for dangerous builtins
-        dangerous = {'exec', 'eval', '__import__', 'compile'}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and node.id in dangerous:
-                raise Exception(f'Forbidden builtin: {node.id}')
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    imported_modules.add(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                imported_modules.add(node.module)
-
-        disallowed = imported_modules - self.allowed_imports
-        return disallowed
-
-    def run(self, source_code: str, task_id: str) -> tuple[str, str, int]:
-        """
-        Run Python code in pre-specified environment.
-
-        Args:
-            source_code: The Python source code to execute.
-            task_id: Unique task identifier for tracking.
-
-        Returns:
-            A tuple of (stdout, stderr, return_code).
-        """
-        import ast
-
-        try:
-            ast.parse(source_code)
-        except SyntaxError as se:
-            return (
-                '',
-                f'Code parsing failed due to: {type(se).__name__}\n{se.text}\nError: {str(se)}',
-                -1
-            )
-
-        disallowed_imports: set = self.check_imports(source_code)
-        if len(disallowed_imports) > 0:
-            modules = '\n'.join([mod for mod in disallowed_imports])
-            return (
-                '',
-                f'The following imports are disallowed:{modules}'
-                '\nPlease only use the allowed modules for importing.',
-                -1
-            )
-
-        if self.env == 'host':
-            import shutil
-            import subprocess as sp
-            import tempfile
-
-            warnings.warn(
-                'You are running LLM-generated code on your host. This could be potentially'
-                ' dangerous! Please consider using a different code runner environment.',
-                UserWarning
-            )
-            with tempfile.NamedTemporaryFile(
-                    mode='w+t', suffix='.py', delete=False, encoding='utf-8'
-            ) as code_file:
-                code_file.write(source_code)
-                code_file.close()
-
-                for a_file in self.local_modules_to_copy:
-                    shutil.copy2(
-                        os.path.join(os.path.dirname(__file__), a_file),
-                        tempfile.gettempdir()
-                    )
-
-                result = sp.run(
-                    [sys.executable, code_file.name],
-                    shell=False, capture_output=True, text=True,
-                    timeout=self.default_timeout,
-                    check=False,
-                    encoding='utf-8'
-                )
-                os.remove(code_file.name)
-                return result.stdout, result.stderr, result.returncode
-
-        elif self.env =='e2b':
-            try:
-                import e2b_code_interpreter as e2b
-            except ModuleNotFoundError:
-                logger.critical(
-                    'The module `e2b_code_interpreter` was not found. Please install E2B as:'
-                    ' `pip install e2b-code-interpreter`\nExecution will halt now.'
-                )
-                sys.exit(-1)
-
-            # Do not reuse existing sandboxes due to security reasons, as they may relate to
-            # other tasks/users. Always create a fresh sandbox.
-            sbx = e2b.Sandbox(
-                timeout=self.default_timeout + 15,
-                envs=self.env_vars_to_set or {},
-                metadata={'task_id': task_id}  # Track ownership
-            )
-            if self.pip_packages_str:
-                sbx.commands.run(f'pip install {self.pip_packages_str}')
-
-            for a_file in self.local_modules_to_copy:
-                with open(
-                        os.path.join(os.path.dirname(__file__), a_file),
-                        'r',
-                        encoding='utf-8'
-                ) as py_file:
-                    sbx.files.write(f'/home/user/{a_file}', py_file.read())
-                    logger.info('Copied file %s...', a_file)
-
-            logger.info('E2B sandbox info: %s', sbx.get_info())
-            execution = sbx.run_code(code=source_code, timeout=self.default_timeout)
-            std_out: str = '\n'.join(execution.logs.stdout)
-            std_err: str = '\n'.join(execution.logs.stderr)
-            if execution.error:
-                std_err += f'\n{execution.error.name}\n{execution.error.value}'
-            ret_code: int = -1 if execution.error else 0
-            return std_out, std_err, ret_code
-
-        else:
-            raise ValueError(f'Unsupported code execution env: {self.env}')
 
 
 class CodeActAgent(ReActAgent):
