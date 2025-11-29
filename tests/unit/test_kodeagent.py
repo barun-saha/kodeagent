@@ -2345,20 +2345,20 @@ async def test_update_plan_with_history():
 
 def test_read_prompt_file_not_found():
     """Test _read_prompt with non-existent file."""
-    from kodeagent.kodeagent import _read_prompt
+    from kodeagent.kutils import read_prompt
 
     with pytest.raises(FileNotFoundError) as exc_info:
-        _read_prompt('nonexistent_file.txt')
+        read_prompt('nonexistent_file.txt')
     assert 'not found' in str(exc_info.value)
 
 
 def test_read_prompt_error():
     """Test _read_prompt with read error."""
-    from kodeagent.kodeagent import _read_prompt
+    from kodeagent.kutils import read_prompt
 
     with patch('builtins.open', side_effect=PermissionError('Access denied')):
         with pytest.raises(RuntimeError) as exc_info:
-            _read_prompt('system/react.txt')
+            read_prompt('system/react.txt')
         assert 'Error reading prompt file' in str(exc_info.value)
 
 

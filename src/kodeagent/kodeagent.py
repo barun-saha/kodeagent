@@ -57,42 +57,13 @@ litellm.failure_callback = ['langfuse']
 logger = ku.get_logger()
 
 
-def _read_prompt(filename: str) -> str:
-    """
-    Reads a prompt from the `prompts` directory.
-
-    Args:
-        filename: Name of the prompt file to read.
-
-    Returns:
-        The content of the prompt file as a string.
-
-    Raises:
-        FileNotFoundError: If the prompt file does not exist.
-        RuntimeError: If there is an error reading the file.
-    """
-    prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', filename)
-
-    try:
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except FileNotFoundError as fnfe:
-        raise FileNotFoundError(
-            f'Prompt file `{filename}` not found in the prompts directory: {prompt_path}'
-        ) from fnfe
-    except Exception as e:
-        raise RuntimeError(
-            f'Error reading prompt file `{filename}`: {e}'
-        ) from e
-
-
-REACT_SYSTEM_PROMPT = _read_prompt('system/react.txt')
-CODE_ACT_SYSTEM_PROMPT = _read_prompt('system/codeact.txt')
-AGENT_PLAN_PROMPT = _read_prompt('agent_plan.txt')
-UPDATE_PLAN_PROMPT = _read_prompt('update_plan.txt')
-OBSERVATION_PROMPT = _read_prompt('observation.txt')
-SALVAGE_RESPONSE_PROMPT = _read_prompt('salvage_response.txt')
-RELEVANT_TOOLS_PROMPT = _read_prompt('relevant_tools.txt')
+REACT_SYSTEM_PROMPT = ku.read_prompt('system/react.txt')
+CODE_ACT_SYSTEM_PROMPT = ku.read_prompt('system/codeact.txt')
+AGENT_PLAN_PROMPT = ku.read_prompt('agent_plan.txt')
+UPDATE_PLAN_PROMPT = ku.read_prompt('update_plan.txt')
+OBSERVATION_PROMPT = ku.read_prompt('observation.txt')
+SALVAGE_RESPONSE_PROMPT = ku.read_prompt('salvage_response.txt')
+RELEVANT_TOOLS_PROMPT = ku.read_prompt('relevant_tools.txt')
 
 # Regex for message parsing from LLM response text (case-insensitive, multiline)
 THOUGHT_MATCH = re.compile(

@@ -64,6 +64,35 @@ def get_logger(name: Optional[str] = 'KodeAgent') -> logging.Logger:
 logger = logging.getLogger('KodeAgent')
 
 
+def read_prompt(filename: str) -> str:
+    """
+    Reads a prompt from the `prompts` directory.
+
+    Args:
+        filename: Name of the prompt file to read.
+
+    Returns:
+        The content of the prompt file as a string.
+
+    Raises:
+        FileNotFoundError: If the prompt file does not exist.
+        RuntimeError: If there is an error reading the file.
+    """
+    prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', filename)
+
+    try:
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError as fnfe:
+        raise FileNotFoundError(
+            f'Prompt file `{filename}` not found in the prompts directory: {prompt_path}'
+        ) from fnfe
+    except Exception as e:
+        raise RuntimeError(
+            f'Error reading prompt file `{filename}`: {e}'
+        ) from e
+
+
 def is_it_url(path: str) -> bool:
     """
     Check whether a given path is a URL.
