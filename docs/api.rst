@@ -10,4 +10,5 @@ API Reference
    kodeagent.code_runner
    kodeagent.kodeagent
    kodeagent.kutils
+   kodeagent.models
    kodeagent.tools

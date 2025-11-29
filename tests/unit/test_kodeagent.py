@@ -10,18 +10,20 @@ import pytest
 
 from kodeagent import (
     ReActAgent,
-    ChatMessage,
-    ReActChatMessage,
     CodeActAgent,
     CodeActChatMessage,
-    AgentPlan,
-    PlanStep,
     Planner,
     Task,
     Observer,
-    ObserverResponse,
-    Agent,
-    AgentResponse
+    Agent
+)
+from kodeagent.models import (
+    ChatMessage,
+    ReActChatMessage,
+    AgentResponse,
+    AgentPlan,
+    PlanStep,
+    ObserverResponse
 )
 from kodeagent.tools import (
     tool,

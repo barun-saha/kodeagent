@@ -1,7 +1,7 @@
-kodeagent.kodeagent.AgentPlan
-=============================
+kodeagent.models.AgentPlan
+==========================
 
-.. currentmodule:: kodeagent.kodeagent
+.. currentmodule:: kodeagent.models
 
 .. autoclass:: AgentPlan
 

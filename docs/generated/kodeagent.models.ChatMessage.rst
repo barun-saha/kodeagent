@@ -1,7 +1,7 @@
-kodeagent.kodeagent.ChatMessage
-===============================
+kodeagent.models.ChatMessage
+============================
 
-.. currentmodule:: kodeagent.kodeagent
+.. currentmodule:: kodeagent.models
 
 .. autoclass:: ChatMessage
 

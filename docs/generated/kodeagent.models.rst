@@ -1,10 +1,10 @@
-﻿kodeagent.kodeagent
-===================
+﻿kodeagent.models
+================
 ===================================
 
 .. currentmodule:: kodeagent
 
-.. automodule:: kodeagent.kodeagent
+.. automodule:: kodeagent.models
    :noindex:
 
 .. autosummary::
@@ -12,26 +12,26 @@
    :nosignatures:
 
    
-   llm_vision_support
-   
-   main
-   
-   print_response
-   
 
    
-   Agent
+   AgentPlan
    
-   CodeActAgent
+   AgentResponse
    
-   Observer
+   ChatMessage
    
-   Planner
+   CodeActChatMessage
    
-   ReActAgent
+   ObserverResponse
+   
+   PlanStep
+   
+   ReActChatMessage
+   
+   Task
    
 
-.. automodule:: kodeagent.kodeagent
+.. automodule:: kodeagent.models
    :members:
    :undoc-members:
    :show-inheritance:

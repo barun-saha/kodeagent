@@ -1,7 +1,7 @@
-kodeagent.kodeagent.PlanStep
-============================
+kodeagent.models.PlanStep
+=========================
 
-.. currentmodule:: kodeagent.kodeagent
+.. currentmodule:: kodeagent.models
 
 .. autoclass:: PlanStep
 

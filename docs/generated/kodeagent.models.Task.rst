@@ -1,7 +1,7 @@
-kodeagent.kodeagent.Task
-========================
+kodeagent.models.Task
+=====================
 
-.. currentmodule:: kodeagent.kodeagent
+.. currentmodule:: kodeagent.models
 
 .. autoclass:: Task
 

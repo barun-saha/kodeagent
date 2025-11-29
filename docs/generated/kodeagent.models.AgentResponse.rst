@@ -1,7 +1,7 @@
-kodeagent.kodeagent.AgentResponse
-=================================
+kodeagent.models.AgentResponse
+==============================
 
-.. currentmodule:: kodeagent.kodeagent
+.. currentmodule:: kodeagent.models
 
 .. autoclass:: AgentResponse
 

@@ -1,7 +1,7 @@
-kodeagent.kodeagent.ObserverResponse
-====================================
+kodeagent.models.ObserverResponse
+=================================
 
-.. currentmodule:: kodeagent.kodeagent
+.. currentmodule:: kodeagent.models
 
 .. autoclass:: ObserverResponse
 
