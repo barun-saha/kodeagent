@@ -890,7 +890,7 @@ class ReActAgent(Agent):
                     f'Args provided: {tool_args_dict}\n'
                     f'Please check the tool signature and try again with correct arguments.'
                 )
-                logger.exception(error_msg)
+                logger.error(error_msg)
                 # Use role='tool' to maintain proper conversation structure
                 self.add_to_history(ChatMessage(role='tool', content=error_msg))
                 yield self.response(
@@ -1288,8 +1288,10 @@ class CodeActAgent(ReActAgent):
 
             except Exception as ex:
                 error_msg = f'*** Error running code: {type(ex).__name__}: {str(ex)}'
-                logger.exception(error_msg)
-                self.add_to_history(ChatMessage(role='user', content=error_msg))
+                logger.error(error_msg)
+                # Respond as the pseudo "tool"
+                tool_msg = ChatMessage(role='tool', content=error_msg)
+                self.add_to_history(tool_msg)
                 yield self.response(
                     rtype='step',
                     value=error_msg,
