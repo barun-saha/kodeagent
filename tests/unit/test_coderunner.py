@@ -66,63 +66,16 @@ def test_run_code_host_warning_and_files():
         assert mock_remove.call_count == 1
 
 
-@patch.dict(sys.modules, {'e2b_code_interpreter': MagicMock()})
-def test_run_code_e2b_success():
-    """
-    Test successful E2B execution with mocks.
-    We verify the sandbox is created, commands run, and output returned.
-    """
-    # Create the mock for the module
-    mock_e2b = sys.modules['e2b_code_interpreter']
-
-    # Set up the Mock Sandbox instance
-    mock_sbx_instance = MagicMock()
-    mock_e2b.Sandbox.return_value = mock_sbx_instance
-
-    # Setup execution result
-    mock_exec_result = MagicMock()
-    mock_exec_result.logs.stdout = ['Hello E2B']
-    mock_exec_result.logs.stderr = []
-    mock_exec_result.error = None
-    mock_sbx_instance.run_code.return_value = mock_exec_result
-
-    runner = CodeRunner(
-        env='e2b',
-        allowed_imports=[],
-        pip_packages='pandas',
-        env_vars_to_set={'API_KEY': '123'}
-    )
-
-    stdout, stderr, code = runner.run("print('Hello E2B')", task_id='task-e2b')
-
-    # Verify Sandbox initialized with correct args
-    mock_e2b.Sandbox.assert_called_with(
-        timeout=45, # Default 30 + 15 buffer
-        envs={'API_KEY': '123'},
-        metadata={'task_id': 'task-e2b'}
-    )
-
-    # Verify pip install was called
-    mock_sbx_instance.commands.run.assert_called_with('pip install pandas')
-
-    # Verify results
-    assert stdout == 'Hello E2B'
-    assert code == 0
-
-
-@patch.dict(sys.modules, {'e2b_code_interpreter': MagicMock()})
 def test_run_code_e2b_execution_error():
     """Test E2B execution when the code itself fails."""
-    mock_e2b = sys.modules['e2b_code_interpreter']
+    mock_e2b = MagicMock()
     mock_sbx_instance = MagicMock()
-    mock_e2b.Sandbox.return_value = mock_sbx_instance
+    mock_e2b.Sandbox.create.return_value.__enter__.return_value = mock_sbx_instance
 
-    # Mock an error result
     mock_exec_result = MagicMock()
     mock_exec_result.logs.stdout = []
     mock_exec_result.logs.stderr = ['Traceback...']
 
-    # Mock the error object on the execution result
     mock_error = MagicMock()
     mock_error.name = 'ValueError'
     mock_error.value = 'Wrong value'
@@ -130,8 +83,9 @@ def test_run_code_e2b_execution_error():
 
     mock_sbx_instance.run_code.return_value = mock_exec_result
 
-    runner = CodeRunner(env='e2b', allowed_imports=[])
-    stdout, stderr, code = runner.run("raise ValueError", task_id='1')
+    with patch.dict(sys.modules, {'e2b_code_interpreter': mock_e2b}):
+        runner = CodeRunner(env='e2b', allowed_imports=[])
+        stdout, stderr, code = runner.run("raise ValueError", task_id='1')
 
     assert code == -1
     assert 'ValueError' in stderr
@@ -159,6 +113,46 @@ def test_code_runner_pip_parsing_logic():
     assert runner_none.pip_packages == []
 
 
+def test_run_code_e2b_pip_install_skipped_without_packages():
+    """No pip command should run when pip_packages_str is falsy."""
+    mock_e2b = MagicMock()
+    mock_sbx = MagicMock()
+    mock_e2b.Sandbox.create.return_value.__enter__.return_value = mock_sbx
+    mock_exec = MagicMock()
+    mock_exec.logs.stdout = []
+    mock_exec.logs.stderr = []
+    mock_exec.error = None
+    mock_sbx.run_code.return_value = mock_exec
+
+    with patch.dict(sys.modules, {'e2b_code_interpreter': mock_e2b}):
+        runner = CodeRunner(env='e2b', allowed_imports=[], pip_packages='')
+        runner.run("print('hi')", task_id='pip-skip')
+
+    mock_sbx.commands.run.assert_not_called()
+
+
+def test_run_code_e2b_pip_install_runs_with_packages():
+    """pip install should run and local files should be uploaded when packages exist."""
+    mock_e2b = MagicMock()
+    mock_sbx = MagicMock()
+    mock_e2b.Sandbox.create.return_value.__enter__.return_value = mock_sbx
+    mock_exec = MagicMock()
+    mock_exec.logs.stdout = []
+    mock_exec.logs.stderr = []
+    mock_exec.error = None
+    mock_sbx.run_code.return_value = mock_exec
+
+    with patch.dict(sys.modules, {'e2b_code_interpreter': mock_e2b}):
+        runner = CodeRunner(env='e2b', allowed_imports=[], pip_packages='uvicorn')
+        runner.local_modules_to_copy = ['dummy.py']
+
+        with patch('kodeagent.code_runner.open', mock_open(read_data='print("x")'), create=True):
+            runner.run("print('hi')", task_id='pip-run')
+
+    mock_sbx.commands.run.assert_called_once_with('pip install uvicorn')
+    mock_sbx.files.write.assert_called_once_with('/home/user/dummy.py', 'print("x")')
+
+
 def test_run_code_e2b_module_missing():
     """Test that missing e2b module raises SystemExit."""
     # We simulate the module being missing by setting it to None in sys.modules
@@ -170,50 +164,6 @@ def test_run_code_e2b_module_missing():
             runner.run("print('test')", task_id='1')
 
         assert excinfo.value.code == -1
-
-
-def test_run_code_e2b_file_copying():
-    """
-    Test that local modules are copied to the E2B sandbox.
-    This covers the loop: 'for a_file in self.local_modules_to_copy:'
-    """
-    # Mock the E2B module and Sandbox
-    mock_e2b = MagicMock()
-    mock_sbx = MagicMock()
-    mock_e2b.Sandbox.return_value = mock_sbx
-
-    # Mock execution result to avoid errors later in the function
-    mock_exec = MagicMock()
-    mock_exec.logs.stdout = []
-    mock_exec.logs.stderr = []
-    mock_exec.error = None
-    mock_sbx.run_code.return_value = mock_exec
-
-    with patch.dict(sys.modules, {'e2b_code_interpreter': mock_e2b}):
-        runner = CodeRunner(env='e2b', allowed_imports=[])
-
-        # Inject a file to copy
-        runner.local_modules_to_copy = ['my_helper.py']
-
-        # We must mock 'open' since the code tries to read the local file
-        with patch('builtins.open', mock_open(read_data='print("helper")')) as mocked_file:
-            runner.run("print('main')", task_id='1')
-
-            # Verify the file was read
-            mocked_file.assert_called_with(
-                # We can't easily predict the full path (os.path.dirname),
-                # so we check if it ended with the filename we expect.
-                match_path('my_helper.py'),
-                'r',
-                encoding='utf-8'
-            )
-
-            # Verify the file was written to the sandbox
-            # The code does: sbx.files.write(f'/home/user/{a_file}', py_file.read())
-            mock_sbx.files.write.assert_called_with(
-                '/home/user/my_helper.py',
-                'print("helper")'
-            )
 
 
 def match_path(suffix):

@@ -18,6 +18,8 @@ from tenacity import wait_random_exponential, AsyncRetrying, stop_after_attempt
 LOGGERS_TO_SUPPRESS = [
     'asyncio',
     'cookie_store',
+    'e2b',
+    'e2b_code_interpreter',
     'hpack',
     'httpx',
     'httpcore',
