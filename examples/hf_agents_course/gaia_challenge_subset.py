@@ -65,8 +65,8 @@ def get_code_act_agent(model_name: str) -> ka.Agent:
         name='Multi-task agent',
         model_name=model_name,
         tools=[
-            ka.search_web, ka.extract_file_contents_as_markdown, ka.download_file, ka.get_youtube_transcript,
-            ka.search_wikipedia, ka.get_audio_transcript,
+            ka.search_web, ka.extract_as_markdown, ka.download_file, ka.transcribe_youtube,
+            ka.search_wikipedia, ka.transcribe_audio,
         ],
         run_env='host',
         max_iterations=10,
@@ -103,13 +103,13 @@ def get_multiagent(model_name: str) -> ka.Agent:
     agent1 = ka.ReActAgent(
         name='Audio video transcription agent',
         model_name=model_name,
-        tools=[ka.get_youtube_transcript, ka.get_audio_transcript, ka.download_file, ],
+        tools=[ka.transcribe_youtube, ka.transcribe_audio, ka.download_file, ],
         max_iterations=5,
     )
     agent2 = ka.CodeActAgent(
         name='Information retrieval agent',
         model_name=model_name,
-        tools=[ka.search_web, ka.extract_file_contents_as_markdown, ka.download_file, ka.search_wikipedia, ],
+        tools=[ka.search_web, ka.extract_as_markdown, ka.download_file, ka.search_wikipedia, ],
         run_env='host',
         max_iterations=7,
         litellm_params=litellm_params,

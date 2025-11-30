@@ -18,6 +18,27 @@ from typing import (
 import pydantic as pyd
 
 
+DEFAULT_TOOLS_IMPORTS = [
+    'ast',
+    'operator',
+    're',
+    'time',
+    'random',
+    'ddgs',
+    'pathlib',
+    'tempfile',
+    'requests',
+    'markitdown',
+    'bs4',
+    'wikipedia',
+    'arxiv',
+    'youtube_transcript_api',
+    'urllib.parse',
+    'os',
+]
+"""List of default Python standard library modules to be available in all tools."""
+
+
 def tool(func: Callable) -> Callable:
     """
     A decorator to convert any Python function into a tool with additional metadata.
@@ -55,18 +76,20 @@ def tool(func: Callable) -> Callable:
 def calculator(expression: str) -> Union[float, None]:
     """
     A simple calculator tool that can evaluate basic arithmetic expressions.
-    The expression must contain only the following allowed mathematical symbols:
-    digits, +, -, *, /, ., (, )
 
-    The ^ symbol, for example, is not allowed. For exponent, use **.
+    Examples:
+        - "2 + 2" returns 4.0
+        - "2 ** 3" returns 8.0 (exponentiation)
+
+    Supported operations: +, -, *, /, ** (exponent), parentheses
+    Note: Use ** for exponents, not ^
     In case the expression has any invalid symbol, the function returns `None`.
 
     Args:
         expression (str): The arithmetic expression as a string.
 
     Returns:
-        The numerical result or `None` in case an incorrect arithmetic expression is provided
-         or any other error occurs.
+        The numerical result or `None` if the expression is invalid.
 
     Raises:
         ValueError: If the expression contains invalid characters.
@@ -103,23 +126,21 @@ def calculator(expression: str) -> Union[float, None]:
             """Recursively evaluate the AST node."""
             if isinstance(node, ast.Constant):  # Python 3.8+
                 return node.value
-            elif isinstance(node, ast.Num):  # Python 3.7 and earlier
-                return node.n
-            elif isinstance(node, ast.BinOp):  # Binary operation
+            if isinstance(node, ast.BinOp):  # Binary operation
                 op_type = type(node.op)
                 if op_type not in allowed_operators:
                     raise ValueError(f'Operator {op_type} not allowed')
                 left = eval_node(node.left)
                 right = eval_node(node.right)
                 return allowed_operators[op_type](left, right)
-            elif isinstance(node, ast.UnaryOp):  # Unary operation
+            if isinstance(node, ast.UnaryOp):  # Unary operation
                 op_type = type(node.op)
                 if op_type not in allowed_operators:
                     raise ValueError(f'Operator {op_type} not allowed')
                 operand = eval_node(node.operand)
                 return allowed_operators[op_type](operand)
-            else:
-                raise ValueError(f'Unsupported node type: {type(node)}')
+
+            raise ValueError(f'Unsupported node type: {type(node)}')
 
         result = eval_node(node)
         return float(result)
@@ -129,137 +150,683 @@ def calculator(expression: str) -> Union[float, None]:
 
 
 @tool
-def search_web(query: str, max_results: int = 10, show_description: bool = False) -> str:
+def search_web(query: str, max_results: int = 10) -> str:
     """
-    Search the Web using DuckDuckGo. The input should be a search query.
-    Use this tool when you need to answer questions about current events and general web search.
-    It returns (as Markdown text) the top search results with titles, links, and optional
-    descriptions.
-    NOTE: The returned URLs can be visited using the `extract_as_markdown` tool to retrieve
-    the contents the respective pages.
+    Search the web using DuckDuckGo and return top results with titles and links.
+    Use this when you need current information, news, or general web search.
+
+    The results include clickable links that can be visited using the 'read_webpage' tool
+    to get the full content of any page.
+
+    Examples:
+        - "latest news about AI" - finds recent AI news articles
+        - "Python tutorial" - finds Python learning resources
+        - "weather in Tokyo" - finds weather information
 
     Args:
-        query: The query string.
-        max_results: Maximum no. of search results (links) to return.
-        show_description: If `True`, includes the description of each search result.
-         Default is `False`.
+        query: Search terms (keep it concise, 2-5 words work best).
+        max_results: Number of results to return (default 10, min 1, max 20).
 
     Returns:
-         The search results.
+        Markdown formatted search results with titles and URLs, or an error message.
     """
     import time
     import random
 
     try:
         from ddgs import DDGS
-    except ImportError as e:
-        raise ImportError(
-            '`ddgs` was not found! Please run `pip install ddgs`.'
-        ) from e
+    except ImportError:
+        return 'ERROR: Required library `ddgs` not installed. Install with: `pip install ddgs`'
 
-    # Note: In general, `verify` should be `True`
-    # In some cases, DDGS may fail because of proxy or something else;
-    # can set it to `False` but generally not recommended
-    results = DDGS(verify=False).text(query, max_results=max_results)
-    # DDGS throws a rate limit error
-    time.sleep(random.uniform(1.5, 3.5))
-    if len(results) == 0:
-        return 'No results found! Try a less restrictive/shorter query.'
+    # Validate inputs
+    if not query or not query.strip():
+        return 'ERROR: Search query cannot be empty.'
 
-    if not show_description:
-        # If descriptions are not needed, only return titles and links
-        results = [f"[{result['title']}]({result['href']})" for result in results]
-    else:
-        results = [f"[{result['title']}]({result['href']})\n{result['body']}" for result in results]
-    return '## Search Results\n\n' + '\n\n'.join(results)
+    query = query.strip()
+
+    if max_results < 1:
+        max_results = 1
+    elif max_results > 20:
+        max_results = 20  # Cap at reasonable limit
+
+    try:
+        # Use verify=True for security, but handle SSL errors gracefully
+        try:
+            engine = DDGS(timeout=20)
+            results = list(engine.text(query, max_results=max_results))
+        except Exception as ssl_error:
+            # Fallback to verify=False only if SSL fails
+            if 'SSL' in str(ssl_error) or 'certificate' in str(ssl_error).lower():
+                engine = DDGS(timeout=20, verify=False)
+                results = list(engine.text(query, max_results=max_results))
+            else:
+                raise
+
+        # Small random delay to be respectful
+        time.sleep(random.uniform(0.5, 1.5))
+
+        if not results or len(results) == 0:
+            return (
+                f"No results found for '{query}'. Try:\n"
+                "- Using fewer, more common words\n"
+                "- Removing special characters\n"
+                "- Being less specific"
+            )
+
+        # Format results as clean Markdown
+        output = f'# Search Results for: {query}\n\n'
+        output += f'Found {len(results)} result(s)\n\n'
+
+        for i, result in enumerate(results, 1):
+            title = result.get('title', 'No title')
+            url = result.get('href', '')
+            body = result.get('body', '')
+
+            # Clean up title and body
+            title = title.replace('\n', ' ').strip()
+            body = body.replace('\n', ' ').strip()
+
+            output += f'## {i}. {title}\n'
+            output += f'**URL:** {url}\n'
+            output += f'**Description:** {body}\n\n'
+
+        # output += "\n**Next Step:** Use the 'read_webpage' tool with any URL above to get full page content."
+
+        return output
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if 'ratelimit' in error_msg:
+            return 'ERROR: DuckDuckGo rate limit reached. Please wait 30s before searching again.'
+        if 'timeout' in error_msg:
+            return 'ERROR: Search request timed out. Please try again with a simpler query.'
+
+        return f'ERROR: Search failed - {error_msg}'
 
 
 @tool
-def download_file(url: str) -> str:
+def download_file(url: str, save_filename: str = None) -> str:
     """
-    Use this tool only when `extract_as_markdown` cannot be used.
-    Download a file from the Web and save it locally on the disk. This tool is to be used to
-    when the goal is to download a file (binary) rather than retrieve its contents as text.
+    Download a file from the internet and save it locally.
+    Use this for downloading images, PDFs, data files, or any binary content.
+
+    For reading webpage content as text, use 'read_webpage' instead.
+    For extracting content from PDFs/DOCX/XLSX, use 'read_document' instead.
+
+    Examples:
+        - Download an image: url="https://example.com/photo.jpg"
+        - Download a dataset: url="https://example.com/data.csv"
+        - Download a PDF: url="https://example.com/paper.pdf"
 
     Args:
-        url: The URL pointing to the file (must be a correct URL).
+        url: The complete URL of the file to download (must start with http:// or https://).
+        save_filename: Optional custom filename. If not provided, uses the filename from URL.
 
-    Return:
-        Path to the locally saved file or error messages in case of any exception.
+    Returns:
+        Success message with file path, or error message if download fails.
     """
-    import os
-    import requests
+    import re
     import tempfile
+    from pathlib import Path
+    from urllib.parse import urlparse, unquote
 
-    response = requests.get(url, timeout=20, stream=True, headers={'user-agent': 'kodeagent/0.0.1'})
-    response.raise_for_status()
+    try:
+        import requests
+    except ImportError:
+        return 'ERROR: Required lib `requests` not installed. Install with: `pip install requests`'
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        for chunk in response.iter_content(chunk_size=8192):
-            tmp_file.write(chunk)
-        tmp_file_path = tmp_file.name
-        if os.name == 'nt':
-            tmp_file_path = tmp_file_path.replace('\\', '/')
-    return tmp_file_path
+    # Validate URL
+    if not url or not url.strip():
+        return 'ERROR: URL cannot be empty.'
+
+    url = url.strip()
+
+    if not url.startswith(('http://', 'https://')):
+        return 'ERROR: URL must start with http:// or https://'
+
+    # Validate URL format
+    try:
+        parsed = urlparse(url)
+        if not parsed.netloc:
+            return 'ERROR: Invalid URL format - missing domain name.'
+    except Exception as e:
+        return f'ERROR: Invalid URL format - {str(e)}'
+
+    # Determine filename
+    if save_filename:
+        # Sanitize custom filename
+        save_filename = re.sub(r'[<>:"/\\|?*]', '_', save_filename)
+    else:
+        # Extract from URL
+        path = unquote(parsed.path)
+        save_filename = Path(path).name
+        if not save_filename or save_filename == '/':
+            save_filename = 'downloaded_file'
+
+    # Browser-like headers to avoid 403 errors
+    headers = {
+        'User-Agent': (
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        ),
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Cache-Control': 'max-age=0',
+    }
+
+    try:
+        # Make request with streaming for large files
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=30,
+            stream=True,
+            allow_redirects=True
+        )
+
+        # Check for errors
+        if response.status_code == 403:
+            return (
+                f'ERROR: Access forbidden (403) for {url}\n'
+                'The website is blocking automated access. Possible reasons:\n'
+                '- Website requires login/authentication\n'
+                '- Website blocks bots/scrapers\n'
+                '- Geographic restrictions\n'
+                'Try accessing the URL in a browser first to verify it works.'
+            )
+        if response.status_code == 404:
+            return f'ERROR: File not found (404) at {url}'
+        if response.status_code == 429:
+            return 'ERROR: Too many requests (429). The server is rate limiting. Wait and retry.'
+        if response.status_code >= 400:
+            return f'ERROR: HTTP {response.status_code} - {response.reason}\nURL: {url}'
+
+        response.raise_for_status()
+
+        # Check content length
+        content_length = response.headers.get('Content-Length')
+        if content_length:
+            size_mb = int(content_length) / (1024 * 1024)
+            if size_mb > 100:
+                return (
+                    f'ERROR: File too large ({size_mb:.1f} MB). Maximum supported size is 100 MB.'
+                )
+
+        # Create temp file with proper extension
+        file_ext = Path(save_filename).suffix
+        with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=file_ext,
+                prefix='kodeagent_'
+        ) as tmp_file:
+            # Download in chunks
+            downloaded_size = 0
+            chunk_size = 8192
+
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    tmp_file.write(chunk)
+                    downloaded_size += len(chunk)
+
+                    # Safety check during download
+                    if downloaded_size > 100 * 1024 * 1024:  # 100 MB
+                        tmp_file.close()
+                        Path(tmp_file.name).unlink()
+                        return 'ERROR: File exceeded 100 MB during download. Aborted.'
+
+            tmp_file_path = tmp_file.name
+
+        # Normalize path for cross-platform compatibility
+        tmp_file_path = str(Path(tmp_file_path).as_posix())
+
+        # Get actual file size
+        actual_size = Path(tmp_file_path).stat().st_size
+        size_str = (
+            f'{actual_size / 1024:.1f} KB'
+            if actual_size < 1024 * 1024
+            else f'{actual_size / (1024 * 1024):.1f} MB'
+        )
+
+        return (
+            f'SUCCESS: File downloaded successfully!\n'
+            f'- Saved to: {tmp_file_path}\n'
+            f'- Original filename: {save_filename}\n'
+            f'- Size: {size_str}\n'
+            f'- Content type: {response.headers.get("Content-Type", "unknown")}\n\n'
+            f'You can now use this file path with other tools.'
+        )
+
+    except requests.exceptions.Timeout:
+        return (
+            'ERROR: Download timed out after 30 seconds.\n'
+            'The file may be too large or the server is slow. Try again.'
+        )
+    except requests.exceptions.ConnectionError as e:
+        return (
+            f'ERROR: Connection failed - {str(e)}\nPossible causes:\n'
+            '- No internet connection\n'
+            '- Invalid domain name\n'
+            '- Server is down'
+        )
+    except requests.exceptions.RequestException as e:
+        return f'ERROR: Download failed - {str(e)}'
+    except Exception as e:
+        return f'ERROR: Unexpected error - {type(e).__name__}: {str(e)}'
 
 
 @tool
-def extract_file_contents_as_markdown(
-        url_or_file_path: str,
-        scrub_links: bool = True,
+def extract_as_markdown(
+        url_or_path: str,
         max_length: int = None
 ) -> str:
     """
-    Always use this tool to extract the contents of HTML files (.html), PDF files (.pdf),
-    Word documents (.docx), and Excel spreadsheets (.xlsx) as Markdown text. No other file type
-    is supported. The input can point to a URL or a local file path.
-    The extracted text can be used for analysis with LLMs.
-    This tool can directly work with URLs, so no need to download the files using
-    `file_download` separately.
-    NOTE: The output returned by this function can be long and may involve lots of quote marks.
+    Extract content from documents (PDF, DOCX, XLSX, PPTX) as Markdown text.
+    Works with both URLs and local file paths.
+
+    Supported formats:
+    - PDF files (.pdf)
+    - Word documents (.docx)
+    - Excel spreadsheets (.xlsx)
+    - PowerPoint presentations (.pptx)
+
+    For reading HTML web pages, use 'read_webpage' instead (faster and cleaner).
+
+    Examples:
+        - Extract from PDF: "https://example.com/paper.pdf"
+        - Extract from local file: "/tmp/document.docx"
+        - Extract from Excel: "https://example.com/data.xlsx"
 
     Args:
-        url_or_file_path: URL or Path to a .html, .pdf, .docx, or .xlsx file.
-        scrub_links: Defaults to `True`, which removes all links from the extracted Markdown text.
-         Set it to `False` if you want to retain the links in the text.
-        max_length: If set, limit the output to the first `max_length` characters. This can be used
-         to truncate the output but doing so can also lead to loss of information.
+        url_or_path: URL or file path to a PDF, DOCX, XLSX, or PPTX file.
+        max_length: Optional limit on output length in characters. Use this to
+                   truncate very long documents (may lose information).
 
     Returns:
-        The content of the file in Markdown format.
+        Document content as Markdown text, or an error message if extraction fails.
     """
     import re
-    import mimetypes
+    from pathlib import Path
+    from urllib.parse import urlparse
 
     try:
         from markitdown import MarkItDown
-    except ImportError as e:
-        raise ImportError(
-            '`markitdown` was not found! Please run `pip install markitdown[pdf,docx,xlsx]`.'
-        ) from e
+    except ImportError:
+        return (
+            'ERROR: Required lib `markitdown` is missing. Install with: `pip install markitdown`'
+        )
 
-    md = MarkItDown(enable_plugins=False)
+    # Validate input
+    if not url_or_path or not url_or_path.strip():
+        return 'ERROR: url_or_path cannot be empty.'
+
+    url_or_path = url_or_path.strip()
+
+    # Check if it's a URL or file path
+    is_url = url_or_path.startswith(('http://', 'https://'))
+
+    if is_url:
+        # Validate URL format
+        try:
+            parsed = urlparse(url_or_path)
+            if not parsed.netloc:
+                return 'ERROR: Invalid URL format - missing domain name.'
+        except Exception as e:
+            return f'ERROR: Invalid URL format - {str(e)}'
+    else:
+        # Validate file path
+        path_obj = Path(url_or_path)
+        if not path_obj.exists():
+            return f'ERROR: File not found at path: {url_or_path}'
+
+        if not path_obj.is_file():
+            return f'ERROR: Path is not a file: {url_or_path}'
+
+    # Determine file type
+    if is_url:
+        file_ext = Path(urlparse(url_or_path).path).suffix.lower()
+    else:
+        file_ext = Path(url_or_path).suffix.lower()
+
+    # Check supported formats
+    supported_formats = {'.pdf', '.docx', '.xlsx', '.pptx'}
+    if file_ext not in supported_formats:
+        return (
+            f'ERROR: Unsupported file format \'{file_ext}\'\n'
+            f'Supported formats: {", ".join(supported_formats)}\n\n'
+            f'For HTML web pages, use \'read_webpage\' instead.\n'
+            f'For other files, use \'download_file\' first.'
+        )
+
+    # Validate max_length
+    if max_length is not None:
+        if max_length < 100:
+            max_length = 100
+        elif max_length > 1000000:
+            max_length = 1000000  # Cap at 1M chars
+
     try:
-        result = md.convert(url_or_file_path.strip()).text_content
+        # Initialize MarkItDown
+        md = MarkItDown()
 
-        if mimetypes.guess_type(url_or_file_path)[0] == 'application/pdf':
-            # Handling (cid:NNN) occurrences in PDFs
-            cid_pattern = re.compile(r'\(cid:(\d+)\)')
-            matches = set(cid_pattern.findall(result))
-            for cid_num in matches:
-                cid_str = f'(cid:{cid_num})'
-                result = result.replace(cid_str, chr(int(cid_num) + 29))
+        # Convert document
+        try:
+            result = md.convert(url_or_path)
+            text = result.text_content
+        except Exception as convert_error:
+            error_str = str(convert_error).lower()
 
-        if scrub_links:
-            # Remove Markdown links [text](url)
-            result = re.sub(r'\[([^\]]+)\]\((https?:\/\/[^\)]+)\)', r'\1', result)
+            # Provide helpful error messages
+            if '403' in error_str or 'forbidden' in error_str:
+                return (
+                    'ERROR: Access forbidden (403) when trying to download from URL.\n'
+                    'The server is blocking automated access.\n\n'
+                    'Solution: Use `download_file` tool first to save it locally, '
+                    'then use this tool with the local file path.'
+                )
+            if '404' in error_str or 'not found' in error_str:
+                return f'ERROR: File not found (404) at URL: {url_or_path}'
+            if 'timeout' in error_str:
+                return 'ERROR: Request timed out. The file may be too large or server is slow.'
+            if 'pdf' in error_str and file_ext == '.pdf':
+                return (
+                    'ERROR: Failed to extract PDF content.\nThe PDF may be:\n'
+                    '- Scanned images without OCR text\n'
+                    '- Password protected\n'
+                    '- Corrupted or malformed\n\n'
+                    f'Original error: {str(convert_error)}'
+                )
 
-        if max_length is not None:
-            result = result[:max_length]
+            raise  # Re-raise for generic handling below
 
-        return result
+        if not text:
+            return (
+                f'ERROR: No content could be extracted from the {file_ext} file.\n'
+                'The file may be empty, corrupted, or contain only images.'
+            )
+
+        # Clean up the text
+        text = text.strip()
+
+        # Handle PDF-specific issues (CID characters)
+        if file_ext == '.pdf':
+            # Remove common PDF artifacts
+            text = re.sub(r'\(cid:\d+\)', '', text)  # Remove CID references
+            text = re.sub(r'\x00', '', text)  # Remove null bytes
+
+        # Remove excessive whitespace
+        text = re.sub(r'\n{4,}', '\n\n\n', text)  # Max 3 newlines
+        text = re.sub(r' {3,}', '  ', text)  # Max 2 spaces
+
+        # Get file info for output
+        if is_url:
+            source_info = f'URL: {url_or_path}'
+        else:
+            path_obj = Path(url_or_path)
+            file_size = path_obj.stat().st_size
+            size_str = (
+                f'{file_size / 1024:.1f} KB'
+                if file_size < 1024 * 1024
+                else f'{file_size / (1024 * 1024):.1f} MB'
+            )
+            source_info = f'File: {path_obj.name} ({size_str})'
+
+        # Truncate if needed
+        original_length = len(text)
+        if max_length and len(text) > max_length:
+            text = text[:max_length]
+            truncation_msg = (
+                f'\n\n---\n**[Content truncated from {original_length:,}'
+                f' to {max_length:,} characters]**'
+            )
+        else:
+            truncation_msg = ''
+
+        # Format output
+        output = f'# Extracted Content\n\n**Source:** {source_info}\n'
+        output += f'**Format:** {file_ext.upper()}\n'
+        output += f'**Length:** {original_length:,} characters\n\n---\n\n'
+        output += text
+        output += truncation_msg
+
+        return output
+
+    except ImportError as e:
+        return (
+            f'ERROR: Missing required library for {file_ext} files.\n'
+            f'Install with: `pip install markitdown[pdf]`\nDetails: {str(e)}'
+        )
+    except MemoryError:
+        return (
+            'ERROR: File too large to process (out of memory).\n'
+            'Try using max_length parameter to limit output size.'
+        )
     except Exception as e:
-        return str(e)
+        error_type = type(e).__name__
+        return f'ERROR: {error_type} - {str(e)}'
+
+
+@tool
+def read_webpage(url: str, max_length: int = 50000) -> str:
+    """
+    Read and extract the main text content from HTML web pages as clean Markdown.
+    Use this after 'search_web' to read articles, blogs, documentation, or any HTML content.
+
+    This tool intelligently extracts readable text while removing ads, navigation,
+    footers, and other clutter. It's optimized for web pages.
+
+    For documents (PDF, DOCX, XLSX), use 'extract_as_markdown' instead.
+
+    Examples:
+        - Read a news article: "https://www.bbc.com/news/article"
+        - Read documentation: "https://docs.python.org/3/tutorial/"
+        - Read a blog post: "https://example.com/blog/post"
+
+    Args:
+        url: The complete URL of the webpage (must start with http:// or https://).
+        max_length: Maximum characters to return (default 50000). Lower values
+                   process faster with small LLMs.
+
+    Returns:
+        Clean webpage content as Markdown text, or an error message.
+    """
+    import re
+    from urllib.parse import urlparse
+
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+    except ImportError as e:
+        missing_lib = 'requests' if 'requests' in str(e) else 'beautifulsoup4'
+        return (
+            'ERROR: Required library `{missing_lib}` not installed.\n'
+            f'Install with: `pip install {missing_lib}`'
+        )
+
+    # Validate URL
+    if not url or not url.strip():
+        return 'ERROR: URL cannot be empty.'
+
+    url = url.strip()
+
+    if not url.startswith(('http://', 'https://')):
+        return 'ERROR: URL must start with http:// or https://'
+
+    try:
+        parsed = urlparse(url)
+        if not parsed.netloc:
+            return 'ERROR: Invalid URL format - missing domain name.'
+    except Exception as e:
+        return f'ERROR: Invalid URL format - {str(e)}'
+
+    # Check if URL points to a document file
+    path_lower = parsed.path.lower()
+    doc_extensions = ('.pdf', '.docx', '.xlsx', '.pptx', '.doc', '.xls', '.ppt')
+    if any(path_lower.endswith(ext) for ext in doc_extensions):
+        ext = next(ext for ext in doc_extensions if path_lower.endswith(ext))
+        return (
+            f'ERROR: URL points to a document file ({ext}), not a webpage.\n'
+            'Use `extract_as_markdown` tool instead for document files.'
+        )
+
+    # Validate max_length
+    if max_length < 100:
+        max_length = 100
+    elif max_length > 50000:
+        max_length = 50000  # Cap at 50K chars
+
+    # Browser-like headers to avoid 403 errors
+    headers = {
+        'User-Agent': (
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        ),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
+        'Referer': 'https://www.google.com/',
+    }
+
+    try:
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=20,
+            allow_redirects=True
+        )
+
+        # Handle HTTP errors
+        if response.status_code == 403:
+            return (
+                f'ERROR: Access forbidden (403) for {url}\n\n'
+                'The website is blocking automated access. This could be because:\n'
+                '1. The site requires login/authentication\n'
+                '2. The site uses anti-bot protection (Cloudflare, etc.)\n'
+                '3. Geographic restrictions apply\n'
+                '4. The site blocks all automated tools\n\n'
+                'Suggestions:\n'
+                '- Verify the URL works in your browser\n'
+                '- Check if the site has an API\n'
+                '- Try a different source for the same information'
+            )
+        if response.status_code == 404:
+            return f'ERROR: Page not found (404). The URL may be incorrect:\n{url}'
+        if response.status_code == 429:
+            return 'ERROR: Rate limited (429). Too many requests. Wait before retrying.'
+        if response.status_code == 503:
+            return 'ERROR: Service unavailable (503). The website may be down. Try again later.'
+        if response.status_code >= 400:
+            return f'ERROR: HTTP {response.status_code} - {response.reason}\nURL: {url}'
+
+        response.raise_for_status()
+
+        # Check content type
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'text/html' not in content_type and 'application/xhtml' not in content_type:
+            if 'application/pdf' in content_type:
+                return (
+                    'ERROR: URL points to a PDF file, not a webpage.\n'
+                    'Use `extract_as_markdown` instead.'
+                )
+            return (
+                f'ERROR: URL does not point to a webpage (Content-Type: {content_type}).\n'
+                'For non-HTML content, use `download_file` or `extract_as_markdown`.'
+            )
+
+        # Parse HTML
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Remove unwanted elements
+        for element in soup([
+            'script', 'style', 'nav', 'footer', 'header',
+            'aside', 'iframe', 'noscript', 'svg', 'form',
+            'button', '[role="navigation"]', '[role="banner"]',
+            '[role="complementary"]', '.advertisement', '.ad',
+            '.sidebar', '.menu', '.navigation'
+        ]):
+            element.decompose()
+
+        # Try to find main content area
+        for selector in [
+            'main', 'article', '[role="main"]', '.main-content',
+            '#main-content', '#content', '.post-content',
+            '.entry-content', '.article-content', '.page-content'
+        ]:
+            main_content = soup.select_one(selector)
+            if main_content:
+                break
+
+        if not main_content:
+            main_content = soup.body if soup.body else soup
+
+        # Extract text
+        text = main_content.get_text(separator='\n', strip=True)
+
+        # Clean up text
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        text = '\n\n'.join(lines)
+
+        # Remove excessive whitespace
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = re.sub(r' {2,}', ' ', text)
+
+        if not text:
+            return (
+                f'ERROR: Could not extract meaningful content from {url}\nThe page may be:\n'
+                '- Dynamically loaded with JavaScript (not supported)\n'
+                '- Behind a login wall\n'
+                '- Empty or malformed'
+            )
+
+        # Get page title
+        title = soup.title.string if soup.title else 'No title'
+        title = title.strip()
+
+        # Truncate if needed
+        original_length = len(text)
+        if len(text) > max_length:
+            text = text[:max_length]
+            truncated_msg = (
+                f'\n\n---\n**[Content truncated from {original_length:,}'
+                f' to {max_length:,} characters]**'
+            )
+        else:
+            truncated_msg = ''
+
+        # Format output
+        output = f'# {title}\n\n**Source:** {url}\n'
+        output += f'**Length:** {original_length:,} characters\n\n---\n\n'
+        output += text
+        output += truncated_msg
+
+        return output
+
+    except requests.exceptions.Timeout:
+        return 'ERROR: Request timed out after 20s. The website may be slow or unresponsive.'
+    except requests.exceptions.ConnectionError:
+        return (
+            f'ERROR: Could not connect to {url}\nPossible causes:\n'
+            '- No internet connection\n'
+            '- Invalid domain name\n'
+            '- Server is down'
+        )
+    except requests.exceptions.RequestException as e:
+        return f'ERROR: Request failed - {str(e)}'
+    except Exception as e:
+        return f'ERROR: Unexpected error - {type(e).__name__}: {str(e)}'
 
 
 @tool
@@ -278,8 +845,8 @@ def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
     """
     try:
         import wikipedia
-    except ImportError as e:
-        raise ImportError('`wikipedia` was not found! Please run `pip install wikipedia`.') from e
+    except ImportError:
+        return '`wikipedia` was not found! Please run `pip install wikipedia`'
 
     try:
         results = wikipedia.search(query, results=max_results)
@@ -342,7 +909,7 @@ def search_arxiv(query: str, max_results: int = 5) -> str:
 
 
 @tool
-def get_youtube_transcript(video_id: str) -> str:
+def transcribe_youtube(video_id: str) -> str:
     """
     Retrieve the transcript/subtitles for YouTube videos (only). It also works for automatically
     generated subtitles, supports translating subtitles. The input should be a valid YouTube
@@ -373,7 +940,7 @@ def get_youtube_transcript(video_id: str) -> str:
 
 
 @tool
-def get_audio_transcript(file_path: str) -> Any:
+def transcribe_audio(file_path: str) -> Any:
     """
     Convert audio files to text using OpenAI's Whisper model via Fireworks API.
     The input should be a path to an audio file (e.g., .mp3, .wav, .flac).

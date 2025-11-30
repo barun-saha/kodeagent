@@ -56,15 +56,16 @@ pip install -r requirements.txt
 ```
 
 Now, in your application code, create a ReAct agent and run a task like this:
-```python
-from kodeagent import ReActAgent, print_response, extract_file_contents_as_markdown, search_web
 
+```python
+from kodeagent import ReActAgent, print_response
+from kodeagent.tools import read_webpage, search_web
 
 agent = ReActAgent(
     name='Web agent',
     model_name='gemini/gemini-2.5-flash-lite',
-    tools=[search_web, extract_file_contents_as_markdown],
-    max_iterations=7,
+    tools=[search_web, read_webpage],
+    max_iterations=5,
 )
 
 for task in [
@@ -79,17 +80,20 @@ for task in [
 You can also create a CodeAct agent, which will execute Python code to use the tools. For example:
 
 ```python
-from kodeagent import CodeActAgent, search_web, extract_file_contents_as_markdown
-
+from kodeagent import CodeActAgent
+from kodeagent.tools import read_webpage, search_web, extract_as_markdown
 
 agent = CodeActAgent(
     name='Web agent',
-    model_name='gemini/gemini-2.5-flash-lite',
-    tools=[search_web, extract_file_contents_as_markdown],
+    model_name='gemini/gemini-2.0-flash-lite',
+    tools=[search_web, read_webpage, extract_as_markdown],
     run_env='host',
     max_iterations=7,
-    allowed_imports=['re', 'requests', 'duckduckgo_search', 'markitdown'],
-    pip_packages='ddgs~=9.5.2;"markitdown[all]";',
+    allowed_imports=[
+        're', 'requests', 'ddgs', 'urllib', 'requests', 'bs4',
+        'pathlib', 'urllib.parse', 'markitdown'
+    ],
+    pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;"markitdown[all]";',
 )
 ```
 
