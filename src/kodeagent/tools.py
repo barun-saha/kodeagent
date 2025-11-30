@@ -36,7 +36,7 @@ DEFAULT_TOOLS_IMPORTS = [
     'urllib.parse',
     'os',
 ]
-"""List of default Python standard library modules to be available in all tools."""
+"""List of default modules (stdlib and third-party) to be available in tools."""
 
 
 def tool(func: Callable) -> Callable:
@@ -253,7 +253,7 @@ def download_file(url: str, save_filename: str = None) -> str:
     Use this for downloading images, PDFs, data files, or any binary content.
 
     For reading webpage content as text, use 'read_webpage' instead.
-    For extracting content from PDFs/DOCX/XLSX, use 'read_document' instead.
+    For extracting content from PDFs/DOCX/XLSX, use 'extract_as_markdown' instead.
 
     Examples:
         - Download an image: url="https://example.com/photo.jpg"
@@ -646,7 +646,7 @@ def read_webpage(url: str, max_length: int = 50000) -> str:
     except ImportError as e:
         missing_lib = 'requests' if 'requests' in str(e) else 'beautifulsoup4'
         return (
-            'ERROR: Required library `{missing_lib}` not installed.\n'
+            f'ERROR: Required library `{missing_lib}` not installed.\n'
             f'Install with: `pip install {missing_lib}`'
         )
 
