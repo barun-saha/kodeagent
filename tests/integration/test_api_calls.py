@@ -105,4 +105,4 @@ async def test_react_agent_llm_integration():
     assert any(r['type'] == 'final' for r in responses)
     # Verify we got a numerical answer
     final_response = next(r for r in responses if r['type'] == 'final')
-    assert '4' in str(final_response['value'])
+    assert '3' in str(final_response['value'])

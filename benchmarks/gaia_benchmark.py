@@ -42,8 +42,8 @@ def get_agent(agent_type: str, model_name: str, max_steps: int = 10) -> ka.Agent
         A configured CodeAgent instance.
     """
     all_tools = [
-        ka.search_web, ka.extract_file_contents_as_markdown, ka.download_file,
-        ka.get_youtube_transcript, ka.get_audio_transcript,
+        ka.search_web, ka.extract_as_markdown, ka.download_file,
+        ka.transcribe_youtube, ka.transcribe_audio,
         ka.search_wikipedia, ka.search_arxiv,
     ]
     litellm_params = {'temperature': 0, 'timeout': 45}

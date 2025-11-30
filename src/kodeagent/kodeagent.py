@@ -859,8 +859,9 @@ class ReActAgent(Agent):
 
                 # Execute tool
                 if tool_name in self.tool_names:
+                    logger.debug('🛠 Running tool: %s with args: %s', tool_name, tool_args_dict)
                     result = self.tool_name_to_func[tool_name](**tool_args_dict)
-                    # FIXED: Always use role='tool' for tool results
+                    # Always use role='tool' for tool results
                     self.add_to_history(ChatMessage(role='tool', content=str(result)))
                     yield self.response(
                         rtype='step',
@@ -1334,7 +1335,9 @@ async def main():
     agent = ReActAgent(
         name='Simple agent',
         model_name=model_name,
-        tools=[dtools.calculator, dtools.search_web, dtools.extract_file_contents_as_markdown,],
+        tools=[
+            dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
+        ],
         max_iterations=5,
         litellm_params=litellm_params,
         filter_tools_for_task=False
@@ -1342,14 +1345,14 @@ async def main():
     # agent = CodeActAgent(
     #     name='Simple agent',
     #     model_name=model_name,
-    #     tools=[dtools.calculator, dtools.search_web, dtools.extract_file_contents_as_markdown,],
+    #     tools=[dtools.calculator, dtools.search_web, dtools.read_webpage,],
     #     max_iterations=7,
     #     litellm_params=litellm_params,
     #     run_env='e2b',
     #     allowed_imports=[
-    #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs', 'markitdown'
+    #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
     #     ],
-    #     pip_packages='ddgs~=9.5.2;',
+    #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
     #     filter_tools_for_task=False
     # )
 
@@ -1376,7 +1379,7 @@ async def main():
 
     print(f'{agent.__class__.__name__} demo\n')
 
-    for task, img_urls in the_tasks:
+    for task, img_urls in the_tasks[3:]:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in agent.run(task, files=img_urls):
             print_response(response, only_final=True)

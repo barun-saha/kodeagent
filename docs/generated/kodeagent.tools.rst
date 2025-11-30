@@ -16,11 +16,9 @@
    
    download_file
    
-   extract_file_contents_as_markdown
+   extract_as_markdown
    
-   get_audio_transcript
-   
-   get_youtube_transcript
+   read_webpage
    
    search_arxiv
    
@@ -29,6 +27,10 @@
    search_wikipedia
    
    tool
+   
+   transcribe_audio
+   
+   transcribe_youtube
    
 
    

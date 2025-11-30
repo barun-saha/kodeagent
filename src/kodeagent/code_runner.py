@@ -12,7 +12,8 @@ from . import kutils as ku
 CODE_ENV_NAMES = Literal['host', 'docker', 'e2b']
 """Allowed code execution environment names."""
 DEFAULT_ALLOWED_IMPORTS = {
-    'ast', 'operator', 're',  # calculator
+    'ast', 'operator', 're',  # calculator tool
+    'time', 'random',
 }
 """ Default allowed imports for code execution."""
 # Check for the use of dangerous builtins
@@ -88,6 +89,10 @@ class CodeRunner:
             elif isinstance(node, ast.ImportFrom):
                 imported_modules.add(node.module)
 
+        logger.debug(
+            'Imported modules found: %s // Allowed imports: %s',
+            imported_modules, self.allowed_imports
+        )
         disallowed = imported_modules - self.allowed_imports
         return disallowed
 
@@ -118,7 +123,8 @@ class CodeRunner:
 
         disallowed_imports: set = self.check_imports(source_code)
         if len(disallowed_imports) > 0:
-            modules = '\n'.join([mod for mod in disallowed_imports])
+            modules = '\n'.join(list(disallowed_imports))
+            logger.error('CodeRunner found disallowed imports: %s', modules)
             return (
                 '',
                 f'The following imports are disallowed:{modules}'
