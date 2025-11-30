@@ -234,6 +234,8 @@ def search_web(query: str, max_results: int = 10) -> str:
 
         return output
 
+    except ImportError:
+        return 'ERROR: Required library `ddgs` not installed. Install with: `pip install ddgs`'
     except Exception as e:
         error_msg = str(e).lower()
         if 'ratelimit' in error_msg:
@@ -953,22 +955,25 @@ def transcribe_audio(file_path: str) -> Any:
         The transcript of the audio file as text.
     """
     import os
-    import requests
+    try:
+        import requests
 
-    with open(file_path, 'rb') as f:
-        response = requests.post(
-            'https://audio-turbo.us-virginia-1.direct.fireworks.ai/v1/audio/transcriptions',
-            headers={'Authorization': f'Bearer {os.getenv("FIREWORKS_API_KEY")}'},
-            files={'file': f},
-            data={
-                'model': 'whisper-v3-turbo',
-                'temperature': '0',
-                'vad_model': 'silero'
-            },
-            timeout=15,
-        )
+        with open(file_path, 'rb') as f:
+            response = requests.post(
+                'https://audio-turbo.us-virginia-1.direct.fireworks.ai/v1/audio/transcriptions',
+                headers={'Authorization': f'Bearer {os.getenv("FIREWORKS_API_KEY")}'},
+                files={'file': f},
+                data={
+                    'model': 'whisper-v3-turbo',
+                    'temperature': '0',
+                    'vad_model': 'silero'
+                },
+                timeout=15,
+            )
 
-    if response.status_code == 200:
-        return response.json()
+        if response.status_code == 200:
+            return response.json()
 
-    return f'Audio transcription error: {response.status_code}: {response.text}'
+        return f'Audio transcription error: {response.status_code}: {response.text}'
+    except ImportError:
+        return 'Audio transcription error: `requests` library not found. Please install it with `pip install requests`.'

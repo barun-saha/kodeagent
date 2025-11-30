@@ -150,6 +150,43 @@ class TestCalculator:
         """Exercises the final 'else' branch (unsupported node types)."""
         assert calculator('abs(-5)') is None
 
+    @patch('re.compile')
+    def test_calculator_rejects_disallowed_binary_operator_after_regex(self, mock_compile):
+        """
+        Tests that disallowed binary operators are rejected by eval_node,
+        by mocking the regex to allow the operator through.
+        """
+        # Mock the regex to be permissive
+        mock_regex = MagicMock()
+        mock_regex.match.return_value = True  # Pretend every expression is valid
+        mock_compile.return_value = mock_regex
+
+        assert calculator('2 << 1') is None
+
+    @patch('re.compile')
+    def test_calculator_rejects_disallowed_unary_operator_after_regex(self, mock_compile):
+        """
+        Tests that disallowed unary operators are rejected by eval_node,
+        by mocking the regex to allow the operator through.
+        """
+        mock_regex = MagicMock()
+        mock_regex.match.return_value = True
+        mock_compile.return_value = mock_regex
+
+        assert calculator('~5') is None
+
+    @patch('re.compile')
+    def test_calculator_rejects_function_calls_after_regex(self, mock_compile):
+        """
+        Tests that function calls are rejected by eval_node,
+        by mocking the regex to allow the operator through.
+        """
+        mock_regex = MagicMock()
+        mock_regex.match.return_value = True
+        mock_compile.return_value = mock_regex
+
+        assert calculator('abs(-5)') is None
+
 
 class TestSearchWeb:
     """Tests for the search_web tool."""
@@ -230,6 +267,22 @@ class TestSearchWeb:
 
     @patch('time.sleep')
     @patch('ddgs.DDGS')
+    def test_search_web_non_ssl_error_reraised(self, mock_ddgs, mock_sleep):
+        """Test that a non-SSL error is re-raised and caught by the outer try-except."""
+        mock_ddgs.side_effect = Exception("A non-SSL error")
+
+    @patch('time.sleep')
+    @patch('ddgs.DDGS')
+    def test_search_web_non_ssl_error_reraised(self, mock_ddgs, mock_sleep):
+        """Test that a non-SSL error is re-raised and caught by the outer try-except."""
+        mock_ddgs.side_effect = Exception("A non-SSL error")
+
+        result = search_web("test query")
+
+        assert "error: search failed - a non-ssl error" in result.lower()
+
+    @patch('time.sleep')
+    @patch('ddgs.DDGS')
     def test_search_web_rate_limit_error(self, mock_ddgs, mock_sleep):
         """Test rate limit error handling."""
         mock_ddgs.return_value.text.side_effect = Exception("Ratelimit exceeded")
@@ -268,12 +321,18 @@ class TestSearchWeb:
         with patch('ddgs.DDGS', side_effect=ImportError("No module named 'duckduckgo_search'")):
             # Need to reload or handle differently
             result = search_web("test")
-            # This will actually fail at import time, so we test the error message in docstring
-            assert True  # Placeholder - import errors happen at module load
+        assert 'ERROR: Required library `ddgs` not installed' in result
 
 
 class TestDownloadFile:
     """Tests for the download_file tool."""
+
+    def test_download_file_import_error(self):
+        """Test download_file with ImportError."""
+        import sys
+        with patch.dict('sys.modules', {'requests': None}):
+            result = download_file("https://example.com/file.pdf")
+            assert 'ERROR: Required lib `requests` not installed' in result
 
     @patch('requests.get')
     def test_download_file_success(self, mock_get):
@@ -292,9 +351,10 @@ class TestDownloadFile:
 
         # Extract path and cleanup
         if 'Saved to:' in result:
-            path = result.split('Saved to:')[1].split('\n')[0].strip()
-            if os.path.exists(path):
-                os.remove(path)
+            from pathlib import Path
+            path = Path(result.split('Saved to:')[1].split('\n')[0].strip())
+            if path.exists():
+                path.unlink()
 
     @patch('requests.get')
     def test_download_file_empty_url(self, mock_get):
@@ -333,9 +393,10 @@ class TestDownloadFile:
 
         # Cleanup
         if 'Saved to:' in result:
-            path = result.split('Saved to:')[1].split('\n')[0].strip()
-            if os.path.exists(path):
-                os.remove(path)
+            from pathlib import Path
+            path = Path(result.split('Saved to:')[1].split('\n')[0].strip())
+            if path.exists():
+                path.unlink()
 
     @patch('requests.get')
     def test_download_file_sanitizes_filename(self, mock_get):
@@ -352,9 +413,10 @@ class TestDownloadFile:
         # Should have sanitized the filename
 
         if 'Saved to:' in result:
-            path = result.split('Saved to:')[1].split('\n')[0].strip()
-            if os.path.exists(path):
-                os.remove(path)
+            from pathlib import Path
+            path = Path(result.split('Saved to:')[1].split('\n')[0].strip())
+            if path.exists():
+                path.unlink()
 
     @patch('requests.get')
     def test_download_file_403_error(self, mock_get):
@@ -449,6 +511,61 @@ class TestDownloadFile:
         assert 'Connection failed' in result
 
     @patch('requests.get')
+    def test_download_file_generic_400_error(self, mock_get):
+        """Test download with a generic 4xx error."""
+        mock_response = Mock()
+        mock_response.status_code = 418
+        mock_response.reason = "I'm a teapot"
+        mock_get.return_value = mock_response
+
+        result = download_file("https://example.com/file.pdf")
+
+        assert 'ERROR' in result
+        assert '418' in result
+        assert "I'm a teapot" in result
+
+    @patch('requests.get')
+    def test_download_file_request_exception(self, mock_get):
+        """Test download with a generic RequestException."""
+        import requests
+        mock_get.side_effect = requests.exceptions.RequestException("Some request error")
+
+        result = download_file("https://example.com/file.pdf")
+
+        assert 'ERROR' in result
+        assert 'Download failed' in result
+        assert 'Some request error' in result
+
+    def test_download_file_urlparse_exception(self):
+        """Test that an exception during URL parsing is handled."""
+        # urlparse on non-string type can raise an exception
+        with patch('urllib.parse.urlparse', side_effect=Exception("mocked exception")):
+            result = download_file("http://example.com")
+            assert 'ERROR: Invalid URL format' in result
+            assert 'mocked exception' in result
+
+    @patch('requests.get')
+    def test_download_file_no_filename_in_url(self, mock_get):
+        """Test download from a URL with no filename like http://example.com/"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'text/html'}
+        mock_response.iter_content.return_value = [b'data']
+        mock_get.return_value = mock_response
+
+        result = download_file("http://example.com/")
+
+        assert 'SUCCESS' in result
+        assert 'downloaded_file' in result
+
+        # Cleanup
+        if 'Saved to:' in result:
+            from pathlib import Path
+            path = Path(result.split('Saved to:')[1].split('\n')[0].strip())
+            if path.exists():
+                path.unlink()
+
+    @patch('requests.get')
     def test_download_file_with_headers(self, mock_get):
         """Test that download includes proper browser-like headers."""
         mock_response = Mock()
@@ -467,8 +584,10 @@ class TestDownloadFile:
         assert 'Chrome' in call_kwargs['headers']['User-Agent']
 
         # Cleanup
-        if os.path.exists('/tmp/kodeagent_file.pdf'):
-            os.remove('/tmp/kodeagent_file.pdf')
+        from pathlib import Path
+        path = Path('/tmp/kodeagent_file.pdf')
+        if path.exists():
+            path.unlink()
 
 
 class TestReadWebpage:
@@ -654,6 +773,53 @@ class TestReadWebpage:
         assert 'Could not connect' in result
 
     @patch('requests.get')
+    def test_read_webpage_503_error(self, mock_get):
+        """Test 503 Service Unavailable error."""
+        mock_response = Mock()
+        mock_response.status_code = 503
+        mock_response.reason = 'Service Unavailable'
+        mock_get.return_value = mock_response
+
+        result = read_webpage("https://example.com")
+
+        assert 'ERROR' in result
+        assert '503' in result
+        assert 'Service unavailable' in result
+
+    @patch('requests.get')
+    def test_read_webpage_request_exception(self, mock_get):
+        """Test generic RequestException."""
+        import requests
+        mock_get.side_effect = requests.exceptions.RequestException("Some other request error")
+
+        result = read_webpage("https://example.com")
+
+        assert 'ERROR' in result
+        assert 'Request failed' in result
+        assert 'Some other request error' in result
+
+    def test_read_webpage_urlparse_exception(self):
+        """Test that an exception during URL parsing is handled."""
+        with patch('urllib.parse.urlparse', side_effect=Exception("mocked exception")):
+            result = read_webpage("http://example.com")
+            assert 'ERROR: Invalid URL format' in result
+            assert 'mocked exception' in result
+
+    @patch('requests.get')
+    def test_read_webpage_no_body(self, mock_get):
+        """Test webpage with no body tag."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'text/html'}
+        mock_response.content = b'<html><head><title>Test Page</title></head></html>'
+        mock_get.return_value = mock_response
+
+        result = read_webpage('https://example.com/page')
+
+        assert 'Test Page' in result
+        assert 'ERROR' not in result
+
+    @patch('requests.get')
     def test_read_webpage_with_browser_headers(self, mock_get):
         """Test that proper browser-like headers are sent."""
         mock_response = Mock()
@@ -715,16 +881,61 @@ class TestExtractAsMarkdown:
 
     @patch('markitdown.MarkItDown')
     @patch('pathlib.Path')
-    def test_extract_path_is_directory(self, mock_path, mock_markitdown):
-        """Test extraction when path is a directory."""
-        mock_path.return_value.exists.return_value = True
-        mock_path.return_value.is_dir.return_value = True
-        mock_path.return_value.suffix = '.pdf'
+    def test_extract_path_is_not_file(self, mock_path, mock_markitdown):
+        """Test extraction when path is not a file (e.g., a directory)."""
+        mock_path_instance = mock_path.return_value
+        mock_path_instance.exists.return_value = True
+        mock_path_instance.is_file.return_value = False
 
-        result = extract_as_markdown('/path/to/directory')
+        result = extract_as_markdown('/path/to/directory.pdf')
+
+        assert 'ERROR: Path is not a file' in result
+
+    def test_extract_urlparse_exception(self):
+        """Test that an exception during URL parsing is handled."""
+        with patch('urllib.parse.urlparse', side_effect=Exception("mocked exception")):
+            result = extract_as_markdown("http://example.com/file.pdf")
+            assert 'ERROR: Invalid URL format' in result
+            assert 'mocked exception' in result
+
+    def test_extract_import_error(self):
+        """Test that ImportError is handled when markitdown is not installed."""
+        import sys
+        with patch.dict('sys.modules', {'markitdown': None}):
+            result = extract_as_markdown("http://example.com/file.pdf")
+            assert 'ERROR: Required lib `markitdown` is missing' in result
+
+    @patch('markitdown.MarkItDown')
+    def test_extract_memory_error(self, mock_markitdown):
+        """Test MemoryError handling."""
+        mock_markitdown.return_value.convert.side_effect = MemoryError("Out of memory")
+
+        result = extract_as_markdown("https://example.com/file.pdf")
 
         assert 'ERROR' in result
-        assert 'expected string or bytes-like object' in result
+        assert 'out of memory' in result.lower()
+
+    @patch('markitdown.MarkItDown')
+    def test_extract_generic_exception(self, mock_markitdown):
+        """Test generic exception handling."""
+        mock_markitdown.return_value.convert.side_effect = Exception("Some other error")
+
+        result = extract_as_markdown("https://example.com/file.pdf")
+
+        assert 'ERROR' in result
+        assert 'some other error' in result.lower()
+
+    @patch('markitdown.MarkItDown')
+    def test_extract_with_excessive_whitespace(self, mock_markitdown):
+        """Test that excessive whitespace is cleaned from the output."""
+        mock_result = Mock()
+        mock_result.text_content = "This   is a    test.\n\n\n\nThis is another line."
+        mock_markitdown.return_value.convert.return_value = mock_result
+
+        result = extract_as_markdown("https://example.com/file.pdf")
+
+        assert 'This  is a  test.' in result
+        assert '\n\n\nThis is another line.' in result
 
     @patch('markitdown.MarkItDown')
     def test_extract_unsupported_format(self, mock_markitdown):
@@ -1001,6 +1212,19 @@ class TestSearchArxiv:
         assert 'error occurred' in result.lower()
         assert 'API Error' in result
 
+    def test_search_arxiv_import_error(self):
+        """Test arXiv search with ImportError."""
+        import sys
+        with patch.dict('sys.modules', {'arxiv': None}):
+            result = search_arxiv("test")
+            assert 'An error occurred' in result
+
+    def test_search_wikipedia_import_error(self):
+        """Test Wikipedia search with ImportError."""
+        import sys
+        with patch.dict('sys.modules', {'wikipedia': None}):
+            result = search_wikipedia("test")
+            assert '`wikipedia` was not found' in result
 
 class TestTranscribeYoutube:
     """Tests for the transcribe_youtube tool."""
@@ -1117,3 +1341,10 @@ class TestTranscribeAudio:
         assert call_kwargs['data']['model'] == 'whisper-v3-turbo'
         assert call_kwargs['data']['temperature'] == '0'
         assert call_kwargs['data']['vad_model'] == 'silero'
+
+    def test_transcribe_audio_import_error(self):
+        """Test audio transcription with ImportError."""
+        import sys
+        with patch.dict('sys.modules', {'requests': None}):
+            result = transcribe_audio('/path/to/audio.mp3')
+            assert 'Audio transcription error' in result
