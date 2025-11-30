@@ -1317,7 +1317,7 @@ def print_response(response: AgentResponse, only_final: bool = True):
             response['value']
             if isinstance(response['value'], str) else response['value']
         )
-        rich.print(f'[blue][bold]Agent[/bold]: {msg}[/blue]\n')
+        rich.print(f'[green][bold]Agent[/bold]: {msg}[/green]\n')
 
     if not only_final:
         if response['type'] == 'log':
