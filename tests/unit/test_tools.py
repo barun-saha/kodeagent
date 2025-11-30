@@ -4,7 +4,6 @@ Tests all tools with appropriate mocking for web APIs and external dependencies.
 """
 import pytest
 from unittest.mock import Mock, patch, mock_open, MagicMock
-import os
 
 from kodeagent.tools import (
     tool,
@@ -265,21 +264,14 @@ class TestSearchWeb:
         assert 'Result' in result
         assert mock_ddgs.call_count == 2
 
-    @patch('time.sleep')
-    @patch('ddgs.DDGS')
-    def test_search_web_non_ssl_error_reraised(self, mock_ddgs, mock_sleep):
-        """Test that a non-SSL error is re-raised and caught by the outer try-except."""
-        mock_ddgs.side_effect = Exception("A non-SSL error")
 
     @patch('time.sleep')
     @patch('ddgs.DDGS')
     def test_search_web_non_ssl_error_reraised(self, mock_ddgs, mock_sleep):
         """Test that a non-SSL error is re-raised and caught by the outer try-except."""
-        mock_ddgs.side_effect = Exception("A non-SSL error")
-
-        result = search_web("test query")
-
-        assert "error: search failed - a non-ssl error" in result.lower()
+        mock_ddgs.side_effect = Exception('A non-SSL error')
+        result = search_web('test query')
+        assert 'error: search failed - a non-ssl error' in result.lower()
 
     @patch('time.sleep')
     @patch('ddgs.DDGS')
