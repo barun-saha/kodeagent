@@ -430,7 +430,7 @@ def download_file(url: str, save_filename: str = None) -> str:
 
 
 @tool
-def extract_as_markdown(url_or_path: str, max_length: int = None) -> str:
+def extract_as_markdown(url_or_path: str, max_length: Optional[int] = None) -> str:
     """
     Extract content from documents (PDF, DOCX, XLSX, PPTX) as Markdown text.
     Works with both URLs and local file paths.
