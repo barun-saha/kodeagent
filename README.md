@@ -9,7 +9,7 @@
 
 KodeAgent is a minimalistic, frameworkless approach to building debuggable AI agents. KodeAgent is a small (~2,000 lines of pure Python) engine designed to be the robust reasoning core inside your larger system, not the entire platform.
 
-![KodeAgent CodeAct Demo](examples/demo.gif)
+![KodeAgent CodeAct Demo](examples/kodeagent_demo.gif)
 
 
 ## ✅ Why KodeAgent?
@@ -18,10 +18,10 @@ KodeAgent adheres to the **Unix Philosophy**: do one thing well and integrate se
 
 Use KodeAgent because it offers:
 - **Stateless and Scalable Core:** Designed to be stateless with zero overhead, making it perfect for serverless and high-throughput microservices where you manage the state.
-- **ReAct & CodeAct:** KodeAgent supports both ReAct and CodeAct agent paradigms out-of-the-box, enabling agents to reason and act using natural language or by generating and executing code.
+- **ReAct & CodeAct:** KodeAgent supports both ReAct and CodeAct agent paradigms out-of-the-box, enabling agents to reason and act using tools or by generating and executing code.
 - **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models, such as Gemini and OpenAI, without requiring any changes to the core agent logic.
-- **Lightweight Foundation:** At only ~2,000 lines of pure Python, KodeAgent provides the complete agent primitives without any of the architectural bloat found in some frameworks.
-- **The Glass Box (Transparent & Debuggable):** The architecture is frameworkless and minimal, allowing you to read the entire Pure Python source and debug without fighting opaque abstraction layers.
+- **Lightweight Foundation:** At only ~2,000 lines of pure Python, KodeAgent provides the agent primitives without any of the architectural bloat found in some frameworks.
+- **The Glass Box:** The architecture is frameworkless and minimal, allowing you to read the entire Pure Python source and debug without fighting opaque abstraction layers.
 
 
 ## ✋ Why Not?
