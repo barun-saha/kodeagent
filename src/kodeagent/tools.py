@@ -60,9 +60,16 @@ def tool(func: Callable) -> Callable:
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
 
-    # Create a schema for the function arguments using Pydantic
     signature = inspect.signature(func)
-    fields = {name: (param.annotation, ...) for name, param in signature.parameters.items()}
+    fields = {}
+
+    for name, param in signature.parameters.items():
+        if param.default is inspect.Parameter.empty:
+            # Required parameter: (Type, ...)
+            fields[name] = (param.annotation, ...)
+        else:
+            # Optional parameter: (Type, default_value)
+            fields[name] = (param.annotation, param.default)
 
     # Add metadata to the function
     wrapper.name = func.__name__
@@ -423,10 +430,7 @@ def download_file(url: str, save_filename: str = None) -> str:
 
 
 @tool
-def extract_as_markdown(
-        url_or_path: str,
-        max_length: int = None
-) -> str:
+def extract_as_markdown(url_or_path: str, max_length: int = None) -> str:
     """
     Extract content from documents (PDF, DOCX, XLSX, PPTX) as Markdown text.
     Works with both URLs and local file paths.

@@ -444,7 +444,7 @@ class Agent(ABC):
 
         for t in self.tools:
             if t.name in filtered_tool_names:
-                description += f'### Tool: {t.name}\n'
+                description += f'\n### Tool: {t.name}\n'
                 description += f'**Description:** {t.description}\n'
 
                 # Extract and highlight required parameters
@@ -454,31 +454,12 @@ class Agent(ABC):
                     required = schema.get('required', [])
 
                     if properties:
-                        description += '**Parameters:**\n'
+                        description += '\n**Parameters:**\n'
                         for param_name, param_info in properties.items():
-                            param_desc = param_info.get('description', 'No description')
                             param_type = param_info.get('type', 'any')
                             is_required = param_name in required
-                            req_marker = '**[REQUIRED]**' if is_required else '[optional]'
-                            description += (
-                                f'  - `{param_name}` ({param_type}) {req_marker}: {param_desc}\n'
-                            )
-
-                    # Add usage example
-                    if required:
-                        example_args = {param: f"<{param}_value>" for param in required}
-                        # Convert to JSON string and escape for display
-                        args_json = json.dumps(example_args)
-                        # Escape the quotes for the outer JSON structure
-                        args_escaped = args_json.replace('"', '\\"')
-
-                        description += '**Example usage:**\n'
-                        description += '```json\n'
-                        description += '{\n'
-                        description += f'  "action": "{t.name}",\n'
-                        description += f'  "args": "{args_escaped}"\n'
-                        description += '}\n'
-                        description += '```\n'
+                            req_marker = '**REQUIRED**' if is_required else 'Optional'
+                            description += f'  - `{param_name}` ({param_type}): {req_marker}\n'
 
                 description += '\n---\n\n'
 
