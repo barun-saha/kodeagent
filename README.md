@@ -1,26 +1,27 @@
 # 🤖 KodeAgent
 
-KodeAgent: A minimalistic approach to building AI agents.
-
 [![pypi](https://img.shields.io/pypi/v/kodeagent.svg)](https://pypi.org/project/kodeagent/)
 [![codecov](https://codecov.io/gh/barun-saha/kodeagent/branch/main/graph/badge.svg)](https://codecov.io/gh/barun-saha/kodeagent)
 [![Documentation Status](https://readthedocs.org/projects/kodeagent/badge/?version=latest)](https://kodeagent.readthedocs.io/en/latest/?badge=latest)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+**KodeAgent: The Minimal, Frameworkless AI Agent Engine**
+
+KodeAgent is a minimalistic, frameworkless approach to building debuggable AI agents. KodeAgent is a small (~2,000 lines of pure Python) engine designed to be the robust reasoning core inside your larger system, not the entire platform.
+
+![KodeAgent CodeAct Demo](examples/demo.gif)
+
 
 ## ✅ Why KodeAgent?
 
-Use KodeAgent because it is:
+KodeAgent adheres to the **Unix Philosophy**: do one thing well and integrate seamlessly.
 
-- **Frameworkless**: Unlike some heavy agentic frameworks, KodeAgent is lightweight, making it easy to integrate and extend.
-- **Learn-first design**: Helps developers understand agent-building from scratch, focusing on the agent loop and various data structures.
-- **Multimodal**: Supports both text and images in the inputs. 
-
-Consisting of only ~2000 lines (excluding the prompts), KodeAgent comes with built-in [ReAct](https://arxiv.org/abs/2210.03629) and [CodeAct](https://arxiv.org/abs/2402.01030) agents. Or you can create your own agent by subclassing `Agent`. The ReAct and CodeAct agents are supported by `Planner` and `Observer`.
-
-A key motivation behind KodeAgent is also to teach building agent-like frameworks from scratch. KodeAgent introduces a few primitives and code flows that should help you get an idea about how such frameworks typically work.
-
-KodeAgent is stateless. It is generally suitable for use as part of larger systems to execute specific tasks.
+Use KodeAgent because it offers:
+- **Stateless and Scalable Core:** Designed to be stateless with zero overhead, making it perfect for serverless and high-throughput microservices where you manage the state.
+- **ReAct & CodeAct:** KodeAgent supports both ReAct and CodeAct agent paradigms out-of-the-box, enabling agents to reason and act using natural language or by generating and executing code.
+- **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models, such as Gemini and OpenAI, without requiring any changes to the core agent logic.
+- **Lightweight Foundation:** At only ~2,000 lines of pure Python, KodeAgent provides the complete agent primitives without any of the architectural bloat found in some frameworks.
+- **The Glass Box (Transparent & Debuggable):** The architecture is frameworkless and minimal, allowing you to read the entire Pure Python source and debug without fighting opaque abstraction layers.
 
 
 ## ✋ Why Not?
@@ -32,7 +33,7 @@ Also, here are a few reasons why you shouldn't use KodeAgent:
 - You want to use some of the well-known frameworks.
 
 
-## 👨‍💻 Usage
+## 🚀 Quick Start
 
 <a target="_blank" href="https://colab.research.google.com/drive/1D9ly3qi9sPZn_sUFdfC1XCFehldCVPXM?usp=sharing">
   <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
@@ -77,7 +78,7 @@ for task in [
         print_response(response, only_final=True)
 ```
 
-You can also create a CodeAct agent, which will execute Python code to use the tools. For example:
+You can also create a CodeActAgent, which leverages the core CodeAct pattern to generate and execute Python code on the fly for complex tasks. For example:
 
 ```python
 from kodeagent import CodeActAgent
