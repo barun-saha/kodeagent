@@ -1326,12 +1326,15 @@ async def main():
     # agent = CodeActAgent(
     #     name='Simple agent',
     #     model_name=model_name,
-    #     tools=[dtools.calculator, dtools.search_web, dtools.read_webpage,],
+    #     tools=[
+    #         dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
+    #     ],
     #     max_iterations=7,
     #     litellm_params=litellm_params,
-    #     run_env='e2b',
+    #     run_env='host',
     #     allowed_imports=[
     #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
+    #         'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib'
     #     ],
     #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
     #     filter_tools_for_task=False
@@ -1360,7 +1363,7 @@ async def main():
 
     print(f'{agent.__class__.__name__} demo\n')
 
-    for task, img_urls in the_tasks[3:]:
+    for task, img_urls in the_tasks:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in agent.run(task, files=img_urls):
             print_response(response, only_final=True)
