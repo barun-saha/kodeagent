@@ -444,7 +444,7 @@ class Agent(ABC):
 
         for t in self.tools:
             if t.name in filtered_tool_names:
-                description += f'### Tool: {t.name}\n'
+                description += f'\n### Tool: {t.name}\n'
                 description += f'**Description:** {t.description}\n'
 
                 # Extract and highlight required parameters
@@ -454,31 +454,12 @@ class Agent(ABC):
                     required = schema.get('required', [])
 
                     if properties:
-                        description += '**Parameters:**\n'
+                        description += '\n**Parameters:**\n'
                         for param_name, param_info in properties.items():
-                            param_desc = param_info.get('description', 'No description')
                             param_type = param_info.get('type', 'any')
                             is_required = param_name in required
-                            req_marker = '**[REQUIRED]**' if is_required else '[optional]'
-                            description += (
-                                f'  - `{param_name}` ({param_type}) {req_marker}: {param_desc}\n'
-                            )
-
-                    # Add usage example
-                    if required:
-                        example_args = {param: f"<{param}_value>" for param in required}
-                        # Convert to JSON string and escape for display
-                        args_json = json.dumps(example_args)
-                        # Escape the quotes for the outer JSON structure
-                        args_escaped = args_json.replace('"', '\\"')
-
-                        description += '**Example usage:**\n'
-                        description += '```json\n'
-                        description += '{\n'
-                        description += f'  "action": "{t.name}",\n'
-                        description += f'  "args": "{args_escaped}"\n'
-                        description += '}\n'
-                        description += '```\n'
+                            req_marker = '**REQUIRED**' if is_required else 'Optional'
+                            description += f'  - `{param_name}` ({param_type}): {req_marker}\n'
 
                 description += '\n---\n\n'
 
@@ -1317,7 +1298,7 @@ def print_response(response: AgentResponse, only_final: bool = True):
             response['value']
             if isinstance(response['value'], str) else response['value']
         )
-        rich.print(f'[blue][bold]Agent[/bold]: {msg}[/blue]\n')
+        rich.print(f'[green][bold]Agent[/bold]: {msg}[/green]\n')
 
     if not only_final:
         if response['type'] == 'log':
@@ -1345,12 +1326,15 @@ async def main():
     # agent = CodeActAgent(
     #     name='Simple agent',
     #     model_name=model_name,
-    #     tools=[dtools.calculator, dtools.search_web, dtools.read_webpage,],
+    #     tools=[
+    #         dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
+    #     ],
     #     max_iterations=7,
     #     litellm_params=litellm_params,
-    #     run_env='e2b',
+    #     run_env='host',
     #     allowed_imports=[
     #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
+    #         'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib'
     #     ],
     #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
     #     filter_tools_for_task=False
@@ -1379,7 +1363,7 @@ async def main():
 
     print(f'{agent.__class__.__name__} demo\n')
 
-    for task, img_urls in the_tasks[3:]:
+    for task, img_urls in the_tasks:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in agent.run(task, files=img_urls):
             print_response(response, only_final=True)

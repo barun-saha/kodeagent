@@ -21,7 +21,7 @@ Use this when you need to execute code to gather information or perform an actio
 ```json
 {{
   "thought": "Your reasoning about what to do next",
-  "code": "# Python code here\\nprint(result)"
+  "code": "# Python code here\nprint(result)"
 }}
 ```
 
@@ -87,7 +87,7 @@ Use this when you have enough information to answer the user's task.
 ```json
 {{
   "thought": "I need to calculate 25 * 4. I'll use the calculator tool and print the result.",
-  "code": "result = calculator(expression='25 * 4')\\nprint(f'Result: {{result}}')"
+  "code": "result = calculator(expression='25 * 4')\nprint(f'Result: {{result}}')"
 }}
 ```
 
@@ -110,7 +110,7 @@ Use this when you have enough information to answer the user's task.
 ```json
 {{
   "thought": "I need to download the CSV file first. I'll use download_file and print the path for the next step.",
-  "code": "file_path = download_file(url='http://example.com/data.csv')\\nprint(f'Downloaded to: {{file_path}}')"
+  "code": "file_path = download_file(url='http://example.com/data.csv')\nprint(f'Downloaded to: {{file_path}}')"
 }}
 ```
 
@@ -120,7 +120,7 @@ Use this when you have enough information to answer the user's task.
 ```json
 {{
   "thought": "The file is downloaded to /tmp/data_xyz.csv. Now I'll read it and count rows. I need to import csv module.",
-  "code": "import csv\\n\\nwith open('/tmp/data_xyz.csv', 'r') as f:\\n    row_count = sum(1 for row in csv.reader(f))\\nprint(f'Total rows: {{row_count}}')"
+  "code": "import csv\n\nwith open('/tmp/data_xyz.csv', 'r') as f:\n    row_count = sum(1 for row in csv.reader(f))\nprint(f'Total rows: {{row_count}}')"
 }}
 ```
 
@@ -143,7 +143,7 @@ Use this when you have enough information to answer the user's task.
 ```json
 {{
   "thought": "I'll search for Python tutorials using web_search and print the results.",
-  "code": "results = web_search(query='Python tutorials')\\nprint(f'Search results: {{results}}')"
+  "code": "results = web_search(query='Python tutorials')\nprint(f'Search results: {{results}}')"
 }}
 ```
 
@@ -153,7 +153,7 @@ Use this when you have enough information to answer the user's task.
 ```json
 {{
   "thought": "I have the search results. I'll extract the first URL and save it to a file.",
-  "code": "# Extract first URL from the observation\\nfirst_url = 'https://tutorial1.com'\\n\\n# Save to file\\nwith open('tutorial_url.txt', 'w') as f:\\n    f.write(first_url)\\n\\nprint(f'Saved URL to tutorial_url.txt: {{first_url}}')"
+  "code": "# Extract first URL from the observation\nfirst_url = 'https://tutorial1.com'\n\n# Save to file\nwith open('tutorial_url.txt', 'w') as f:\n    f.write(first_url)\n\nprint(f'Saved URL to tutorial_url.txt: {{first_url}}')"
 }}
 ```
 
@@ -176,7 +176,7 @@ Use this when you have enough information to answer the user's task.
 ```json
 {{
   "thought": "I'll calculate the sum using a loop.",
-  "code": "total = sum(range(1, 100))\\nprint(total)"
+  "code": "total = sum(range(1, 100))\nprint(total)"
 }}
 ```
 
@@ -186,7 +186,7 @@ Use this when you have enough information to answer the user's task.
 ```json
 {{
   "thought": "Wait, I made an error. range(1, 100) goes from 1 to 99, not 100. I need range(1, 101). Let me recalculate.",
-  "code": "total = sum(range(1, 101))\\nprint(f'Sum from 1 to 100: {{total}}')"
+  "code": "total = sum(range(1, 101))\nprint(f'Sum from 1 to 100: {{total}}')"
 }}
 ```
 
@@ -259,21 +259,21 @@ Use this when you have enough information to answer the user's task.
 ✅ **CORRECT:** Printing data for next step
 ```json
 {{
-  "code": "result = calculator(expression='2+2')\\nprint(f'Result: {{result}}')"
+  "code": "result = calculator(expression='2+2')\nprint(f'Result: {{result}}')"
 }}
 ```
 
 ✅ **CORRECT:** Calling tools as functions
 ```json
 {{
-  "code": "results = web_search(query='Python tutorials')\\nprint(results)"
+  "code": "results = web_search(query='Python tutorials')\nprint(results)"
 }}
 ```
 
 ✅ **CORRECT:** Importing before use
 ```json
 {{
-  "code": "import json\\ndata = json.loads(text)\\nprint(data)"
+  "code": "import json\ndata = json.loads(text)\nprint(data)"
 }}
 ```
 

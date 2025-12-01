@@ -22,7 +22,7 @@ Use this when you need to use a tool to gather information or perform an action.
 {{
   "thought": "Your reasoning about what to do next",
   "action": "exact_tool_name",
-  "args": "{{\\"param1\\": \\"value1\\", \\"param2\\": \\"value2\\"}}"
+  "args": "{{\"param1\": \"value1\", \"param2\": \"value2\"}}"
 }}
 ```
 
@@ -30,17 +30,17 @@ Use this when you need to use a tool to gather information or perform an action.
 - `thought`: Always required, explain your reasoning
 - `action`: Exact tool name from Available Tools section (case-sensitive)
 - `args`: **MUST be a valid JSON string with ALL required parameters**
-  - Use double quotes and escape them: `"{{\\"key\\": \\"value\\"}}"`
+  - Use double quotes and escape them: `"{{\"key\": \"value\"}}"`
   - Include ALL required parameters for the tool
   - Check the tool description below for required parameters
-  - Example: `"{{\\"query\\": \\"search term\\", \\"max_results\\": 5}}"`
+  - Example: `"{{\"query\": \"search term\", \"max_results\": 5}}"`
 - Do NOT include `final_answer` or set `task_successful` to true
 
 **Common args mistakes to avoid:**
 - ❌ Empty args: `"args": "{{}}"`
 - ❌ Missing required parameters: `"args": "{{}}"`  when a tool needs `query`
-- ❌ Wrong parameter names: `"args": "{{\\"search\\": \\"term\\"}}"` when a tool expects `query`
-- ✅ Correct: `"args": "{{\\"query\\": \\"search term\\"}}"`
+- ❌ Wrong parameter names: `"args": "{{\"search\": \"term\"}}"` when a tool expects `query`
+- ✅ Correct: `"args": "{{\"query\": \"search term\"}}"`
 
 ### Pattern 2: Final Answer
 Use this when you have enough information to answer the user's task.
@@ -72,7 +72,7 @@ Use this when you have enough information to answer the user's task.
 
 1. **Mutual Exclusivity**: Never provide both a tool call (action + args) AND final_answer in the same response
 2. **Complete Tool Calls**: When calling a tool, ALWAYS provide ALL required parameters in args
-3. **Valid JSON in args**: Use double quotes and escape them: `"{{\\"key\\": \\"value\\"}}"`
+3. **Valid JSON in args**: Use double quotes and escape them: `"{{\"key\": \"value\"}}"`
 4. **Exact tool names**: Use tools exactly as listed in Available Tools (case-sensitive)
 5. **Check tool parameters**: Before calling a tool, verify you're providing the correct parameter names
 6. **No repetition**: Don't call the same tool with same args if it failed
@@ -92,7 +92,7 @@ Use this when you have enough information to answer the user's task.
 {{
   "thought": "I need to calculate 25 * 4. The calculator tool requires an 'expression' parameter.",
   "action": "calculator",
-  "args": "{{\\"expression\\": \\"25 * 4\\"}}"
+  "args": "{{\"expression\": \"25 * 4\"}}"
 }}
 ```
 
@@ -117,7 +117,7 @@ Use this when you have enough information to answer the user's task.
 {{
   "thought": "I need to search for information about festivals in Paris. The web_search tool requires a 'query' parameter.",
   "action": "web_search",
-  "args": "{{\\"query\\": \\"main festivals in Paris\\"}}"
+  "args": "{{\"query\": \"main festivals in Paris\"}}"
 }}
 ```
 
@@ -142,7 +142,7 @@ Use this when you have enough information to answer the user's task.
 {{
   "thought": "This task has two parts. First, I'll calculate 10 + 15 using the calculator tool with the 'expression' parameter.",
   "action": "calculator",
-  "args": "{{\\"expression\\": \\"10 + 15\\"}}"
+  "args": "{{\"expression\": \"10 + 15\"}}"
 }}
 ```
 
@@ -153,7 +153,7 @@ Use this when you have enough information to answer the user's task.
 {{
   "thought": "The sum is 25. Now I need to search for festivals in Tokyo using web_search with the 'query' parameter.",
   "action": "web_search",
-  "args": "{{\\"query\\": \\"festivals in Tokyo\\"}}"
+  "args": "{{\"query\": \"festivals in Tokyo\"}}"
 }}
 ```
 
@@ -189,7 +189,7 @@ Use this when you have enough information to answer the user's task.
 {{
   "thought": "I made an error - I didn't provide the required 'query' parameter. Let me fix that.",
   "action": "web_search",
-  "args": "{{\\"query\\": \\"Python tutorials\\"}}"
+  "args": "{{\"query\": \"Python tutorials\"}}"
 }}
 ```
 
@@ -215,13 +215,13 @@ Use this when you have enough information to answer the user's task.
 
 ❌ **WRONG:** Missing required parameter
 ```json
-{{"thought": "...", "action": "web_search", "args": "{{\\"max_results\\": 5}}"}}
+{{"thought": "...", "action": "web_search", "args": "{{\"max_results\": 5}}"}}
 // Missing required 'query' parameter!
 ```
 
 ❌ **WRONG:** Wrong parameter name
 ```json
-{{"thought": "...", "action": "calculator", "args": "{{\\"formula\\": \\"2+2\\"}}"}}
+{{"thought": "...", "action": "calculator", "args": "{{\"formula\": \"2+2\"}}"}}
 // Tool expects 'expression', not 'formula'!
 ```
 
@@ -237,12 +237,12 @@ Use this when you have enough information to answer the user's task.
 
 ✅ **CORRECT:** Tool call with all required parameters
 ```json
-{{"thought": "I need to calculate 2+2", "action": "calculator", "args": "{{\\"expression\\": \\"2+2\\"}}"}}
+{{"thought": "I need to calculate 2+2", "action": "calculator", "args": "{{\"expression\": \"2+2\"}}"}}
 ```
 
 ✅ **CORRECT:** Web search with required query parameter
 ```json
-{{"thought": "I need to search", "action": "web_search", "args": "{{\\"query\\": \\"search term\\"}}"}}
+{{"thought": "I need to search", "action": "web_search", "args": "{{\"query\": \"search term\"}}"}}
 ```
 
 ✅ **CORRECT:** Final answer with FINISH
@@ -274,7 +274,6 @@ Before generating a tool call response, verify:
 - Examples above use hypothetical tools for illustration
 - You MUST use actual tool names from "Available Tools" section
 - **ALWAYS provide ALL required parameters** when calling a tool
-- Always escape quotes in the `args` JSON string: `"{{\\"key\\": \\"value\\"}}"`
 - Use `action: "FINISH"` when providing final_answer
 - Set `task_successful: true` only for successful task completion
 - You MUST respond in valid JSON format as specified
