@@ -1,15 +1,13 @@
-# 🤖 KodeAgent
+# 🤖 KodeAgent: The Frameworkless, Minimal AI Agent Engine
 
 [![pypi](https://img.shields.io/pypi/v/kodeagent.svg)](https://pypi.org/project/kodeagent/)
 [![codecov](https://codecov.io/gh/barun-saha/kodeagent/branch/main/graph/badge.svg)](https://codecov.io/gh/barun-saha/kodeagent)
 [![Documentation Status](https://readthedocs.org/projects/kodeagent/badge/?version=latest)](https://kodeagent.readthedocs.io/en/latest/?badge=latest)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**KodeAgent: The Minimal, Frameworkless AI Agent Engine**
-
 KodeAgent is a minimalistic, frameworkless approach to building debuggable AI agents. KodeAgent is a small (~2,000 lines of pure Python) engine designed to be the robust reasoning core inside your larger system, not the entire platform.
 
-![KodeAgent CodeAct Demo](examples/kodeagent_demo.gif)
+![KodeAgent Demo](examples/kodeagent_demo.gif)
 
 
 ## ✅ Why KodeAgent?
@@ -17,10 +15,10 @@ KodeAgent is a minimalistic, frameworkless approach to building debuggable AI ag
 KodeAgent adheres to the **Unix Philosophy**: do one thing well and integrate seamlessly.
 
 Use KodeAgent because it offers:
-- **Stateless and Scalable Core:** Designed to be stateless with zero overhead, making it perfect for serverless and high-throughput microservices where you manage the state.
+- **Stateless and Scalable:** Designed to be stateless with zero overhead, making it perfect for serverless and high-throughput microservices where you manage the state.
 - **ReAct & CodeAct:** KodeAgent supports both ReAct and CodeAct agent paradigms out-of-the-box, enabling agents to reason and act using tools or by generating and executing code.
 - **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models, such as Gemini and OpenAI, without requiring any changes to the core agent logic.
-- **Lightweight Foundation:** At only ~2,000 lines of pure Python, KodeAgent provides the agent primitives without any of the architectural bloat found in some frameworks.
+- **Lightweight Foundation:** At only ~2,000 lines of pure Python and just a few dependencies, KodeAgent provides the agent primitives without any of the architectural bloat found in some frameworks.
 - **The Glass Box:** The architecture is frameworkless and minimal, allowing you to read the entire Pure Python source and debug without fighting opaque abstraction layers.
 
 
@@ -29,8 +27,8 @@ Use KodeAgent because it offers:
 Also, here are a few reasons why you shouldn't use KodeAgent:
 
 - KodeAgent is actively evolving, meaning some aspects may change.
-- The priority of KodeAgent is simplicity; optimization is secondary.
 - You want to use some of the well-known frameworks.
+- You need a full-fledged platform with built-in state management, memory, and other components.
 
 
 ## 🚀 Quick Start
