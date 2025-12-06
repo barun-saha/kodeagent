@@ -83,12 +83,28 @@ MAX_TASK_FILES = 10
 class Planner:
     """Given a task, generate and maintain a step-by-step plan to solve it."""
     def __init__(self, model_name: str, litellm_params: Optional[dict] = None):
+        """
+        Create a Planner instance for the agent.
+
+        Args:
+            model_name: The LLM to use for planning.
+            litellm_params: LiteLLM params.
+        """
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
         self.plan: Optional[AgentPlan] = None
 
     async def create_plan(self, task: Task, agent_type: str) -> AgentPlan:
-        """Create a plan to solve the given task and store it."""
+        """
+        Create a plan to solve the given task and store it.
+
+        Args:
+            task: The task to solve.
+            agent_type: Type of the agent that would solve the task.
+
+        Returns:
+            A plan to solve the task.
+        """
         messages = ku.make_user_message(
             text_content=AGENT_PLAN_PROMPT.format(
                 agent_type=agent_type,
@@ -108,7 +124,14 @@ class Planner:
         return self.plan
 
     async def update_plan(self, thought: str, observation: str, task_id: str):
-        """Update the plan based on the last thought and observation."""
+        """
+        Update the plan based on the last thought and observation.
+
+        Args:
+            thought: The ReAct/CodeAct agent's thought.
+            observation: The agent's observation.
+            task_id: ID of the task for which the plan is to be updated.
+        """
         if not self.plan:
             return
 
@@ -139,7 +162,7 @@ class Planner:
         return [step for step in self.plan.steps if not step.is_done]
 
     def get_formatted_plan(self, scope: Literal['all', 'done', 'pending'] = 'all') -> str:
-        """Convert the agent's plan into a markdown checklist."""
+        """Convert the agent's plan into a Markdown checklist."""
         if not self.plan or not self.plan.steps:
             return ''
 
@@ -158,14 +181,26 @@ class Planner:
 
 
 class Observer:
-    """Monitors an agent's behavior to detect issues like loops or stalled plans."""
+    """
+    Monitors an agent's behavior to detect issues like loops or stalled plans.
+    """
     def __init__(
             self,
             model_name: str,
             tool_names: set[str],
             litellm_params: Optional[dict] = None,
-            threshold: int = 3
+            threshold: Optional[int] = 3
     ):
+        """
+        Create an Observer for an agent.
+
+        Args:
+            model_name: The LLM to use.
+            tool_names: The set of tools available to the agent.
+            litellm_params: LiteLLM parameters.
+            threshold: Observation threshold, i.e., how frequently the observer will analyze
+             the chat history.
+        """
         self.threshold = threshold
         self.model_name = model_name
         self.tool_names = tool_names
@@ -180,7 +215,19 @@ class Observer:
             plan_before: Optional[str | AgentPlan],
             plan_after: Optional[str | AgentPlan],
     ) -> Optional[str]:
-        """Observe the agent's state and return a corrective message if a problem is detected."""
+        """
+        Observe the agent's state and return a corrective message if a problem is detected.
+
+        Args:
+            iteration: The current iteration of the agent.
+            task: The task being solved by the agent.
+            history: Task progress history (LLM chat history).
+            plan_before: The agent's plan before this iteration.
+            plan_after: The updated plan.
+
+        Returns:
+            Optional correction message for the agent (LLM), e.g., what to do or avoid.
+        """
         if self.threshold is None or iteration <= 1:
             return None
         if iteration - self.last_correction_iteration < self.threshold:
@@ -246,6 +293,19 @@ class Agent(ABC):
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
     ):
+        """
+        Create an agent.
+
+        Args:
+            name: The name of the agent.
+            model_name: The (LiteLLM) model name to use.
+            description: Optional brief description about the agent.
+            tools: An optional list of tools available to the agent.
+            litellm_params: LiteLLM params.
+            system_prompt: Optional system prompt for the agent. If not provided, default is used.
+            max_iterations: The max iterations an agent can perform to solve a task.
+            filter_tools_for_task: Whether the tools should be filtered for a task. Unused.
+        """
         self.id = uuid.uuid4()
         self.name: str = name
         self.description = description
@@ -322,7 +382,14 @@ class Agent(ABC):
             files: Optional[list[str]] = None,
             task_id: Optional[str] = None
     ):
-        """Initialize the running of a task by an agent."""
+        """
+        Initialize the running of a task by an agent.
+
+        Args:
+            description: Task description.
+            files: Optional files for the task.
+            task_id: Optional task ID.
+        """
         self.task = Task(description=description, files=files)
         if task_id:
             self.task.id = task_id
@@ -384,7 +451,18 @@ class Agent(ABC):
             channel: Optional[str] = None,
             metadata: Optional[dict[str, Any]] = None
     ) -> AgentResponse:
-        """Prepare a response to be sent by the agent."""
+        """
+        Prepare a response to be sent by the agent.
+
+        Args:
+            rtype: Response type emitted by the agent.
+            value: The current update from the agent.
+            channel: The response channel.
+            metadata: Any metadata associated with the update.
+
+        Returns:
+            A response from the agent.
+        """
         return {'type': rtype, 'channel': channel, 'value': value, 'metadata': metadata}
 
     @abstractmethod
@@ -395,6 +473,15 @@ class Agent(ABC):
         """
         Interact with the LLM using the agent's message history.
         Enhanced with retry logic for structured output failures.
+
+        Args:
+            response_format: Optional structured response format for the LLM.
+
+        Returns:
+            A chat response or an empty string.
+
+        Raises:
+            Exception in case of error.
         """
         formatted_messages = self.formatted_history_for_llm()
 
@@ -417,9 +504,9 @@ class Agent(ABC):
                     # Add feedback to help LLM correct itself
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                     feedback = (
-                        f"Error: Previous response had issues: {str(e)}. "
-                        f"Please ensure your response follows the exact JSON schema provided. "
-                        f"[Timestamp={datetime.now()}]"
+                        f'Error: Previous response had issues: {str(e)}. '
+                        f'Please ensure your response follows the exact JSON schema provided. '
+                        f'[Timestamp={datetime.now()}]'
                     )
                     formatted_messages.append({'role': 'user', 'content': feedback})
                 else:
