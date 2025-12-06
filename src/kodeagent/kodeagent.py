@@ -696,6 +696,7 @@ class ReActAgent(Agent):
             ChatMessage(role='user', content=f'Plan:\n{self.planner.get_formatted_plan()}')
         )
 
+        idx = 0
         for idx in range(self.max_iterations):
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
 
