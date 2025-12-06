@@ -15,8 +15,9 @@ from kodeagent import (
     Planner,
     Task,
     Observer,
-    Agent
+    Agent,
 )
+from kodeagent.kodeagent import MAX_TASK_FILES
 from kodeagent.models import (
     ChatMessage,
     ReActChatMessage,
@@ -2885,3 +2886,73 @@ def test_agent_custom_system_prompt():
         system_prompt='You are ReActAgent'
     )
     assert agent.system_prompt == 'You are ReActAgent'
+
+
+@pytest.mark.asyncio
+async def test_run_raises_error_on_empty_task(react_agent):
+    """Test that a ValueError is raised when the task string is empty."""
+    with pytest.raises(ValueError, match='Task description cannot be empty!'):
+        # The iterator must be consumed for the async function to run the validation
+        async for _ in react_agent.run(task=''):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_run_raises_error_on_whitespace_task(react_agent):
+    """Test that a ValueError is raised when the task string is only whitespace."""
+    with pytest.raises(ValueError, match='Task description cannot be empty!'):
+        async for _ in react_agent.run(task='   \t\n'):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_run_raises_error_on_too_many_files(react_agent):
+    """Test that a ValueError is raised when the number of files exceeds the limit."""
+    # Create a list of files one larger than the maximum allowed
+    excessive_files = [f'file{i}.txt' for i in range(MAX_TASK_FILES + 1)]
+
+    # Define the expected error message pattern
+    expected_match = f'Too many files provided for the task \\(max {MAX_TASK_FILES}\\)!'
+
+    with pytest.raises(ValueError, match=expected_match):
+        async for _ in react_agent.run(task='some task', files=excessive_files):
+            pass
+
+
+def dummy_llm_side_effect(*args, **kwargs):
+    # If response_format is AgentPlan, return valid AgentPlan JSON
+    if kwargs.get('response_format') == AgentPlan:
+        return '{"steps": [{"description": "Ask for details", "is_done": false}]}'
+    # If response_format is ObserverResponse, return valid ObserverResponse JSON
+    if kwargs.get('response_format') == ObserverResponse:
+        return (
+            '{"is_progressing": true, "is_in_loop": false,'
+            ' "reasoning": "Agent is progressing", "correction_message": null}'
+        )
+    # Otherwise, return a valid ReActChatMessage-like response
+    return (
+        '{"role": "assistant", "thought": "I should ask for details",'
+        ' "action": "FINISH", "args": null, "task_successful": true,'
+        ' "final_answer": "Task completed"}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_succeeds_with_max_files():
+    """Test that execution proceeds when the number of files is exactly the limit."""
+    max_files = [f'file{i}.txt' for i in range(MAX_TASK_FILES)]
+
+    with patch('kodeagent.kutils.call_llm', side_effect=dummy_llm_side_effect):
+        agent = ReActAgent(
+            name='no_tools_agent',
+            model_name=MODEL_NAME,
+            tools=[],
+            max_iterations=1
+        )
+        # Use a task string that the mock Agent class recognizes as a successful run
+        try:
+            async for _ in agent.run(task='successful task', files=max_files):
+                pass
+        except Exception as e:
+            # Catch any unexpected validation errors
+            pytest.fail(f'run raised an unexpected exception for valid input: {e}')

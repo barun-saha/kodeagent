@@ -77,17 +77,34 @@ SUCCESS_MATCH = re.compile(r'Successful:\s*(true|false)', re.IGNORECASE)
 CODE_MATCH = re.compile(r'Code:\s*```(?:python)?\s*(.+?)\s*```', re.DOTALL | re.IGNORECASE)
 
 CODE_ACT_PSEUDO_TOOL_NAME = 'code_execution'
+MAX_TASK_FILES = 10
 
 
 class Planner:
     """Given a task, generate and maintain a step-by-step plan to solve it."""
     def __init__(self, model_name: str, litellm_params: Optional[dict] = None):
+        """
+        Create a Planner instance for the agent.
+
+        Args:
+            model_name: The LLM to use for planning.
+            litellm_params: LiteLLM params.
+        """
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
         self.plan: Optional[AgentPlan] = None
 
     async def create_plan(self, task: Task, agent_type: str) -> AgentPlan:
-        """Create a plan to solve the given task and store it."""
+        """
+        Create a plan to solve the given task and store it.
+
+        Args:
+            task: The task to solve.
+            agent_type: Type of the agent that would solve the task.
+
+        Returns:
+            A plan to solve the task.
+        """
         messages = ku.make_user_message(
             text_content=AGENT_PLAN_PROMPT.format(
                 agent_type=agent_type,
@@ -107,7 +124,14 @@ class Planner:
         return self.plan
 
     async def update_plan(self, thought: str, observation: str, task_id: str):
-        """Update the plan based on the last thought and observation."""
+        """
+        Update the plan based on the last thought and observation.
+
+        Args:
+            thought: The ReAct/CodeAct agent's thought.
+            observation: The agent's observation.
+            task_id: ID of the task for which the plan is to be updated.
+        """
         if not self.plan:
             return
 
@@ -138,7 +162,7 @@ class Planner:
         return [step for step in self.plan.steps if not step.is_done]
 
     def get_formatted_plan(self, scope: Literal['all', 'done', 'pending'] = 'all') -> str:
-        """Convert the agent's plan into a markdown checklist."""
+        """Convert the agent's plan into a Markdown checklist."""
         if not self.plan or not self.plan.steps:
             return ''
 
@@ -157,14 +181,26 @@ class Planner:
 
 
 class Observer:
-    """Monitors an agent's behavior to detect issues like loops or stalled plans."""
+    """
+    Monitors an agent's behavior to detect issues like loops or stalled plans.
+    """
     def __init__(
             self,
             model_name: str,
             tool_names: set[str],
             litellm_params: Optional[dict] = None,
-            threshold: int = 3
+            threshold: Optional[int] = 3
     ):
+        """
+        Create an Observer for an agent.
+
+        Args:
+            model_name: The LLM to use.
+            tool_names: The set of tools available to the agent.
+            litellm_params: LiteLLM parameters.
+            threshold: Observation threshold, i.e., how frequently the observer will analyze
+             the chat history.
+        """
         self.threshold = threshold
         self.model_name = model_name
         self.tool_names = tool_names
@@ -179,7 +215,19 @@ class Observer:
             plan_before: Optional[str | AgentPlan],
             plan_after: Optional[str | AgentPlan],
     ) -> Optional[str]:
-        """Observe the agent's state and return a corrective message if a problem is detected."""
+        """
+        Observe the agent's state and return a corrective message if a problem is detected.
+
+        Args:
+            iteration: The current iteration of the agent.
+            task: The task being solved by the agent.
+            history: Task progress history (LLM chat history).
+            plan_before: The agent's plan before this iteration.
+            plan_after: The updated plan.
+
+        Returns:
+            Optional correction message for the agent (LLM), e.g., what to do or avoid.
+        """
         if self.threshold is None or iteration <= 1:
             return None
         if iteration - self.last_correction_iteration < self.threshold:
@@ -245,6 +293,19 @@ class Agent(ABC):
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
     ):
+        """
+        Create an agent.
+
+        Args:
+            name: The name of the agent.
+            model_name: The (LiteLLM) model name to use.
+            description: Optional brief description about the agent.
+            tools: An optional list of tools available to the agent.
+            litellm_params: LiteLLM params.
+            system_prompt: Optional system prompt for the agent. If not provided, default is used.
+            max_iterations: The max iterations an agent can perform to solve a task.
+            filter_tools_for_task: Whether the tools should be filtered for a task. Unused.
+        """
         self.id = uuid.uuid4()
         self.name: str = name
         self.description = description
@@ -321,7 +382,14 @@ class Agent(ABC):
             files: Optional[list[str]] = None,
             task_id: Optional[str] = None
     ):
-        """Initialize the running of a task by an agent."""
+        """
+        Initialize the running of a task by an agent.
+
+        Args:
+            description: Task description.
+            files: Optional files for the task.
+            task_id: Optional task ID.
+        """
         self.task = Task(description=description, files=files)
         if task_id:
             self.task.id = task_id
@@ -383,7 +451,18 @@ class Agent(ABC):
             channel: Optional[str] = None,
             metadata: Optional[dict[str, Any]] = None
     ) -> AgentResponse:
-        """Prepare a response to be sent by the agent."""
+        """
+        Prepare a response to be sent by the agent.
+
+        Args:
+            rtype: Response type emitted by the agent.
+            value: The current update from the agent.
+            channel: The response channel.
+            metadata: Any metadata associated with the update.
+
+        Returns:
+            A response from the agent.
+        """
         return {'type': rtype, 'channel': channel, 'value': value, 'metadata': metadata}
 
     @abstractmethod
@@ -394,6 +473,15 @@ class Agent(ABC):
         """
         Interact with the LLM using the agent's message history.
         Enhanced with retry logic for structured output failures.
+
+        Args:
+            response_format: Optional structured response format for the LLM.
+
+        Returns:
+            A chat response or an empty string.
+
+        Raises:
+            Exception in case of error.
         """
         formatted_messages = self.formatted_history_for_llm()
 
@@ -410,15 +498,17 @@ class Agent(ABC):
                 return chat_response or ''
 
             except Exception as e:
-                logger.warning(f'LLM call failed (attempt {attempt + 1}/{max_retries}): {e}')
+                logger.warning(
+                    'LLM call failed (attempt %d/%d): %s', attempt + 1, max_retries, str(e)
+                )
 
                 if attempt < max_retries - 1:
                     # Add feedback to help LLM correct itself
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                     feedback = (
-                        f"Error: Previous response had issues: {str(e)}. "
-                        f"Please ensure your response follows the exact JSON schema provided. "
-                        f"[Timestamp={datetime.now()}]"
+                        f'Error: Previous response had issues: {str(e)}.'
+                        ' Please ensure your response follows the exact JSON schema provided.'
+                        f' [Timestamp={datetime.now()}]'
                     )
                     formatted_messages.append({'role': 'user', 'content': feedback})
                 else:
@@ -547,7 +637,24 @@ class ReActAgent(Agent):
             task_id: Optional[str] = None,
             summarize_progress_on_failure: bool = True,
     ) -> AsyncIterator[AgentResponse]:
-        """Solve a task using ReAct's TAO loop."""
+        """
+        Solve a task using ReAct's TAO loop (or CodeAct's TCO loop).
+
+        Args:
+            task: A task to be solved by the agent.
+            files: An optional list of files related to the task.
+            task_id: Optional task ID.
+            summarize_progress_on_failure: Whether to summarize the progress if the agent fails
+             to successfully solve the task in max iterations.
+
+        Returns:
+            Step updates on the task and the final response.
+        """
+        if not task or not task.strip():
+            raise ValueError('Task description cannot be empty!')
+        if files and len(files) > MAX_TASK_FILES:
+            raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
+
         self._run_init(task, files, task_id)
         self.clear_history()
 
@@ -591,6 +698,7 @@ class ReActAgent(Agent):
             ChatMessage(role='user', content=f'Plan:\n{self.planner.get_formatted_plan()}')
         )
 
+        idx = 0
         for idx in range(self.max_iterations):
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
 
@@ -670,7 +778,9 @@ class ReActAgent(Agent):
                     try:
                         parsed_json = json.loads(thought_response_cleaned)
                     except JSONDecodeError as e:
-                        logger.warning(f'Initial JSON parse failed: {e}. Attempting repair...')
+                        logger.warning(
+                            'Initial JSON parse failed: %s. Attempting repair...', str(e)
+                        )
                         thought_response_cleaned = json_repair.repair_json(
                             thought_response_cleaned)
                         parsed_json = json.loads(thought_response_cleaned)
@@ -698,8 +808,8 @@ class ReActAgent(Agent):
 
                         if has_code and has_final_answer:
                             logger.warning(
-                                "LLM provided both code and final_answer. "
-                                "Keeping code, removing final_answer."
+                                'LLM provided both code and final_answer. '
+                                'Keeping code, removing final_answer.'
                             )
                             parsed_json['final_answer'] = None
                             parsed_json['task_successful'] = False
@@ -714,8 +824,8 @@ class ReActAgent(Agent):
 
                 except (JSONDecodeError, pyd.ValidationError) as parse_error:
                     logger.warning(
-                        f'Structured parsing failed: {type(parse_error).__name__}: {parse_error}. '
-                        f'Falling back to text parsing...'
+                        f'Structured parsing failed: %s: %s. Falling back to text parsing...',
+                        type(parse_error).__name__, parse_error
                     )
 
                     try:
@@ -724,7 +834,7 @@ class ReActAgent(Agent):
                         logger.info('Successfully parsed response using text fallback')
 
                     except Exception as text_error:
-                        logger.error(f'Text parsing also failed: {text_error}')
+                        logger.error('Text parsing also failed: %s', str(text_error))
                         raise ValueError(
                             f'Both structured and text parsing failed. '
                             f'Structured error: {parse_error}. '
@@ -735,7 +845,10 @@ class ReActAgent(Agent):
                 return msg
 
             except ValueError as ex:
-                logger.error(f'Parsing error in _record_thought (attempt {attempt + 1}/3): {ex}')
+                logger.error(
+                    'Parsing error in _record_thought (attempt %d/3): %s',
+                    attempt + 1, str(ex)
+                )
 
                 if attempt < 2:
                     await asyncio.sleep(random.uniform(0.5, 1.0))
@@ -751,7 +864,8 @@ class ReActAgent(Agent):
 
             except Exception as ex:
                 logger.exception(
-                    f'Unexpected error in _record_thought (attempt {attempt + 1}/3): {ex}')
+                    'Unexpected error in _record_thought (attempt %d/3): %s', attempt + 1, str(ex)
+                )
 
                 if attempt < 2:
                     await asyncio.sleep(random.uniform(0.5, 1.0))
@@ -935,7 +1049,7 @@ class ReActAgent(Agent):
             try:
                 json.loads(args)
             except (JSONDecodeError, Exception) as e:
-                logger.warning(f'Args extraction failed, invalid JSON: {e}')
+                logger.warning('Args extraction failed, invalid JSON: %s', str(e))
                 args = None
 
         # Extract final answer and success status
@@ -976,11 +1090,10 @@ class ReActAgent(Agent):
                 final_answer=None,
                 task_successful=False
             )
-        else:
-            raise ValueError(
-                f"Could not extract valid Action or Answer from response. "
-                f"Text: {text[:300]}..."
-            )
+
+        raise ValueError(
+            f'Could not extract valid Action or Answer from response. Text: {text[:300]}...'
+        )
 
     def formatted_history_for_llm(self) ->list[dict]:
         """Format message history for LLM with proper tool call structure."""
@@ -1046,7 +1159,8 @@ class ReActAgent(Agent):
         # Safety check: if we have a pending tool call without response, add a placeholder
         if pending_tool_call and last_tool_call_id:
             logger.warning(
-                'Found tool_call without corresponding tool response, adding placeholder')
+                'Found tool_call without corresponding tool response, adding placeholder'
+            )
             formatted_messages.append({
                 'role': 'tool',
                 'tool_call_id': last_tool_call_id,
