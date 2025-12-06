@@ -1082,11 +1082,10 @@ class ReActAgent(Agent):
                 final_answer=None,
                 task_successful=False
             )
-        else:
-            raise ValueError(
-                f"Could not extract valid Action or Answer from response. "
-                f"Text: {text[:300]}..."
-            )
+
+        raise ValueError(
+            f'Could not extract valid Action or Answer from response. Text: {text[:300]}...'
+        )
 
     def formatted_history_for_llm(self) ->list[dict]:
         """Format message history for LLM with proper tool call structure."""
