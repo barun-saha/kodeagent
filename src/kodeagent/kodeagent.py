@@ -77,6 +77,7 @@ SUCCESS_MATCH = re.compile(r'Successful:\s*(true|false)', re.IGNORECASE)
 CODE_MATCH = re.compile(r'Code:\s*```(?:python)?\s*(.+?)\s*```', re.DOTALL | re.IGNORECASE)
 
 CODE_ACT_PSEUDO_TOOL_NAME = 'code_execution'
+MAX_TASK_FILES = 10
 
 
 class Planner:
@@ -547,7 +548,24 @@ class ReActAgent(Agent):
             task_id: Optional[str] = None,
             summarize_progress_on_failure: bool = True,
     ) -> AsyncIterator[AgentResponse]:
-        """Solve a task using ReAct's TAO loop."""
+        """
+        Solve a task using ReAct's TAO loop (or CodeAct's TCO loop).
+
+        Args:
+            task: A task to be solved by the agent.
+            files: An optional list of files related to the task.
+            task_id: Optional task ID.
+            summarize_progress_on_failure: Whether to summarize the progress if the agent fails
+             to successfully solve the task in max iterations.
+
+        Returns:
+            Step updates on the task and the final response.
+        """
+        if not task or not task.strip():
+            raise ValueError('Task description cannot be empty!')
+        if files and len(files) > MAX_TASK_FILES:
+            raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
+
         self._run_init(task, files, task_id)
         self.clear_history()
 
