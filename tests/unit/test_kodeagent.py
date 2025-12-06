@@ -2862,3 +2862,26 @@ def test_codeact_tools_source_code_empty():
     # Should have base imports but no tool functions
     assert 'from typing import *' in agent.tools_source_code
     assert 'def ' not in agent.tools_source_code or agent.tools_source_code.count('def ') == 0
+
+
+def test_agent_custom_system_prompt():
+    """Test user-specified system prompts."""
+    agent = CodeActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        run_env='host',
+        tools=[],
+        allowed_imports=['datetime'],
+        system_prompt='You are CodeActAgent'
+    )
+    assert agent.system_prompt == 'You are CodeActAgent'
+
+    agent = ReActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        tools=[],
+        description='Test ReAct agent for unit tests',
+        max_iterations=3,
+        system_prompt='You are ReActAgent'
+    )
+    assert agent.system_prompt == 'You are ReActAgent'
