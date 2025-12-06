@@ -241,6 +241,7 @@ class Agent(ABC):
             description: Optional[str] = None,
             tools: Optional[list[Callable]] = None,
             litellm_params: Optional[dict] = None,
+            system_prompt: Optional[str] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
     ):
@@ -252,6 +253,7 @@ class Agent(ABC):
         self.tools = tools or []
         self.filter_tools_for_task = filter_tools_for_task
         self.litellm_params: dict = litellm_params or {}
+        self.system_prompt = system_prompt
         self.max_iterations = max_iterations
 
         self.tool_names = {t.name for t in tools} if tools else set()
@@ -494,6 +496,7 @@ class ReActAgent(Agent):
             tools: list,
             description: Optional[str] = None,
             litellm_params: Optional[dict] = None,
+            system_prompt: Optional[str] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
     ):
@@ -503,6 +506,7 @@ class ReActAgent(Agent):
             tools=tools,
             litellm_params=litellm_params,
             description=description,
+            system_prompt=system_prompt or REACT_SYSTEM_PROMPT,
             max_iterations=max_iterations,
             filter_tools_for_task=filter_tools_for_task,
         )
@@ -551,14 +555,14 @@ class ReActAgent(Agent):
             self.add_to_history(
                 ChatMessage(
                     role='system',
-                    content=REACT_SYSTEM_PROMPT.format(tools=self.get_tools_description())
+                    content=self.system_prompt.format(tools=self.get_tools_description())
                 )
             )
         elif self.__class__.__name__ == 'CodeActAgent':
             self.add_to_history(
                 ChatMessage(
                     role='system',
-                    content=CODE_ACT_SYSTEM_PROMPT.format(
+                    content=self.system_prompt.format(
                         tools=self.get_tools_description(),
                         authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports])
                     )
@@ -1065,6 +1069,7 @@ class CodeActAgent(ReActAgent):
             tools: Optional[list[Callable]] = None,
             description: Optional[str] = None,
             litellm_params: Optional[dict] = None,
+            system_prompt: Optional[str] = None,
             max_iterations: int = 20,
             allowed_imports: Optional[list[str]] = None,
             pip_packages: Optional[str] = None,
@@ -1078,6 +1083,7 @@ class CodeActAgent(ReActAgent):
             tools=tools,
             litellm_params=litellm_params,
             max_iterations=max_iterations,
+            system_prompt=system_prompt or CODE_ACT_SYSTEM_PROMPT,
             description=description,
             filter_tools_for_task=filter_tools_for_task,
         )
