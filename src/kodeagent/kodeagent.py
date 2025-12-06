@@ -498,7 +498,9 @@ class Agent(ABC):
                 return chat_response or ''
 
             except Exception as e:
-                logger.warning(f'LLM call failed (attempt {attempt + 1}/{max_retries}): {e}')
+                logger.warning(
+                    'LLM call failed (attempt %d/%d): %s', attempt + 1, max_retries, str(e)
+                )
 
                 if attempt < max_retries - 1:
                     # Add feedback to help LLM correct itself
@@ -776,7 +778,9 @@ class ReActAgent(Agent):
                     try:
                         parsed_json = json.loads(thought_response_cleaned)
                     except JSONDecodeError as e:
-                        logger.warning(f'Initial JSON parse failed: {e}. Attempting repair...')
+                        logger.warning(
+                            'Initial JSON parse failed: %s. Attempting repair...', str(e)
+                        )
                         thought_response_cleaned = json_repair.repair_json(
                             thought_response_cleaned)
                         parsed_json = json.loads(thought_response_cleaned)
@@ -804,8 +808,8 @@ class ReActAgent(Agent):
 
                         if has_code and has_final_answer:
                             logger.warning(
-                                "LLM provided both code and final_answer. "
-                                "Keeping code, removing final_answer."
+                                'LLM provided both code and final_answer. '
+                                'Keeping code, removing final_answer.'
                             )
                             parsed_json['final_answer'] = None
                             parsed_json['task_successful'] = False
@@ -820,8 +824,8 @@ class ReActAgent(Agent):
 
                 except (JSONDecodeError, pyd.ValidationError) as parse_error:
                     logger.warning(
-                        f'Structured parsing failed: {type(parse_error).__name__}: {parse_error}. '
-                        f'Falling back to text parsing...'
+                        f'Structured parsing failed: %s: %s. Falling back to text parsing...',
+                        type(parse_error).__name__, parse_error
                     )
 
                     try:
@@ -830,7 +834,7 @@ class ReActAgent(Agent):
                         logger.info('Successfully parsed response using text fallback')
 
                     except Exception as text_error:
-                        logger.error(f'Text parsing also failed: {text_error}')
+                        logger.error('Text parsing also failed: %s', str(text_error))
                         raise ValueError(
                             f'Both structured and text parsing failed. '
                             f'Structured error: {parse_error}. '
@@ -841,7 +845,10 @@ class ReActAgent(Agent):
                 return msg
 
             except ValueError as ex:
-                logger.error(f'Parsing error in _record_thought (attempt {attempt + 1}/3): {ex}')
+                logger.error(
+                    'Parsing error in _record_thought (attempt %d/3): %s',
+                    attempt + 1, str(ex)
+                )
 
                 if attempt < 2:
                     await asyncio.sleep(random.uniform(0.5, 1.0))
@@ -857,7 +864,8 @@ class ReActAgent(Agent):
 
             except Exception as ex:
                 logger.exception(
-                    f'Unexpected error in _record_thought (attempt {attempt + 1}/3): {ex}')
+                    'Unexpected error in _record_thought (attempt %d/3): %s', attempt + 1, str(ex)
+                )
 
                 if attempt < 2:
                     await asyncio.sleep(random.uniform(0.5, 1.0))
@@ -1041,7 +1049,7 @@ class ReActAgent(Agent):
             try:
                 json.loads(args)
             except (JSONDecodeError, Exception) as e:
-                logger.warning(f'Args extraction failed, invalid JSON: {e}')
+                logger.warning('Args extraction failed, invalid JSON: %s', str(e))
                 args = None
 
         # Extract final answer and success status
@@ -1151,7 +1159,8 @@ class ReActAgent(Agent):
         # Safety check: if we have a pending tool call without response, add a placeholder
         if pending_tool_call and last_tool_call_id:
             logger.warning(
-                'Found tool_call without corresponding tool response, adding placeholder')
+                'Found tool_call without corresponding tool response, adding placeholder'
+            )
             formatted_messages.append({
                 'role': 'tool',
                 'tool_call_id': last_tool_call_id,
