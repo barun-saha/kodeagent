@@ -504,9 +504,9 @@ class Agent(ABC):
                     # Add feedback to help LLM correct itself
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                     feedback = (
-                        f'Error: Previous response had issues: {str(e)}. '
-                        f'Please ensure your response follows the exact JSON schema provided. '
-                        f'[Timestamp={datetime.now()}]'
+                        f'Error: Previous response had issues: {str(e)}.'
+                        ' Please ensure your response follows the exact JSON schema provided.'
+                        f' [Timestamp={datetime.now()}]'
                     )
                     formatted_messages.append({'role': 'user', 'content': feedback})
                 else:
