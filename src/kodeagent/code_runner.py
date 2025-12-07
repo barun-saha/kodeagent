@@ -7,6 +7,7 @@ import warnings
 from typing import Optional, Literal
 
 from . import kutils as ku
+from .code_reviewer import CodeSecurityReviewer
 
 
 CODE_ENV_NAMES = Literal['host', 'docker', 'e2b']
@@ -37,9 +38,11 @@ class CodeRunner:
             self,
             env: CODE_ENV_NAMES,
             allowed_imports: list[str],
+            model_name: str,
             pip_packages: Optional[str] = None,
             timeout: int = 30,
-            env_vars_to_set: Optional[dict[str, str]] = None
+            env_vars_to_set: Optional[dict[str, str]] = None,
+            litellm_params: Optional[dict] = None
     ):
         """
         Create an environment to run Python code.
@@ -47,10 +50,12 @@ class CodeRunner:
         Args:
             env: The code execution environment. Must be a string from `CODE_ENV_NAMES`.
             allowed_imports: A list of Python modules that are allowed to be imported.
+            model_name: The LLM model name to use for security review.
             pip_packages: Optional Python libs to be installed by `pip` [E2B].
             timeout: Code execution timeout (default 30s).
             env_vars_to_set: Optional environment variables to set in the code execution
              environment (E2B only).
+            litellm_params: Optional parameters for LiteLLM.
         """
         self.allowed_imports: set[str] = set(allowed_imports).union(DEFAULT_ALLOWED_IMPORTS)
         self.env: CODE_ENV_NAMES = env
@@ -62,6 +67,10 @@ class CodeRunner:
         self.local_modules_to_copy = []
         self.pip_packages_str = ' '.join(self.pip_packages) if self.pip_packages else None
         self.env_vars_to_set = env_vars_to_set
+        self.code_reviewer = CodeSecurityReviewer(
+            model_name=model_name,
+            litellm_params=litellm_params
+        )
 
     def check_imports(self, code: str) -> set[str]:
         """
@@ -96,12 +105,13 @@ class CodeRunner:
         disallowed = imported_modules - self.allowed_imports
         return disallowed
 
-    def run(self, source_code: str, task_id: str) -> tuple[str, str, int]:
+    async def run(self, tools_code: str, generated_code: str, task_id: str) -> tuple[str, str, int]:
         """
-        Run Python code in pre-specified environment.
+        Run Python code in pre-specified environment after security review.
 
         Args:
-            source_code: The Python source code to execute.
+            tools_code: The Python source code for agent tools.
+            generated_code: The Python source code generated to solve a task.
             task_id: Unique task identifier for tracking.
 
         Returns:
@@ -109,8 +119,11 @@ class CodeRunner:
 
         Raises:
             UnknownCodeEnvError: If the specified environment is unsupported.
+            CodeSecurityError: If the code fails security review.
         """
         import ast
+
+        source_code = f'{tools_code}\n\n{generated_code}'
 
         try:
             ast.parse(source_code)
@@ -131,6 +144,17 @@ class CodeRunner:
                 '\nPlease only use the allowed modules for importing.',
                 -1
             )
+
+        # Security review before execution
+        # We check only the AI-generated code; tools are assumed to be "safe"
+        logger.info('Performing security review of code...')
+        review_result = await self.code_reviewer.review(generated_code)
+        if not review_result.is_secure:
+            logger.error('Code failed security review: %s', review_result.reason)
+            raise CodeSecurityError(
+                f'Code execution blocked due to security concerns: {review_result.reason}'
+            )
+        logger.info('Security review passed: %s', review_result.reason)
 
         if self.env == 'host':
             return self._run_code_host(source_code)

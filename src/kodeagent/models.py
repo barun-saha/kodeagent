@@ -244,3 +244,9 @@ class AgentResponse(TypedDict):
     channel: Optional[str]
     value: Any
     metadata: Optional[dict[str, Any]]
+
+
+class CodeReview(pyd.BaseModel):
+    """Code review decision for CodeActAgent."""
+    is_secure: bool = pyd.Field(description='Is the code safe & secure for execution?')
+    reason: str = pyd.Field(description='A brief explanation of the decision')

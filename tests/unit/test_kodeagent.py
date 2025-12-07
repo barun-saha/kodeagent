@@ -3,7 +3,7 @@ Unit tests for the agents and their operations.
 """
 import datetime
 from typing import Optional, AsyncIterator
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pydantic_core
 import pytest
@@ -95,7 +95,8 @@ def codeact_agent_factory():
         # Patch CodeRunner to avoid task.id issue
         with patch('kodeagent.kodeagent.CodeRunner') as mock_runner_class:
             mock_runner = MagicMock()
-            mock_runner.run.return_value = ('output', '', 0)
+            # Use AsyncMock for the async run() method
+            mock_runner.run = AsyncMock(return_value=('output', '', 0))
             mock_runner_class.return_value = mock_runner
 
             defaults = {
@@ -373,7 +374,7 @@ async def test_codeact_agent_host():
         with patch('kodeagent.kodeagent.CodeRunner') as mock_runner_class:
             # Create a mock runner instance
             mock_runner_instance = MagicMock()
-            mock_runner_instance.run.return_value = (current_month, '', 0)
+            mock_runner_instance.run = AsyncMock(return_value=(current_month, '', 0))
             mock_runner_class.return_value = mock_runner_instance
 
             code_agent = CodeActAgent(
@@ -452,11 +453,11 @@ async def test_codeact_agent_unsupported_env():
             # Create a mock runner that simulates unsupported env error
             mock_runner_instance = MagicMock()
 
-            def mock_run_with_error(code):
+            async def mock_run_with_error(*args, **kwargs):
                 # Return error tuple instead of raising exception
                 return ('', 'Unsupported code execution env: unknown_env', -1)
 
-            mock_runner_instance.run.side_effect = mock_run_with_error
+            mock_runner_instance.run = mock_run_with_error
             mock_runner_class.return_value = mock_runner_instance
 
             code_agent = CodeActAgent(
