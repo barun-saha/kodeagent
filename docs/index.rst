@@ -15,6 +15,12 @@ Please select a section below or choose a version in the bottom-left corner.
 
 .. toctree::
    :maxdepth: 2
+   :caption: Security
+
+   security.md
+
+.. toctree::
+   :maxdepth: 2
    :caption: API Reference
 
    api.rst
