@@ -90,6 +90,22 @@ class SecurityPatternDetector(ast.NodeVisitor):
                 
         self.generic_visit(node)
     
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        """Detect suspicious from-imports."""
+        module = node.module or ''
+        
+        # Subprocess module
+        if module in ['subprocess', 'multiprocessing', 'threading']:
+            self.violations.append(('HIGH', f'Process/thread module: from {module}'))
+            self.risk_score += 5
+            
+        # Network modules
+        if module in ['socket', 'urllib', 'http']:
+            self.violations.append(('MEDIUM', f'Network module: from {module}'))
+            self.risk_score += 2
+            
+        self.generic_visit(node)
+    
     def visit_While(self, node: ast.While) -> None:
         """Detect potential infinite loops."""
         # Check for while True without break
@@ -110,7 +126,9 @@ class SecurityPatternDetector(ast.NodeVisitor):
             func_name = self._get_func_name(node.iter.func)
             if func_name == 'range' and node.iter.args:
                 if isinstance(node.iter.args[0], ast.Constant):
-                    if node.iter.args[0].value > 1000000:
+                    if isinstance(
+                        node.iter.args[0].value, int
+                    ) and node.iter.args[0].value > 1000000:
                         self.violations.append(
                             ('MEDIUM', f'Large loop range: {node.iter.args[0].value}')
                         )
@@ -137,14 +155,6 @@ class SecurityPatternDetector(ast.NodeVisitor):
                     if left_val > 100_000_000:  # 100MB
                         self.violations.append(
                             ('HIGH', f'Large memory allocation: {left_val} * string')
-                        )
-                        self.risk_score += 5
-                # Number * Number
-                elif isinstance(left_val, int) and isinstance(right_val, int):
-                    result = left_val * right_val
-                    if result > 100_000_000:  # 100MB
-                        self.violations.append(
-                            ('HIGH', f'Large memory allocation: {result} bytes')
                         )
                         self.risk_score += 5
                     
@@ -199,7 +209,7 @@ class SecurityPatternDetector(ast.NodeVisitor):
     
     def _has_break(self, body: List[ast.stmt]) -> bool:
         """Check if a code block contains a break statement."""
-        for node in ast.walk(ast.Module(body=body)):
+        for node in ast.walk(ast.Module(body=body, type_ignores=[])):
             if isinstance(node, ast.Break):
                 return True
         return False
@@ -228,7 +238,6 @@ def analyze_code_patterns(code: str) -> Tuple[bool, str, int]:
     
     # Determine if code is safe based on violations
     critical_violations = [v for v in detector.violations if v[0] == 'CRITICAL']
-    high_violations = [v for v in detector.violations if v[0] == 'HIGH']
     
     if critical_violations:
         reasons = '; '.join([v[1] for v in critical_violations])

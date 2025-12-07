@@ -162,10 +162,10 @@ class CodeRunner:
         # We check only the AI-generated code; tools are assumed to be "safe"
         # At first, do a static analysis check for dangerous patterns in the generated code
         logger.debug('Performing static analysis of code...')
-        is_safe, reason, risk = analyze_code_patterns(generated_code)
+        is_safe, reason, _ = analyze_code_patterns(generated_code)
         if not is_safe:
             raise CodeSecurityError(f'Pattern detection blocked: {reason}')
-        
+       
         # If the code fails the static analysis, it is not executed
         # If the code passes the static analysis, do another round of check by the LLM
         logger.debug('Performing security review of code...')

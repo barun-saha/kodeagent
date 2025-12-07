@@ -569,11 +569,28 @@ os.rmdir('/important/dir')
 import os
 os.unlink('/important/file')
 """
-        is_safe, reason, risk = analyze_code_patterns(code)
+        is_safe, reason, _ = analyze_code_patterns(code)
         
         assert is_safe is False
         assert 'os.unlink' in reason.lower() or 'unlink' in reason.lower()
 
+
+
+    def test_import_from_subprocess_detected(self):
+        """Test that from subprocess import ... is detected."""
+        code = "from subprocess import Popen"
+        _, reason, risk = analyze_code_patterns(code)
+        
+        assert 'subprocess' in reason.lower()
+        assert risk >= 5
+
+    def test_import_from_socket_detected(self):
+        """Test that from socket import ... is detected."""
+        code = "from socket import socket"
+        _, reason, risk = analyze_code_patterns(code)
+        
+        assert 'socket' in reason.lower()
+        assert risk >= 2
 
 class TestAdditionalMemoryAllocation:
     """Test additional memory allocation patterns."""
@@ -581,18 +598,20 @@ class TestAdditionalMemoryAllocation:
     def test_reverse_string_multiplication(self):
         """Test that integer * string (reverse order) is detected."""
         code = "x = 200000000 * 'A'"  # Reverse order
-        is_safe, reason, risk = analyze_code_patterns(code)
+        _, reason, risk = analyze_code_patterns(code)
         
         assert 'memory allocation' in reason.lower() or 'large' in reason.lower()
         assert risk >= 5
     
-    def test_integer_multiplication_large(self):
-        """Test that large integer * integer is detected."""
+    def test_integer_multiplication_safe(self):
+        """Test that large integer * integer is safe (just math)."""
         code = "x = 50000 * 50000"  # Results in 2,500,000,000
-        is_safe, reason, risk = analyze_code_patterns(code)
+        is_safe, _, risk = analyze_code_patterns(code)
         
-        assert 'memory allocation' in reason.lower() or 'large' in reason.lower()
-        assert risk >= 5
+        # Should NOT be flagged as memory allocation
+        assert is_safe is True
+        assert risk == 0
+
 
 
 class TestHighRiskAccumulation:
