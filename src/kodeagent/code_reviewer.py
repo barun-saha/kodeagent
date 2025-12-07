@@ -1,3 +1,6 @@
+"""
+Review code for security vulnerabilities.
+"""
 import uuid
 from typing import Optional
 
@@ -26,7 +29,6 @@ class CodeSecurityReviewer:
         Returns:
             A CodeReview object containing the review results.
         """
-        print(f'\n\n\nCode under review:{code}\n\n\n')
         messages = [
             {
                 "role": "system",

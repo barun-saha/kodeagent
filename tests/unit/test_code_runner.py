@@ -270,7 +270,9 @@ def test_code_runner_default_allowed_imports():
 
 @pytest.mark.asyncio
 async def test_security_review_blocks_unsafe_code():
-    """Test that unsafe code is blocked by security review."""
+    """Test that unsafe code is blocked by pattern detection or security review."""
+    # Note: This code will be blocked by pattern detection BEFORE LLM review
+    # because os.environ access is detected by AST analysis
     async def mock_unsafe_review(code):
         return CodeReview(
             is_secure=False,
@@ -289,8 +291,9 @@ async def test_security_review_blocks_unsafe_code():
         with pytest.raises(CodeSecurityError) as excinfo:
             await runner.run(tools_code='', generated_code=unsafe_code, task_id='test-1')
         
-        assert 'security concerns' in str(excinfo.value).lower()
-        assert 'environment variables' in str(excinfo.value)
+        # Pattern detection blocks this before LLM review
+        assert 'pattern detection' in str(excinfo.value).lower() or 'security concerns' in str(excinfo.value).lower()
+        assert 'environ' in str(excinfo.value).lower()
 
 
 @pytest.mark.asyncio
