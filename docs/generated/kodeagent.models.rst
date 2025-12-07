@@ -22,6 +22,8 @@
    
    CodeActChatMessage
    
+   CodeReview
+   
    ObserverResponse
    
    PlanStep
