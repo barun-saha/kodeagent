@@ -22,6 +22,7 @@ kodeagent.pattern\_detector.SecurityPatternDetector
       ~SecurityPatternDetector.visit_Constant
       ~SecurityPatternDetector.visit_For
       ~SecurityPatternDetector.visit_Import
+      ~SecurityPatternDetector.visit_ImportFrom
       ~SecurityPatternDetector.visit_Str
       ~SecurityPatternDetector.visit_While
    

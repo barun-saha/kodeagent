@@ -23,6 +23,7 @@ extensions = [
     'sphinx.ext.napoleon',    # Converts Google/NumPy style docstrings
     'sphinx.ext.viewcode',
     'myst_parser',            # Enables Markdown support (.md files)
+    'sphinxcontrib.kroki',    # Use Kroki image rendering of Mermaid
 ]
 autosummary_generate = True
 
@@ -40,6 +41,13 @@ myst_enable_extensions = [
     'replacements',
     'html_admonition'
 ]
+# myst_fence_as_directive = ["mermaid"]
+# Kroki configuration
+kroki_server_url = "https://kroki.io"   # public server; use your own for offline/CI
+kroki_output_format = "svg"             # or "png"
+kroki_default_processing = "server"     # ensures server-side rendering
+kroki_inline_svg = True
+
 source_suffix = {
     '.rst': 'restructuredtext',
     '.md': 'markdown',

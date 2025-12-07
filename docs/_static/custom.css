@@ -1,0 +1,7 @@
+img.kroki.kroki-mermaid {
+  width: 200% !important;
+  max-width: none !important;
+  height: auto !important;
+  display: block;
+  margin: 1rem auto;
+}

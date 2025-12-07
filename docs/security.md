@@ -1,6 +1,41 @@
 # Code Security & Safety
 
-This section describes how code security is handled in case of code-generating agents.
+This section describes how code security is handled in case of code-generating agents. The following sequence diagram (via CodeRabbit) shows the flow of code security in CodeActAgent.
+
+```{kroki}
+:type: mermaid
+:format: svg
+:options: {"themeVariables": {"fontSize": "24px"}}
+:caption: Code Security Review by CodeActAgent
+sequenceDiagram
+    actor User
+    participant CodeRunner
+    participant PatternDetector
+    participant SecurityReviewer
+    participant LLM
+    participant Executor
+
+    User->>CodeRunner: run(tools_code, generated_code, task_id)
+    CodeRunner->>PatternDetector: analyze_code_patterns(generated_code)
+    alt Static analysis fails
+        PatternDetector-->>CodeRunner: (is_safe=false, reason, risk_score)
+        CodeRunner-->>User: raise CodeSecurityError(reason)
+    else Static analysis passes
+        PatternDetector-->>CodeRunner: (is_safe=true, reason, risk_score)
+        CodeRunner->>SecurityReviewer: review(generated_code)
+        SecurityReviewer->>LLM: call_llm(system_prompt, user: code)
+        LLM-->>SecurityReviewer: CodeReview(is_secure, reason)
+        alt LLM deems unsafe
+            SecurityReviewer-->>CodeRunner: CodeReview(is_secure=false, reason)
+            CodeRunner-->>User: raise CodeSecurityError(reason)
+        else LLM approves
+            SecurityReviewer-->>CodeRunner: CodeReview(is_secure=true, reason)
+            CodeRunner->>Executor: execute(tools_code + generated_code)
+            Executor-->>CodeRunner: (stdout, stderr, return_code)
+            CodeRunner-->>User: (stdout, stderr, return_code)
+        end
+    end
+```
 
 
 ## Overview

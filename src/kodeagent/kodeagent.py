@@ -658,14 +658,8 @@ class ReActAgent(Agent):
         self._run_init(task, files, task_id)
         self.clear_history()
 
-        if self.__class__.__name__ == 'ReActAgent':
-            self.add_to_history(
-                ChatMessage(
-                    role='system',
-                    content=self.system_prompt.format(tools=self.get_tools_description())
-                )
-            )
-        elif self.__class__.__name__ == 'CodeActAgent':
+        # Order matters -- specialized class first
+        if isinstance(self, CodeActAgent):
             self.add_to_history(
                 ChatMessage(
                     role='system',
@@ -673,6 +667,13 @@ class ReActAgent(Agent):
                         tools=self.get_tools_description(),
                         authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports])
                     )
+                )
+            )
+        elif isinstance(self, ReActAgent):
+            self.add_to_history(
+                ChatMessage(
+                    role='system',
+                    content=self.system_prompt.format(tools=self.get_tools_description())
                 )
             )
 

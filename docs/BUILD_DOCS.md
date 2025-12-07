@@ -13,7 +13,7 @@ pip install -r docs/requirements.txt
 Or install Sphinx manually:
 
 ```bash
-pip install sphinx sphinx-rtd-theme myst-parser sphinx-autodoc-typehints
+pip install sphinx sphinx-rtd-theme myst-parser sphinx-autodoc-typehints sphinxcontrib-kroki
 ```
 
 ## Quick Build
@@ -21,15 +21,13 @@ pip install sphinx sphinx-rtd-theme myst-parser sphinx-autodoc-typehints
 ### On Windows (PowerShell/CMD):
 
 ```bash
-cd docs
-sphinx-build -b html . _build/html
+sphinx-build -b html docs/ docs/_build/html
 ```
 
 ### On Linux/Mac:
 
 ```bash
-cd docs
-sphinx-build -b html . _build/html
+sphinx-build -b html docs/ docs/_build/html
 ```
 
 ## Using Make (if available)
