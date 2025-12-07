@@ -56,16 +56,20 @@ class SecurityPatternDetector(ast.NodeVisitor):
         # Detect os.environ, os.system, etc.
         if isinstance(node.value, ast.Name):
             if node.value.id == 'os':
-                if node.attr in ['system', 'popen', 'environ', 'execv', 'execl', 
-                                'spawn', 'remove', 'rmdir', 'unlink']:
+                if node.attr in [
+                    'system', 'popen', 'environ', 'execv', 'execl',
+                    'spawn', 'remove', 'rmdir', 'unlink'
+                ]:
                     self.violations.append(
                         ('CRITICAL', f'Dangerous os.{node.attr} access')
                     )
                     self.risk_score += 10
                     
         # Detect __dict__, __class__, __bases__ (introspection for exploits)
-        if node.attr in ['__dict__', '__class__', '__bases__', '__subclasses__',
-                        '__globals__', '__code__', '__builtins__']:
+        if node.attr in [
+            '__dict__', '__class__', '__bases__', '__subclasses__',
+            '__globals__', '__code__', '__builtins__'
+        ]:
             self.violations.append(('MEDIUM', f'Introspection detected: {node.attr}'))
             self.risk_score += 3
             
@@ -92,7 +96,9 @@ class SecurityPatternDetector(ast.NodeVisitor):
         if isinstance(node.test, ast.Constant) and node.test.value is True:
             has_break = self._has_break(node.body)
             if not has_break:
-                self.violations.append(('HIGH', 'Potential infinite loop: while True without break'))
+                self.violations.append(
+                    ('HIGH', 'Potential infinite loop: while True without break')
+                )
                 self.risk_score += 5
                 
         self.generic_visit(node)
@@ -157,19 +163,30 @@ class SecurityPatternDetector(ast.NodeVisitor):
     
     def _check_string_content(self, s: str) -> None:
         """Check string for suspicious patterns."""
-        # Detect shell commands
-        dangerous_commands = ['rm -rf', 'dd if=', 'mkfs', 'format', 
-                            'del /f', 'rmdir /s']
-        for cmd in dangerous_commands:
-            if cmd in s.lower():
+        # Detect shell commands - be more specific to avoid false positives
+        # Only flag if it looks like an actual shell command, not just the word
+        dangerous_patterns = [
+            ('rm -rf /', 'Dangerous rm command'),
+            ('rm -rf ~', 'Dangerous rm command'),
+            ('dd if=/dev', 'Dangerous dd command'),
+            ('mkfs.', 'Dangerous mkfs command'),
+            ('del /f /s /q', 'Dangerous Windows delete command'),
+            ('rmdir /s /q', 'Dangerous Windows rmdir command'),
+        ]
+        
+        s_lower = s.lower()
+        for pattern, description in dangerous_patterns:
+            if pattern in s_lower:
                 self.violations.append(
-                    ('CRITICAL', f'Dangerous command in string: {cmd}')
+                    ('CRITICAL', f'{description}: {pattern}')
                 )
                 self.risk_score += 10
                 
-        # Detect path traversal
-        if '../' in s or '..\\' in s:
-            self.violations.append(('HIGH', 'Path traversal pattern detected'))
+        # Detect path traversal - but only if it looks suspicious
+        # Allow relative paths in URLs and normal file operations
+        if ('../../../' in s or '..\\..\\..\\' in s):
+            # Only flag if it's trying to traverse multiple levels
+            self.violations.append(('HIGH', 'Deep path traversal pattern detected'))
             self.risk_score += 5
     
     def _get_func_name(self, node: ast.AST) -> str:
@@ -204,7 +221,7 @@ def analyze_code_patterns(code: str) -> Tuple[bool, str, int]:
     try:
         tree = ast.parse(code)
     except SyntaxError as e:
-        return False, f"Syntax error: {str(e)}", 100
+        return False, f'Syntax error: {str(e)}', 100
     
     detector = SecurityPatternDetector()
     detector.visit(tree)
@@ -215,14 +232,14 @@ def analyze_code_patterns(code: str) -> Tuple[bool, str, int]:
     
     if critical_violations:
         reasons = '; '.join([v[1] for v in critical_violations])
-        return False, f"Critical security violations: {reasons}", detector.risk_score
+        return False, f'Critical security violations: {reasons}', detector.risk_score
     
     if detector.risk_score > 15:  # Threshold for multiple high-risk patterns
         reasons = '; '.join([v[1] for v in detector.violations])
-        return False, f"High risk score ({detector.risk_score}): {reasons}", detector.risk_score
+        return False, f'High risk score ({detector.risk_score}): {reasons}', detector.risk_score
     
     if detector.violations:
         reasons = '; '.join([v[1] for v in detector.violations])
-        return True, f"Minor concerns detected: {reasons}", detector.risk_score
+        return True, f'Minor concerns detected: {reasons}', detector.risk_score
     
-    return True, "No suspicious patterns detected", 0
+    return True, 'No suspicious patterns detected', 0

@@ -161,21 +161,21 @@ class CodeRunner:
         # Security review before execution
         # We check only the AI-generated code; tools are assumed to be "safe"
         # At first, do a static analysis check for dangerous patterns in the generated code
-        logger.info('Performing static analysis of code...')
+        logger.debug('Performing static analysis of code...')
         is_safe, reason, risk = analyze_code_patterns(generated_code)
         if not is_safe:
             raise CodeSecurityError(f'Pattern detection blocked: {reason}')
         
         # If the code fails the static analysis, it is not executed
         # If the code passes the static analysis, do another round of check by the LLM
-        logger.info('Performing security review of code...')
+        logger.debug('Performing security review of code...')
         review_result = await self.code_reviewer.review(generated_code)
         if not review_result.is_secure:
             logger.error('Code failed security review: %s', review_result.reason)
             raise CodeSecurityError(
                 f'Code execution blocked due to security concerns: {review_result.reason}'
             )
-        logger.info('Security review passed: %s', review_result.reason)
+        logger.info('Code security review passed: %s', review_result.reason)
 
         if self.env == 'host':
             return self._run_code_host(source_code)
