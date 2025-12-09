@@ -1,4 +1,4 @@
-# 🤖 KodeAgent: The Frameworkless, Minimal AI Agent Engine
+# 🤖 KodeAgent: The Frameworkless, Minimal Agent Engine
 
 [![pypi](https://img.shields.io/pypi/v/kodeagent.svg)](https://pypi.org/project/kodeagent/)
 [![codecov](https://codecov.io/gh/barun-saha/kodeagent/branch/main/graph/badge.svg)](https://codecov.io/gh/barun-saha/kodeagent)
@@ -113,7 +113,7 @@ With `host` as the code running environment, no special steps are required, sinc
 
 For example, the Python modules that are allowed to be used in code should be explicitly specified using `allowed_imports`. In addition, any additional Python package that may need to be installed should be specified as a comma-separated list via `pip_packages`.  
 
-KodeAgent is very much experimental. Capabilities are limited. Use with caution.
+KodeAgent is under active development. Capabilities are limited. Use with caution.
 
 
 ## 🛠️ Tools
@@ -121,16 +121,17 @@ KodeAgent is very much experimental. Capabilities are limited. Use with caution.
 KodeAgent comes with the following built-in [tools](src/kodeagent/tools.py):
 - `calculator`: A simple calculator tool to perform basic arithmetic operations.
 - `download_file`: A tool to download a file from a given URL.
-- `extract_file_contents_as_markdown`: A tool to read file contents and return as markdown using MarkItDown.
-- `get_audio_transcript`: A tool to transcribe audio files using OpenAI's Whisper via [Fireworks API](https://fireworks.ai/). Need to set the `FIREWORKS_API_KEY` environment variable.
-- `get_youtube_transcript`: A tool to fetch YouTube video transcripts.
+- `extract_as_markdown`: A tool to read file contents and return as Markdown using MarkItDown.
+- `read_webpage`: A tool to read a webpage using BeautifulSoup.
 - `search_arxiv`: A tool to search arXiv for research papers and return summaries and links.
 - `search_web`: A web search tool using DuckDuckGo to fetch top search results.
 - `search_wikipedia`: A tool to search Wikipedia and return summaries and links.
+- `transcribe_audio`: A tool to transcribe audio files using OpenAI's Whisper via [Fireworks API](https://fireworks.ai/). Need to set the `FIREWORKS_API_KEY` environment variable.
+- `transcribe_youtube`: A tool to fetch YouTube video transcripts.
 
 Check out the docstrings of these tools in the [tools.py](src/kodeagent/tools.py) module for more details.
 
-To add a new tool, use the `@tool` decorator from `kodeagent.tool` module. For example:
+To add a new tool, use the `@tool` decorator from `kodeagent.tools` module. For example:
 ```python
 from kodeagent import tool
 
@@ -215,3 +216,12 @@ KodeAgent heavily borrows code and ideas from different places, such as:
 - [LangGraph](https://github.com/langchain-ai/langgraph)
 - [Building ReAct Agents from Scratch: A Hands-On Guide using Gemini](https://medium.com/google-cloud/building-react-agents-from-scratch-a-hands-on-guide-using-gemini-ffe4621d90ae)
 - [LangGraph Tutorial: Build Your Own AI Coding Agent](https://medium.com/@mariumaslam499/build-your-own-ai-coding-agent-with-langgraph-040644343e73)
+- Aider, Antigravity, CodeRabbit, GitHub Copilot, Jules, ...
+
+
+## ⚠️ DISCLAIMER & LIABILITY
+
+AI agents can occasionally cause unintended or unpredictable side effects. We urge users to **use KodeAgent with caution**. Always review generated code and test agents rigorously in a constrained, non-production environment before deployment.
+
+**LIMITATION OF LIABILITY:**
+By using this software, you agree that KodeAgent, its developers, contributors, supporters, and any other associated entities shall not be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise) arising in any way out of the use of this software.

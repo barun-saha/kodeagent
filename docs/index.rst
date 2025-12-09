@@ -17,7 +17,7 @@ Please select a section below or choose a version in the bottom-left corner.
    :maxdepth: 2
    :caption: Security
 
-   security.md
+   codeact_security.md
 
 .. toctree::
    :maxdepth: 2
