@@ -131,7 +131,7 @@ KodeAgent comes with the following built-in [tools](src/kodeagent/tools.py):
 
 Check out the docstrings of these tools in the [tools.py](src/kodeagent/tools.py) module for more details.
 
-To add a new tool, use the `@tool` decorator from `kodeagent.tool` module. For example:
+To add a new tool, use the `@tool` decorator from `kodeagent.tools` module. For example:
 ```python
 from kodeagent import tool
 
