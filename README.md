@@ -121,7 +121,7 @@ KodeAgent is under active development. Capabilities are limited. Use with cautio
 KodeAgent comes with the following built-in [tools](src/kodeagent/tools.py):
 - `calculator`: A simple calculator tool to perform basic arithmetic operations.
 - `download_file`: A tool to download a file from a given URL.
-- `extract_as_markdown`: A tool to read file contents and return as markdown using MarkItDown.
+- `extract_as_markdown`: A tool to read file contents and return as Markdown using MarkItDown.
 - `read_webpage`: A tool to read a webpage using BeautifulSoup.
 - `search_arxiv`: A tool to search arXiv for research papers and return summaries and links.
 - `search_web`: A web search tool using DuckDuckGo to fetch top search results.
