@@ -1,5 +1,10 @@
 # Code Security & Safety
 
+> **⚠️ DISCLAIMER**
+>
+> CodeActAgent offers basic security features to prevent malicious code execution. It is not a substitute for proper security measures. By no means the security features described here are bulletproof. Use it with caution.
+
+
 This section describes how code security is handled in case of code-generating agents. The following sequence diagram (via CodeRabbit) shows the flow of code security in CodeActAgent.
 
 ```{kroki}
