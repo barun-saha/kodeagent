@@ -419,22 +419,6 @@ class Agent(ABC):
         )
         return salvaged_response
 
-    def trace(self) -> str:
-        """Provide a trace of the agent's activities for the current task."""
-        trace_log = []
-        for msg in self.messages[self.msg_idx_of_new_task:]:
-            if isinstance(msg, ReActChatMessage):
-                trace_log.append(f"Thought: {msg.thought}")
-                if msg.action:
-                    trace_log.append(f"Action: {msg.action}({msg.args})")
-            elif isinstance(msg, CodeActChatMessage):
-                trace_log.append(f"Thought: {msg.thought}")
-                if msg.code:
-                    trace_log.append(f"Code:\n{msg.code}")
-            elif msg.role == 'tool':
-                trace_log.append(f"Observation: {msg.content}")
-        return "\n".join(trace_log)
-
     @abstractmethod
     async def run(
             self,
@@ -826,7 +810,7 @@ class ReActAgent(Agent):
 
                 except (JSONDecodeError, pyd.ValidationError) as parse_error:
                     logger.warning(
-                        f'Structured parsing failed: %s: %s. Falling back to text parsing...',
+                        'Structured parsing failed: %s: %s. Falling back to text parsing...',
                         type(parse_error).__name__, parse_error
                     )
 

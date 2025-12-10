@@ -918,71 +918,6 @@ def test_agent_purpose():
     assert 'calculator' in purpose
 
 
-def test_agent_trace(react_agent):
-    """Test the trace method of Agent."""
-    # Add some history
-    react_agent.add_to_history(ChatMessage(role='user', content='Calculate 2+2'))
-    react_agent.add_to_history(ReActChatMessage(
-        role='assistant',
-        thought='Using calculator',
-        action='calculator',
-        args='{"expression": "2+2"}',
-        task_successful=False,
-        final_answer=None
-    ))
-    react_agent.add_to_history(ChatMessage(role='tool', content='4'))
-
-    trace = react_agent.trace()
-    assert 'Thought: Using calculator' in trace
-    assert 'Action: calculator' in trace
-    assert 'Observation: 4' in trace
-
-
-def test_agent_trace_detailed(react_agent):
-    """Test detailed scenarios for Agent.trace."""
-    # Test empty history
-    assert react_agent.trace() == ''
-
-    # Add a sequence of messages to test different scenarios
-    messages = [
-        ChatMessage(role='user', content='Calculate 2+2'),
-        ReActChatMessage(
-            role='assistant',
-            thought='I will use the calculator',
-            action='calculator',
-            args='{"expression": "2+2"}',
-            task_successful=False,
-            final_answer=None
-        ),
-        ChatMessage(role='tool', content='4'),
-        ReActChatMessage(
-            role='assistant',
-            thought='I have the result',
-            action='FINISH',
-            args=None,
-            task_successful=True,
-            final_answer='The answer is 4'
-        )
-    ]
-
-    for msg in messages:
-        react_agent.add_to_history(msg)
-
-    trace = react_agent.trace()
-
-    # Verify all components are present in the trace
-    assert 'Thought: I will use the calculator' in trace
-    assert 'Action: calculator({"expression": "2+2"})' in trace
-    assert 'Observation: 4' in trace
-    assert 'Thought: I have the result' in trace
-
-    # Verify order of events
-    thought_pos = trace.find('Thought: I will use the calculator')
-    action_pos = trace.find('Action: calculator')
-    observation_pos = trace.find('Observation: 4')
-    assert thought_pos < action_pos < observation_pos
-
-
 @pytest.mark.parametrize('expression,expected', [
     ('2 + 2', 4),
     ('10 * 5', 50),
@@ -1991,54 +1926,6 @@ async def test_act_with_json_repair():
 
     # Should handle JSON repair
     assert len(responses) > 0
-
-
-def test_agent_trace_with_codeact():
-    """Test trace method with CodeActChatMessage."""
-    agent = CodeActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        run_env='host',
-        allowed_imports=['datetime']
-    )
-
-    agent.add_to_history(ChatMessage(role='user', content='Get date'))
-    agent.add_to_history(CodeActChatMessage(
-        role='assistant',
-        thought='Getting date',
-        code='from datetime import datetime\nprint(datetime.now())',
-        task_successful=False,
-        final_answer=None
-    ))
-    agent.add_to_history(ChatMessage(role='tool', content='2024-01-01'))
-
-    trace = agent.trace()
-    assert 'Thought: Getting date' in trace
-    assert 'Code:' in trace
-    assert 'Observation: 2024-01-01' in trace
-
-
-def test_agent_trace_with_final_answer():
-    """Test trace method with final answer."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
-
-    agent.add_to_history(ChatMessage(role='user', content='Calculate'))
-    agent.add_to_history(ReActChatMessage(
-        role='assistant',
-        thought='Done',
-        action='FINISH',
-        args=None,
-        task_successful=True,
-        final_answer='The answer is 4'
-    ))
-
-    trace = agent.trace()
-    assert 'Thought: Done' in trace
-    # FINISH action should not appear in trace for final answers
 
 
 @pytest.mark.asyncio
