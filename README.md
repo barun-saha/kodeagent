@@ -28,7 +28,7 @@ Also, here are a few reasons why you shouldn't use KodeAgent:
 
 - KodeAgent is actively evolving, meaning some aspects may change.
 - You want to use some of the well-known frameworks.
-- You need a full-fledged platform with built-in memory management and.
+- You need a full-fledged platform with built-in memory management.
 
 
 ## 🚀 Quick Start
