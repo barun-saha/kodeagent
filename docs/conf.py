@@ -56,3 +56,15 @@ source_suffix = {
 html_theme = 'pydata_sphinx_theme'
 master_doc = 'index'
 html_show_sourcelink = True
+
+html_context = {
+    "display_github": True,
+    "github_user": "barun-saha",
+    "github_repo": "kodeagent",
+    "github_version": "main",
+    "conf_py_path": "/docs/",
+}
+
+html_theme_options = {
+    "github_url": "https://github.com/barun-saha/kodeagent",
+}
