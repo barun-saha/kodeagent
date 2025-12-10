@@ -15,7 +15,7 @@ KodeAgent is a minimalistic, frameworkless approach to building debuggable AI ag
 KodeAgent adheres to the **Unix Philosophy**: do one thing well and integrate seamlessly.
 
 Use KodeAgent because it offers:
-- **Stateless and Scalable:** Designed to be stateless with zero overhead, making it perfect for serverless and high-throughput microservices where you manage the state.
+- **Memoryless and Scalable:** Designed to be memoryless with zero overhead, making it perfect for serverless and high-throughput microservices (ephemeral-task agents).
 - **ReAct & CodeAct:** KodeAgent supports both ReAct and CodeAct agent paradigms out-of-the-box, enabling agents to reason and act using tools or by generating and executing code.
 - **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models, such as Gemini and OpenAI, without requiring any changes to the core agent logic.
 - **Lightweight Foundation:** At only ~2,000 lines of pure Python and just a few dependencies, KodeAgent provides the agent primitives without any of the architectural bloat found in some frameworks.
@@ -28,7 +28,7 @@ Also, here are a few reasons why you shouldn't use KodeAgent:
 
 - KodeAgent is actively evolving, meaning some aspects may change.
 - You want to use some of the well-known frameworks.
-- You need a full-fledged platform with built-in state management, memory, and other components.
+- You need a full-fledged platform with built-in memory management and.
 
 
 ## 🚀 Quick Start
