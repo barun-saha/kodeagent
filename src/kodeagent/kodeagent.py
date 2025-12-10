@@ -558,6 +558,10 @@ class Agent(ABC):
         """Clear the agent's message history."""
         self.messages = []
 
+    def init_history(self):
+        """Initialize the agent's message history."""
+        self.clear_history()
+
 
 class ReActAgent(Agent):
     """Reasoning and Acting agent with thought-action-observation loop."""
@@ -614,6 +618,15 @@ class ReActAgent(Agent):
             task_id=self.task.id,
         )
 
+    def init_history(self):
+        self.clear_history()
+        self.add_to_history(
+            ChatMessage(
+                role='system',
+                content=self.system_prompt.format(tools=self.get_tools_description())
+            )
+        )
+
     async def run(
             self,
             task: str,
@@ -640,26 +653,7 @@ class ReActAgent(Agent):
             raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
 
         self._run_init(task, files, task_id)
-        self.clear_history()
-
-        # Order matters -- specialized class first
-        if isinstance(self, CodeActAgent):
-            self.add_to_history(
-                ChatMessage(
-                    role='system',
-                    content=self.system_prompt.format(
-                        tools=self.get_tools_description(),
-                        authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports])
-                    )
-                )
-            )
-        elif isinstance(self, ReActAgent):
-            self.add_to_history(
-                ChatMessage(
-                    role='system',
-                    content=self.system_prompt.format(tools=self.get_tools_description())
-                )
-            )
+        self.init_history()            
 
         yield self.response(
             rtype='log',
@@ -1324,6 +1318,18 @@ class CodeActAgent(ReActAgent):
             f"Could not extract valid Code or Answer from response. Text: {text[:300]}..."
         )
 
+    def init_history(self):
+        self.clear_history()
+        self.add_to_history(
+            ChatMessage(
+                role='system',
+                content=self.system_prompt.format(
+                    tools=self.get_tools_description(),
+                    authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports])
+                )
+            )
+        )
+
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think step for CodeAct agent."""
         msg = await self._record_thought(CodeActChatMessage)
@@ -1444,7 +1450,7 @@ async def main():
     #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
     #         'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
     #         # ⚠️ Warning: Import of os should be avoided; added here for code security demo
-    #         'os'
+    #         # 'os'
     #     ],
     #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
     #     filter_tools_for_task=False

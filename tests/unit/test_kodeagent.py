@@ -2844,3 +2844,78 @@ async def test_run_succeeds_with_max_files():
         except Exception as e:
             # Catch any unexpected validation errors
             pytest.fail(f'run raised an unexpected exception for valid input: {e}')
+
+
+# -------------------------------------------------------------------------
+# Tests for init_history methods
+# -------------------------------------------------------------------------
+
+def test_agent_init_history():
+    """Test the base Agent init_history method."""
+    # Create a concrete implementation of the abstract Agent class
+    class ConcreteAgent(Agent):
+        def parse_text_response(self, text):
+            return ChatMessage(role='assistant', content=text)
+        
+        async def run(self, task, files=None, task_id=None):
+            yield {'type': 'final', 'value': 'done', 'channel': 'test', 'metadata': {}}
+            
+        def formatted_history_for_llm(self):
+            return []
+
+    agent = ConcreteAgent(name='test', model_name='test-model')
+    
+    # Add some history
+    agent.add_to_history(ChatMessage(role='user', content='test'))
+    assert len(agent.messages) == 1
+    
+    # Call init_history
+    agent.init_history()
+    
+    # Verify history is cleared
+    assert len(agent.messages) == 0
+
+
+def test_react_init_history(react_agent):
+    """Test ReActAgent init_history method."""
+    # Add some history first
+    react_agent.add_to_history(ChatMessage(role='user', content='test'))
+    assert len(react_agent.messages) == 1
+    
+    # Call init_history
+    react_agent.init_history()
+    
+    # Verify history is cleared and system prompt is added
+    assert len(react_agent.messages) == 1
+    assert react_agent.messages[0].role == 'system'
+    # Check if tools are in the system prompt
+    assert 'dummy_tool_one' in react_agent.messages[0].content
+
+
+def test_codeact_init_history():
+    """Test CodeActAgent init_history method."""
+    # Create agent
+    agent = CodeActAgent(
+        name='test_codeact', 
+        model_name='test-model',
+        run_env='host',
+        allowed_imports=['json', 'os']
+    )
+    
+    # Add some history
+    agent.add_to_history(ChatMessage(role='user', content='test'))
+    assert len(agent.messages) == 1
+    
+    # Call init_history
+    agent.init_history()
+    
+    # Verify history is cleared and system prompt is added
+    assert len(agent.messages) == 1
+    assert agent.messages[0].role == 'system'
+    
+    # Check content of system prompt
+    content = agent.messages[0].content
+    assert 'json' in content
+    assert 'os' in content
+    assert 'datetime' in content  # Default import
+
