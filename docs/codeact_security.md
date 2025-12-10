@@ -1,4 +1,4 @@
-# Code Security & Safety
+# CodeAct Security & Safety
 
 > **⚠️ DISCLAIMER**
 >
