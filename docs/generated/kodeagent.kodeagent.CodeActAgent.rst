@@ -1,4 +1,4 @@
-kodeagent.kodeagent.CodeActAgent
+﻿kodeagent.kodeagent.CodeActAgent
 ================================
 
 .. currentmodule:: kodeagent.kodeagent
@@ -20,11 +20,11 @@ kodeagent.kodeagent.CodeActAgent
       ~CodeActAgent.get_history
       ~CodeActAgent.get_relevant_tools
       ~CodeActAgent.get_tools_description
+      ~CodeActAgent.init_history
       ~CodeActAgent.parse_text_response
       ~CodeActAgent.response
       ~CodeActAgent.run
       ~CodeActAgent.salvage_response
-      ~CodeActAgent.trace
    
    
 
