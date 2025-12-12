@@ -559,7 +559,7 @@ class Agent(ABC):
         self.messages = []
 
     def init_history(self):
-        """Initialize the agent's message history."""
+        """Initialize the agent's message history, e.g., with a system prompt."""
         self.clear_history()
 
 
@@ -629,13 +629,12 @@ class ReActAgent(Agent):
         )
 
     def init_history(self):
-        self.clear_history()
-        self.add_to_history(
+        self.messages = [
             ChatMessage(
                 role='system',
                 content=self.system_prompt.format(tools=self.get_tools_description())
             )
-        )
+        ]
 
     async def run(
             self,
@@ -1329,8 +1328,7 @@ class CodeActAgent(ReActAgent):
         )
 
     def init_history(self):
-        self.clear_history()
-        self.add_to_history(
+        self.messages = [
             ChatMessage(
                 role='system',
                 content=self.system_prompt.format(
@@ -1338,7 +1336,7 @@ class CodeActAgent(ReActAgent):
                     authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports])
                 )
             )
-        )
+        ]
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think step for CodeAct agent."""
