@@ -595,23 +595,26 @@ class ReActAgent(Agent):
 
     async def _update_plan(self):
         """Update the plan based on the last thought and observation."""
-        # Find last thought/observation pair explicitly
         last_thought = None
         last_observation = None
 
+        # Traverse backwards to find the most recent thought and observation
         for msg in reversed(self.messages):
-            if not last_observation and msg.role == 'tool':
+            # Look for observation (Tool response)
+            if last_observation is None and msg.role == 'tool':
                 last_observation = msg.content
-            elif not last_thought and isinstance(msg, (ReActChatMessage, CodeActChatMessage)):
-                last_thought = msg.thought
+
+            # Look for thought (Assistant response with a 'thought' field)
+            # We use distinct checks for role and attribute to be robust to custom message types
+            if last_thought is None and msg.role == 'assistant':
+                # Use getattr for loose coupling - accepts any message object with a 'thought'
+                thought = getattr(msg, 'thought', None)
+                if thought:
+                    last_thought = thought
+
             if last_thought and last_observation:
                 break
 
-        if len(self.messages) > 1:
-            if isinstance(self.messages[-2], (ReActChatMessage, CodeActChatMessage)):
-                last_thought = self.messages[-2].thought
-            if self.messages[-1].role == 'tool':
-                last_observation = self.messages[-1].content
         await self.planner.update_plan(
             thought=last_thought,
             observation=last_observation,
@@ -1437,24 +1440,24 @@ async def main():
         litellm_params=litellm_params,
         filter_tools_for_task=False
     )
-    # agent = CodeActAgent(
-    #     name='Simple agent',
-    #     model_name=model_name,
-    #     tools=[
-    #         dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
-    #     ],
-    #     max_iterations=7,
-    #     litellm_params=litellm_params,
-    #     run_env='host',
-    #     allowed_imports=[
-    #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
-    #         'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
-    #         # ⚠️ Warning: Import of os should be avoided; added here for code security demo
-    #         # 'os'
-    #     ],
-    #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
-    #     filter_tools_for_task=False
-    # )
+    agent = CodeActAgent(
+        name='Simple agent',
+        model_name=model_name,
+        tools=[
+            dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
+        ],
+        max_iterations=7,
+        litellm_params=litellm_params,
+        run_env='host',
+        allowed_imports=[
+            'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
+            'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
+            # ⚠️ Warning: Import of os should be avoided; added here for code security demo
+            # 'os'
+        ],
+        pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
+        filter_tools_for_task=False
+    )
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
