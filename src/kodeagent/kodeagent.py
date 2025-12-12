@@ -550,9 +550,21 @@ class Agent(ABC):
 
         return description
 
-    def get_history(self, start_idx: int = 0) -> str:
-        """Get a formatted string representation of all the messages."""
-        return '\n'.join([f'[{msg.role}]: {msg}' for msg in self.messages[start_idx:]])
+    def get_history(self, start_idx: int = 0, truncate_text: bool = False) -> str:
+        """
+        Get a formatted string representation of all the messages.
+        
+        Args:
+            start_idx: Index to start getting history from.
+            truncate_text: If True, truncate message content to 100 chars.
+        """
+        messages = []
+        for msg in self.messages[start_idx:]:
+            content = str(msg)
+            if truncate_text and len(content) > 100:
+                content = content[:100] + '...'
+            messages.append(f'[{msg.role}]: {content}')
+        return '\n'.join(messages)
 
     def clear_history(self):
         """Clear the agent's message history."""
@@ -1449,7 +1461,7 @@ async def main():
         tools=[
             dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
         ],
-        max_iterations=2,
+        max_iterations=5,
         litellm_params=litellm_params,
         filter_tools_for_task=False
     )
@@ -1498,15 +1510,13 @@ async def main():
 
     print(f'{agent.__class__.__name__} demo\n')
 
-    for task, img_urls in the_tasks[3:]:
+    for task, img_urls in the_tasks:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in agent.run(task, files=img_urls):
             print_response(response, only_final=True)
 
         if agent.current_plan:
             print(f'Plan:\n{agent.current_plan}')
-        print(agent.get_history())
-        break
 
         await asyncio.sleep(random.uniform(0.15, 0.55))
         print('\n\n')

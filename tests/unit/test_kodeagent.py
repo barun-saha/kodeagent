@@ -188,6 +188,26 @@ def test_history_formatting():
     assert 'None' not in history, "History should not contain 'None'"
 
 
+def test_history_truncation():
+    """Test history truncation."""
+    agent = ReActAgent(name='test_agent', model_name='gpt-4', tools=[])
+    
+    # Add a long message > 100 chars
+    long_text = 'A' * 150
+    agent.add_to_history(ChatMessage(role='user', content=long_text))
+    
+    # Test without truncation (default)
+    history_full = agent.get_history()
+    assert long_text in history_full
+    assert '...' not in history_full
+    
+    # Test with truncation
+    history_truncated = agent.get_history(truncate_text=True)
+    assert len(history_truncated) < 150
+    assert '...' in history_truncated
+    assert history_truncated.count('A') == 100 
+
+
 def test_format_messages_for_prompt(react_agent):
     """Test formatting of message history for prompt."""
     msg1 = ReActChatMessage(
