@@ -1818,6 +1818,25 @@ async def test_update_plan_without_plan():
     assert agent.planner.plan is None
 
 
+@pytest.mark.asyncio
+async def test_update_plan_skips_when_history_missing():
+    """Test _update_plan skips update when history is missing thought/observation."""
+    agent = ReActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        tools=[calculator]
+    )
+    agent._run_init('Test task')
+
+    # Create initial plan but don't add history
+    agent.planner.plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
+
+    # Mock planner.update_plan to ensure it's NOT called
+    with patch.object(agent.planner, 'update_plan') as mock_update:
+        await agent._update_plan()
+        mock_update.assert_not_called()
+
+
 def test_agent_description():
     """Test agent description property."""
     agent = ReActAgent(
