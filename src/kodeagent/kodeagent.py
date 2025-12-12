@@ -611,6 +611,13 @@ class ReActAgent(Agent):
                 thought = getattr(msg, 'thought', None)
                 if thought:
                     last_thought = thought
+                
+                # If the message contains a final answer, treat it as the observation
+                # This ensures the Planner sees the final result, allowing it to mark "Output..."
+                # steps as done
+                final_answer = getattr(msg, 'final_answer', None)
+                if final_answer:
+                    last_observation = f'Final Answer: {final_answer}'
 
             if last_thought and last_observation:
                 break
@@ -1440,24 +1447,24 @@ async def main():
         litellm_params=litellm_params,
         filter_tools_for_task=False
     )
-    agent = CodeActAgent(
-        name='Simple agent',
-        model_name=model_name,
-        tools=[
-            dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
-        ],
-        max_iterations=7,
-        litellm_params=litellm_params,
-        run_env='host',
-        allowed_imports=[
-            'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
-            'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
-            # ⚠️ Warning: Import of os should be avoided; added here for code security demo
-            # 'os'
-        ],
-        pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
-        filter_tools_for_task=False
-    )
+    # agent = CodeActAgent(
+    #     name='Simple agent',
+    #     model_name=model_name,
+    #     tools=[
+    #         dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
+    #     ],
+    #     max_iterations=7,
+    #     litellm_params=litellm_params,
+    #     run_env='host',
+    #     allowed_imports=[
+    #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
+    #         'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
+    #         # ⚠️ Warning: Import of os should be avoided; added here for code security demo
+    #         # 'os'
+    #     ],
+    #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
+    #     filter_tools_for_task=False
+    # )
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
