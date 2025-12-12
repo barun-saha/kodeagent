@@ -550,9 +550,21 @@ class Agent(ABC):
 
         return description
 
-    def get_history(self, start_idx: int = 0) -> str:
-        """Get a formatted string representation of all the messages."""
-        return '\n'.join([f'[{msg.role}]: {msg.content}' for msg in self.messages[start_idx:]])
+    def get_history(self, start_idx: int = 0, truncate_text: bool = False) -> str:
+        """
+        Get a formatted string representation of all the messages.
+        
+        Args:
+            start_idx: Index to start getting history from.
+            truncate_text: If True, truncate message content to 100 chars.
+        """
+        messages = []
+        for msg in self.messages[start_idx:]:
+            content = str(msg)
+            if truncate_text and len(content) > 100:
+                content = content[:100] + '...'
+            messages.append(f'[{msg.role}]: {content}')
+        return '\n'.join(messages)
 
     def clear_history(self):
         """Clear the agent's message history."""

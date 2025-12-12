@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run kodeagent as module",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.kodeagent.kodeagent",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONUNBUFFERED": "1"
+            },
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
