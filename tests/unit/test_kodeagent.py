@@ -1782,6 +1782,17 @@ async def test_update_plan():
 
     mock_response = '{"steps": [{"description": "Use calculator", "is_done": true}]}'
 
+    # Add history for _update_plan to work
+    agent.add_to_history(ReActChatMessage(
+        role='assistant',
+        thought='I need to use calculator',
+        action='calculator',
+        args='{"expression": "2+2"}',
+        task_successful=False,
+        final_answer=None
+    ))
+    agent.add_to_history(ChatMessage(role='tool', content='4'))
+
     with patch('kodeagent.kutils.call_llm', return_value=mock_response):
         await agent._update_plan()
 
@@ -1805,6 +1816,25 @@ async def test_update_plan_without_plan():
     # Should not raise error
     await agent._update_plan()
     assert agent.planner.plan is None
+
+
+@pytest.mark.asyncio
+async def test_update_plan_skips_when_history_missing():
+    """Test _update_plan skips update when history is missing thought/observation."""
+    agent = ReActAgent(
+        name='test_agent',
+        model_name=MODEL_NAME,
+        tools=[calculator]
+    )
+    agent._run_init('Test task')
+
+    # Create initial plan but don't add history
+    agent.planner.plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
+
+    # Mock planner.update_plan to ensure it's NOT called
+    with patch.object(agent.planner, 'update_plan') as mock_update:
+        await agent._update_plan()
+        mock_update.assert_not_called()
 
 
 def test_agent_description():

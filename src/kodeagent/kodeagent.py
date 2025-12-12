@@ -559,7 +559,7 @@ class Agent(ABC):
         self.messages = []
 
     def init_history(self):
-        """Initialize the agent's message history."""
+        """Initialize the agent's message history, e.g., with a system prompt."""
         self.clear_history()
 
 
@@ -595,23 +595,41 @@ class ReActAgent(Agent):
 
     async def _update_plan(self):
         """Update the plan based on the last thought and observation."""
-        # Find last thought/observation pair explicitly
         last_thought = None
         last_observation = None
 
+        # Traverse backwards to find the most recent thought and observation
         for msg in reversed(self.messages):
-            if not last_observation and msg.role == 'tool':
+            # Look for observation (Tool response)
+            if last_observation is None and msg.role == 'tool':
                 last_observation = msg.content
-            elif not last_thought and isinstance(msg, (ReActChatMessage, CodeActChatMessage)):
-                last_thought = msg.thought
+
+            # Look for thought (Assistant response with a 'thought' field)
+            # We use distinct checks for role and attribute to be robust to custom message types
+            if last_thought is None and msg.role == 'assistant':
+                # Use getattr for loose coupling - accepts any message object with a 'thought'
+                thought = getattr(msg, 'thought', None)
+                if thought:
+                    last_thought = thought
+                
+                # If the message contains a final answer, treat it as the observation
+                # This ensures the Planner sees the final result, allowing it to mark "Output..."
+                # steps as done
+                final_answer = getattr(msg, 'final_answer', None)
+                if final_answer:
+                    last_observation = f'Final Answer: {final_answer}'
+
             if last_thought and last_observation:
                 break
 
-        if len(self.messages) > 1:
-            if isinstance(self.messages[-2], (ReActChatMessage, CodeActChatMessage)):
-                last_thought = self.messages[-2].thought
-            if self.messages[-1].role == 'tool':
-                last_observation = self.messages[-1].content
+        # Only update plan if both thought and observation are found
+        if not (last_thought and last_observation):
+            logger.debug(
+                'Skipping plan update: missing thought=%s or observation=%s',
+                bool(last_thought), bool(last_observation)
+            )
+            return
+
         await self.planner.update_plan(
             thought=last_thought,
             observation=last_observation,
@@ -619,13 +637,12 @@ class ReActAgent(Agent):
         )
 
     def init_history(self):
-        self.clear_history()
-        self.add_to_history(
+        self.messages = [
             ChatMessage(
                 role='system',
                 content=self.system_prompt.format(tools=self.get_tools_description())
             )
-        )
+        ]
 
     async def run(
             self,
@@ -1319,8 +1336,7 @@ class CodeActAgent(ReActAgent):
         )
 
     def init_history(self):
-        self.clear_history()
-        self.add_to_history(
+        self.messages = [
             ChatMessage(
                 role='system',
                 content=self.system_prompt.format(
@@ -1328,7 +1344,7 @@ class CodeActAgent(ReActAgent):
                     authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports])
                 )
             )
-        )
+        ]
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think step for CodeAct agent."""
