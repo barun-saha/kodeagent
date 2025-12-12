@@ -137,6 +137,57 @@ def test_add_to_history(react_agent):
         react_agent.add_to_history('invalid message')
 
 
+def test_history_formatting():
+    """Test string representation of history with structured messages."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[])
+    
+    # 1. Standard user message
+    agent.add_to_history(ChatMessage(role='user', content='Hello'))
+    
+    # 2. ReAct intermediate step
+    agent.add_to_history(ReActChatMessage(
+        role='assistant',
+        thought='I need to think',
+        action='calculator',
+        args='{"expr": "1+1"}',
+        task_successful=False
+    ))
+    
+    # 3. CodeAct intermediate step
+    agent.add_to_history(CodeActChatMessage(
+        role='assistant',
+        thought='I will run python',
+        code='print("hello")',
+        task_successful=False
+    ))
+    
+    # 4. Final answer
+    agent.add_to_history(ReActChatMessage(
+        role='assistant',
+        thought='Done',
+        action='FINISH',
+        final_answer='42',
+        task_successful=True
+    ))
+
+    history = agent.get_history()
+    
+    expected_snippets = [
+        '[user]: Hello',
+        '[assistant]: Thought: I need to think',
+        'Action: calculator',
+        'Args: {"expr": "1+1"}',
+        '[assistant]: Thought: I will run python',
+        'Code:\n```python\nprint("hello")\n```',
+        '[assistant]: 42'
+    ]
+    
+    for snippet in expected_snippets:
+        assert snippet in history, f"Expected '{snippet}' in history"
+    
+    assert 'None' not in history, "History should not contain 'None'"
+
+
 def test_format_messages_for_prompt(react_agent):
     """Test formatting of message history for prompt."""
     msg1 = ReActChatMessage(

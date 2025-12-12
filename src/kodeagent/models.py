@@ -72,6 +72,10 @@ class ChatMessage(pyd.BaseModel):
         default=None
     )
 
+    def __str__(self) -> str:
+        """Return proper string representation of the message."""
+        return str(self.content) if self.content is not None else ''
+
 
 class ReActChatMessage(ChatMessage):
     """
@@ -185,6 +189,20 @@ class ReActChatMessage(ChatMessage):
         """Check if this is a final answer."""
         return self.action == 'FINISH' and self.final_answer is not None
 
+    def __str__(self) -> str:
+        if self.is_final:
+            return f'{self.final_answer}'
+        
+        parts = []
+        if self.thought:
+            parts.append(f'Thought: {self.thought}')
+        if self.action:
+            parts.append(f'Action: {self.action}')
+        if self.args:
+            parts.append(f'Args: {self.args}')
+            
+        return '\n'.join(parts)
+
 
 class CodeActChatMessage(ChatMessage):
     """
@@ -236,6 +254,18 @@ class CodeActChatMessage(ChatMessage):
     def is_final(self) -> bool:
         """Check if this is a final answer."""
         return self.final_answer is not None
+
+    def __str__(self) -> str:
+        if self.is_final:
+            return f'{self.final_answer}'
+            
+        parts = []
+        if self.thought:
+            parts.append(f'Thought: {self.thought}')
+        if self.code:
+            parts.append(f'Code:\n```python\n{self.code}\n```')
+            
+        return '\n'.join(parts)
 
 
 class AgentResponse(TypedDict):
