@@ -621,12 +621,14 @@ class ReActAgent(Agent):
 
             if last_thought and last_observation:
                 break
-            else:
-                logger.debug(
-                    'Skipping plan update: missing thought=%s or observation=%s',
-                    bool(last_thought), bool(last_observation)
-                )
-                return
+
+        # Only update plan if both thought and observation are found
+        if not (last_thought and last_observation):
+            logger.debug(
+                'Skipping plan update: missing thought=%s or observation=%s',
+                bool(last_thought), bool(last_observation)
+            )
+            return
 
         await self.planner.update_plan(
             thought=last_thought,

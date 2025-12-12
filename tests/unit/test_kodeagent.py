@@ -1782,6 +1782,17 @@ async def test_update_plan():
 
     mock_response = '{"steps": [{"description": "Use calculator", "is_done": true}]}'
 
+    # Add history for _update_plan to work
+    agent.add_to_history(ReActChatMessage(
+        role='assistant',
+        thought='I need to use calculator',
+        action='calculator',
+        args='{"expression": "2+2"}',
+        task_successful=False,
+        final_answer=None
+    ))
+    agent.add_to_history(ChatMessage(role='tool', content='4'))
+
     with patch('kodeagent.kutils.call_llm', return_value=mock_response):
         await agent._update_plan()
 
