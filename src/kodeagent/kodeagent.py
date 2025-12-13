@@ -58,6 +58,7 @@ litellm.failure_callback = ['langfuse']
 
 logger = ku.get_logger()
 
+DEFAULT_MAX_LLM_RETRIES = 3
 
 REACT_SYSTEM_PROMPT = ku.read_prompt('system/react.txt')
 CODE_ACT_SYSTEM_PROMPT = ku.read_prompt('system/codeact.txt')
@@ -84,16 +85,22 @@ MAX_TASK_FILES = 10
 
 class Planner:
     """Given a task, generate and maintain a step-by-step plan to solve it."""
-    def __init__(self, model_name: str, litellm_params: Optional[dict] = None):
+    def __init__(self,
+            model_name: str,
+            litellm_params: Optional[dict] = None,
+            max_retries: int = DEFAULT_MAX_LLM_RETRIES
+    ):
         """
-        Create a Planner instance for the agent.
+        Create a planner using the given model.
 
         Args:
-            model_name: The LLM to use for planning.
-            litellm_params: LiteLLM params.
+            model_name: The name of the LLM to use.
+            litellm_params: LiteLLM parameters.
+            max_retries: Maximum number of retries for LLM calls.
         """
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
+        self.max_retries = max_retries
         self.plan: Optional[AgentPlan] = None
 
     async def create_plan(self, task: Task, agent_type: str) -> AgentPlan:
@@ -120,7 +127,8 @@ class Planner:
             litellm_params=self.litellm_params,
             messages=messages,
             response_format=AgentPlan,
-            trace_id=task.id
+            trace_id=task.id,
+            max_retries=self.max_retries
         )
         self.plan = AgentPlan.model_validate_json(plan_response)
         return self.plan
@@ -147,7 +155,8 @@ class Planner:
             litellm_params=self.litellm_params,
             messages=ku.make_user_message(prompt),
             response_format=AgentPlan,
-            trace_id=task_id
+            trace_id=task_id,
+            max_retries=self.max_retries
         )
         self.plan = AgentPlan.model_validate_json(plan_response)
 
@@ -191,7 +200,8 @@ class Observer:
             model_name: str,
             tool_names: set[str],
             litellm_params: Optional[dict] = None,
-            threshold: Optional[int] = 3
+            threshold: Optional[int] = 3,
+            max_retries: int = DEFAULT_MAX_LLM_RETRIES
     ):
         """
         Create an Observer for an agent.
@@ -207,6 +217,7 @@ class Observer:
         self.model_name = model_name
         self.tool_names = tool_names
         self.litellm_params = litellm_params or {}
+        self.max_retries = max_retries
         self.last_correction_iteration: int = 0
 
     async def observe(
@@ -248,6 +259,7 @@ class Observer:
                 model_name=self.model_name,
                 litellm_params=self.litellm_params,
                 messages=[{'role': 'user', 'content': prompt}],
+                max_retries=self.max_retries,
                 response_format=ObserverResponse,
             )
             observation = ObserverResponse.model_validate_json(observation_response)
@@ -294,6 +306,7 @@ class Agent(ABC):
             system_prompt: Optional[str] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
+            max_retries: int = DEFAULT_MAX_LLM_RETRIES
     ):
         """
         Create an agent.
@@ -303,10 +316,11 @@ class Agent(ABC):
             model_name: The (LiteLLM) model name to use.
             description: Optional brief description about the agent.
             tools: An optional list of tools available to the agent.
-            litellm_params: LiteLLM params.
+            litellm_params: LiteLLM parameters.
             system_prompt: Optional system prompt for the agent. If not provided, default is used.
             max_iterations: The max iterations an agent can perform to solve a task.
             filter_tools_for_task: Whether the tools should be filtered for a task. Unused.
+            max_retries: Maximum number of retries for LLM calls.
         """
         self.id = uuid.uuid4()
         self.name: str = name
@@ -318,6 +332,7 @@ class Agent(ABC):
         self.litellm_params: dict = litellm_params or {}
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
+        self.max_retries = max_retries
 
         self.tool_names = {t.name for t in tools} if tools else set()
         self.tool_name_to_func = {t.name: t for t in tools} if tools else {}
@@ -326,7 +341,11 @@ class Agent(ABC):
         self.messages: list[ChatMessage] = []
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
-        self.planner: Optional[Planner] = None
+        self.planner: Optional[Planner] = Planner(
+            model_name=model_name,
+            litellm_params=litellm_params,
+            max_retries=self.max_retries
+        )
         self.observer = Observer(
             model_name=model_name,
             litellm_params=litellm_params,
@@ -594,6 +613,7 @@ class ReActAgent(Agent):
             system_prompt: Optional[str] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
+            max_retries: int = DEFAULT_MAX_LLM_RETRIES
     ):
         super().__init__(
             name=name,
@@ -604,6 +624,7 @@ class ReActAgent(Agent):
             system_prompt=system_prompt or REACT_SYSTEM_PROMPT,
             max_iterations=max_iterations,
             filter_tools_for_task=filter_tools_for_task,
+            max_retries=max_retries
         )
 
         self.planner = Planner(model_name, litellm_params)
@@ -1272,6 +1293,7 @@ class CodeActAgent(ReActAgent):
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
             filter_tools_for_task: bool = False,
+            max_retries: int = DEFAULT_MAX_LLM_RETRIES
     ):
         super().__init__(
             name=name,
@@ -1282,6 +1304,7 @@ class CodeActAgent(ReActAgent):
             system_prompt=system_prompt or CODE_ACT_SYSTEM_PROMPT,
             description=description,
             filter_tools_for_task=filter_tools_for_task,
+            max_retries=max_retries
         )
         self.tools_source_code: str = 'from typing import *\n\n'
 
@@ -1567,7 +1590,7 @@ async def main():
         tools=[
             dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
         ],
-        max_iterations=1,
+        max_iterations=5,
         litellm_params=litellm_params,
         filter_tools_for_task=False
     )

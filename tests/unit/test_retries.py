@@ -8,7 +8,7 @@ from tenacity import RetryError
 from litellm.exceptions import RateLimitError
 
 from kodeagent import ReActAgent
-from kodeagent.kutils import call_llm, MAX_LLM_RETRIES
+from kodeagent.kutils import call_llm
 
 MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
 
@@ -52,7 +52,24 @@ async def test_call_llm_retries_on_generic_error():
             await call_llm(MODEL_NAME, {}, [{"role": "user", "content": "hi"}])
 
         # Verify call count is MAX_LLM_RETRIES (because we retry on Exception now)
-        assert mock_acompletion.call_count == MAX_LLM_RETRIES
+        assert mock_acompletion.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_call_llm_custom_max_retries():
+    """
+    Test that call_llm respects custom max_retries.
+    """
+    # Mock litellm.acompletion to raise a generic Exception
+    error = ValueError("Some other error")
+    custom_retries = 5
+    
+    with patch('litellm.acompletion', side_effect=error) as mock_acompletion:
+        with pytest.raises(RetryError):
+            await call_llm(MODEL_NAME, {}, [{"role": "user", "content": "hi"}], max_retries=custom_retries)
+        
+        # Verify call count matches custom retries
+        assert mock_acompletion.call_count == custom_retries
 
 
 @pytest.mark.asyncio
@@ -68,8 +85,8 @@ async def test_call_llm_rate_limit_retry_failure():
         with pytest.raises(RetryError) as excinfo:
             await call_llm(MODEL_NAME, {}, [{"role": "user", "content": "hi"}])
 
-        # Verify call count is MAX_LLM_RETRIES
-        assert mock_acompletion.call_count == MAX_LLM_RETRIES
+        # Verify call count is 3
+        assert mock_acompletion.call_count == 3
 
 
 @pytest.mark.asyncio
@@ -159,3 +176,42 @@ async def test_graceful_exit_on_rate_limit_during_execution():
         assert any(
             'Rate limit exceeded' in str(msg) for msg in agent.messages
         ), 'Error message not found in history'
+
+
+@pytest.mark.asyncio
+async def test_graceful_exit_on_exhaustion():
+    """
+    Test that the agent exits gracefully when retries are exhausted.
+    """
+    # Create an agent with mocked dependencies
+    with patch('kodeagent.kutils.call_llm') as mock_call_llm:
+        # First call succeeds (Planner)
+        # Second call (Think) fails with RetryError
+        mock_call_llm.side_effect = [
+            '{"steps": [{"description": "Step 1", "is_done": false}]}', # Plan
+            RetryError(last_attempt=MagicMock())
+        ]
+        
+        agent = ReActAgent(
+            name='test_agent', 
+            model_name=MODEL_NAME, 
+            tools=[],
+            max_iterations=1,
+            system_prompt="You are a test agent."
+        )
+        
+        responses = []
+        try:
+            async for response in agent.run('Simple task'):
+                responses.append(response)
+        except Exception as e:
+            pytest.fail(f"Agent raised an exception instead of exiting gracefully: {e}")
+            
+        # Verify final response is an error
+        final_response = next((r for r in responses if r['type'] == 'final'), None)
+        assert final_response is not None
+        assert final_response['metadata']['is_error'] is True
+        assert "Rate limit exceeded" in final_response['value']
+        
+        # Verify history contains the error message
+        assert any("Rate limit exceeded" in str(msg) for msg in agent.messages)
