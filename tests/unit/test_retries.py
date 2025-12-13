@@ -51,7 +51,7 @@ async def test_call_llm_retries_on_generic_error():
     error = ValueError('Some other error')
 
     with patch('litellm.acompletion', side_effect=error) as mock_acompletion:
-        with pytest.raises(RetryError) as excinfo:
+        with pytest.raises(RetryError) as _:
             await call_llm(MODEL_NAME, {}, [{'role': 'user', 'content': 'hi'}])
 
         # Verify call count is DEFAULT_MAX_LLM_RETRIES (because we retry on Exception now)
@@ -88,7 +88,7 @@ async def test_call_llm_rate_limit_retry_failure():
     error = RateLimitError(message='Rate limit exceeded', llm_provider='gemini', model=MODEL_NAME)
 
     with patch('litellm.acompletion', side_effect=error) as mock_acompletion:
-        with pytest.raises(RetryError) as excinfo:
+        with pytest.raises(RetryError) as _:
             await call_llm(MODEL_NAME, {}, [{'role': 'user', 'content': 'hi'}])
 
         assert mock_acompletion.call_count == DEFAULT_MAX_LLM_RETRIES

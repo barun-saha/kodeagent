@@ -347,7 +347,8 @@ class Agent(ABC):
         self.observer = Observer(
             model_name=model_name,
             litellm_params=litellm_params,
-            tool_names=self.tool_names
+            tool_names=self.tool_names,
+            max_retries=self.max_retries
         )
 
         self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
@@ -496,7 +497,8 @@ class Agent(ABC):
                     litellm_params=self.litellm_params,
                     messages=formatted_messages,
                     response_format=response_format,
-                    trace_id=self.task.id if self.task else None
+                    trace_id=self.task.id if self.task else None,
+                    max_retries=self.max_retries
                 )
                 return chat_response or ''
 
@@ -625,7 +627,7 @@ class ReActAgent(Agent):
             max_retries=max_retries
         )
 
-        self.planner = Planner(model_name, litellm_params)
+        self.planner = Planner(model_name, litellm_params, max_retries=max_retries)
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
 
