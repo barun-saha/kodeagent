@@ -8,7 +8,8 @@ from tenacity import RetryError
 from litellm.exceptions import RateLimitError
 
 from kodeagent import ReActAgent
-from kodeagent.kutils import call_llm
+from kodeagent.kutils import call_llm, DEFAULT_MAX_LLM_RETRIES
+
 
 MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
 
@@ -25,18 +26,20 @@ async def test_call_llm_rate_limit_retry_success():
     mock_response.usage = {}
 
     # Mock litellm.acompletion to raise RateLimitError 2 times, then return success
-    # This should succeed because MAX_LLM_RETRIES is 3
+    # This should succeed because DEFAULT_MAX_LLM_RETRIES is 3
     side_effects = [
-        RateLimitError(message="Rate limit exceeded", llm_provider="openai", model=MODEL_NAME),
-        RateLimitError(message="Rate limit exceeded", llm_provider="openai", model=MODEL_NAME),
+        RateLimitError(message='Rate limit exceeded', llm_provider='gemini', model=MODEL_NAME),
+        RateLimitError(message='Rate limit exceeded', llm_provider='gemini', model=MODEL_NAME),
         mock_response
     ]
 
     with patch('litellm.acompletion', side_effect=side_effects) as mock_acompletion:
-        response = await call_llm(MODEL_NAME, {}, [{"role": "user", "content": "hi"}])
+        response = await call_llm(
+            MODEL_NAME, {}, [{'role': 'user', 'content': 'hi'}]
+        )
 
-        assert response == "Success"
-        assert mock_acompletion.call_count == 3
+        assert response == 'Success'
+        assert mock_acompletion.call_count == DEFAULT_MAX_LLM_RETRIES
 
 
 @pytest.mark.asyncio
@@ -45,14 +48,14 @@ async def test_call_llm_retries_on_generic_error():
     Test that call_llm retries on generic errors (as per user configuration).
     """
     # Mock litellm.acompletion to raise a generic Exception
-    error = ValueError("Some other error")
+    error = ValueError('Some other error')
 
     with patch('litellm.acompletion', side_effect=error) as mock_acompletion:
         with pytest.raises(RetryError) as excinfo:
-            await call_llm(MODEL_NAME, {}, [{"role": "user", "content": "hi"}])
+            await call_llm(MODEL_NAME, {}, [{'role': 'user', 'content': 'hi'}])
 
-        # Verify call count is MAX_LLM_RETRIES (because we retry on Exception now)
-        assert mock_acompletion.call_count == 3
+        # Verify call count is DEFAULT_MAX_LLM_RETRIES (because we retry on Exception now)
+        assert mock_acompletion.call_count == DEFAULT_MAX_LLM_RETRIES
 
 
 @pytest.mark.asyncio
@@ -61,12 +64,15 @@ async def test_call_llm_custom_max_retries():
     Test that call_llm respects custom max_retries.
     """
     # Mock litellm.acompletion to raise a generic Exception
-    error = ValueError("Some other error")
+    error = ValueError('Some other error')
     custom_retries = 5
     
     with patch('litellm.acompletion', side_effect=error) as mock_acompletion:
         with pytest.raises(RetryError):
-            await call_llm(MODEL_NAME, {}, [{"role": "user", "content": "hi"}], max_retries=custom_retries)
+            await call_llm(
+                MODEL_NAME, {},
+                [{'role': 'user', 'content': 'hi'}], max_retries=custom_retries
+            )
         
         # Verify call count matches custom retries
         assert mock_acompletion.call_count == custom_retries
@@ -79,14 +85,13 @@ async def test_call_llm_rate_limit_retry_failure():
     """
     # Mock litellm.acompletion to always raise RateLimitError
     # Raise it MAX_LLM_RETRIES + 1 times to ensure we exceed the limit
-    error = RateLimitError(message="Rate limit exceeded", llm_provider="openai", model=MODEL_NAME)
+    error = RateLimitError(message='Rate limit exceeded', llm_provider='gemini', model=MODEL_NAME)
 
     with patch('litellm.acompletion', side_effect=error) as mock_acompletion:
         with pytest.raises(RetryError) as excinfo:
-            await call_llm(MODEL_NAME, {}, [{"role": "user", "content": "hi"}])
+            await call_llm(MODEL_NAME, {}, [{'role': 'user', 'content': 'hi'}])
 
-        # Verify call count is 3
-        assert mock_acompletion.call_count == 3
+        assert mock_acompletion.call_count == DEFAULT_MAX_LLM_RETRIES
 
 
 @pytest.mark.asyncio

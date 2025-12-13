@@ -58,8 +58,6 @@ litellm.failure_callback = ['langfuse']
 
 logger = ku.get_logger()
 
-DEFAULT_MAX_LLM_RETRIES = 3
-
 REACT_SYSTEM_PROMPT = ku.read_prompt('system/react.txt')
 CODE_ACT_SYSTEM_PROMPT = ku.read_prompt('system/codeact.txt')
 AGENT_PLAN_PROMPT = ku.read_prompt('agent_plan.txt')
@@ -88,7 +86,7 @@ class Planner:
     def __init__(self,
             model_name: str,
             litellm_params: Optional[dict] = None,
-            max_retries: int = DEFAULT_MAX_LLM_RETRIES
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
     ):
         """
         Create a planner using the given model.
@@ -201,7 +199,7 @@ class Observer:
             tool_names: set[str],
             litellm_params: Optional[dict] = None,
             threshold: Optional[int] = 3,
-            max_retries: int = DEFAULT_MAX_LLM_RETRIES
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
     ):
         """
         Create an Observer for an agent.
@@ -306,7 +304,7 @@ class Agent(ABC):
             system_prompt: Optional[str] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
-            max_retries: int = DEFAULT_MAX_LLM_RETRIES
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
     ):
         """
         Create an agent.
@@ -613,7 +611,7 @@ class ReActAgent(Agent):
             system_prompt: Optional[str] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
-            max_retries: int = DEFAULT_MAX_LLM_RETRIES
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
     ):
         super().__init__(
             name=name,
@@ -1293,7 +1291,7 @@ class CodeActAgent(ReActAgent):
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
             filter_tools_for_task: bool = False,
-            max_retries: int = DEFAULT_MAX_LLM_RETRIES
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
     ):
         super().__init__(
             name=name,

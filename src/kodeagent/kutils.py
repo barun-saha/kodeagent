@@ -22,6 +22,7 @@ from tenacity import (
 )
 
 
+DEFAULT_MAX_LLM_RETRIES = 3
 LOGGERS_TO_SUPPRESS = [
     'asyncio',
     'cookie_store',
@@ -167,7 +168,7 @@ async def call_llm(
         messages: list[dict],
         response_format: Optional[Type[pyd.BaseModel]] = None,
         trace_id: Optional[str] = None,
-        max_retries: int = 3,
+        max_retries: int = DEFAULT_MAX_LLM_RETRIES,
 ) -> str | None:
     """
     Call the LLM with the given parameters and response format.
@@ -184,6 +185,7 @@ async def call_llm(
         The LLM response as string.
 
     Raises:
+        RetryError: If the LLM call fails after maximum retries.
         ValueError: If the LLM returns an empty or invalid response body.
     """
     params = {'model': model_name, 'messages': messages}
