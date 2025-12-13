@@ -190,7 +190,7 @@ def test_history_formatting():
 
 def test_history_truncation():
     """Test history truncation."""
-    agent = ReActAgent(name='test_agent', model_name='gpt-4', tools=[])
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[])
     
     # Add a long message > 100 chars
     long_text = 'A' * 150
@@ -579,6 +579,62 @@ def test_code_chat_message_validation():
             task_successful=False,
             final_answer=None
         )
+
+
+@pytest.mark.asyncio
+async def test_code_act_parser_no_action_valid_code():
+    """
+    Test CodeAct parser with a response having Thought and Code, but NO Action/Answer.
+    This verifies the independence from ReAct parser logic.
+    """
+    agent = CodeActAgent(
+        name='test_codeact',
+        model_name=MODEL_NAME,
+        run_env='host',
+        allowed_imports=[]
+    )
+    # Text response with Thought and Code, no Action
+    text_response = """Thought: I will run some code.
+Code:
+```python
+print("Hello")
+```"""
+    
+    msg = agent.parse_text_response(text_response)
+    
+    assert isinstance(msg, CodeActChatMessage)
+    assert msg.role == 'assistant'
+    assert msg.thought == 'I will run some code.'
+    assert 'print("Hello")' in msg.code
+    assert msg.final_answer is None
+
+
+@pytest.mark.asyncio
+async def test_code_act_parser_fallback_code_format():
+    """Test CodeAct parser with code block not using markdown fences."""
+    agent = CodeActAgent(name='test', model_name=MODEL_NAME, run_env='host')
+    text_response = """Thought: Here is the code.
+Code: print("Raw code")"""
+    
+    msg = agent.parse_text_response(text_response)
+    assert msg.code == 'print("Raw code")'
+
+
+def test_code_act_parser_invalid():
+    """Test CodeAct parser with missing Code and Final Answer (should raise ValueError)."""
+    agent = CodeActAgent(
+        name='test_codeact',
+        model_name=MODEL_NAME,
+        run_env='host'
+    )
+    
+    # Response with Thought but no Code/Answer
+    text_response = """Thought: I am thinking..."""
+    
+    with pytest.raises(ValueError) as excinfo:
+        agent.parse_text_response(text_response)
+    
+    assert "Could not extract valid Code or Answer" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
