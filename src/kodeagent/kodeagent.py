@@ -77,6 +77,7 @@ ANSWER_MATCH = re.compile(r'Answer:\s*(.+?)(?=\nSuccessful:|$)', re.DOTALL | re.
 SUCCESS_MATCH = re.compile(r'Successful:\s*(true|false)', re.IGNORECASE)
 CODE_MATCH = re.compile(r'Code:\s*```(?:python)?\s*(.+?)\s*```', re.DOTALL | re.IGNORECASE)
 
+MAX_RESPONSE_PARSING_ATTEMPTS = 3
 CODE_ACT_PSEUDO_TOOL_NAME = 'code_execution'
 MAX_TASK_FILES = 10
 
@@ -485,12 +486,12 @@ class Agent(ABC):
             A chat response or an empty string.
 
         Raises:
+            RetryError: If LLM call fails after max retries.
             Exception in case of error.
         """
         formatted_messages = self.formatted_history_for_llm()
 
-        max_retries = 3
-        for attempt in range(max_retries):
+        for attempt in range(MAX_RESPONSE_PARSING_ATTEMPTS):
             try:
                 chat_response: str = await ku.call_llm(
                     model_name=self.model_name,
@@ -507,10 +508,11 @@ class Agent(ABC):
                 raise
             except Exception as e:
                 logger.warning(
-                    'LLM call failed (attempt %d/%d): %s', attempt + 1, max_retries, str(e)
+                    'LLM call failed (attempt %d/%d): %s',
+                    attempt + 1, MAX_RESPONSE_PARSING_ATTEMPTS, str(e)
                 )
 
-                if attempt < max_retries - 1:
+                if attempt < MAX_RESPONSE_PARSING_ATTEMPTS - 1:
                     # Add feedback to help LLM correct itself
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                     feedback = (
