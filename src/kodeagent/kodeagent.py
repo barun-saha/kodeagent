@@ -30,6 +30,8 @@ import pydantic as pyd
 import rich
 from dotenv import load_dotenv
 
+from tenacity import RetryError
+
 from . import kutils as ku
 from . import tools as dtools
 from .code_runner import CodeRunner, CODE_ENV_NAMES
@@ -481,6 +483,9 @@ class Agent(ABC):
                 )
                 return chat_response or ''
 
+            except RetryError:
+                # LLM call failed after max retries; do not retry at this level
+                raise
             except Exception as e:
                 logger.warning(
                     'LLM call failed (attempt %d/%d): %s', attempt + 1, max_retries, str(e)
@@ -690,7 +695,23 @@ class ReActAgent(Agent):
             channel='run'
         )
 
-        await self.planner.create_plan(self.task, self.__class__.__name__)
+        try:
+            await self.planner.create_plan(self.task, self.__class__.__name__)
+        except RetryError:
+            logger.warning('Max retries reached during plan creation.')
+            error_msg = (
+                'Unable to start solving the task: Rate limit exceeded while creating '
+                'the initial plan. Please try again later.'
+            )
+            self.add_to_history(ChatMessage(role='assistant', content=error_msg))
+            yield self.response(
+                rtype='final',
+                value=error_msg,
+                channel='run',
+                metadata={'final_answer_found': False, 'is_error': True}
+            )
+            return
+
         yield self.response(
             rtype='log', value=f'Plan:\n{self.planner.get_formatted_plan()}', channel='run'
         )
@@ -710,10 +731,23 @@ class ReActAgent(Agent):
         for idx in range(self.max_iterations):
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
 
-            async for update in self._think():
-                yield update
-            async for update in self._act():
-                yield update
+            try:
+                async for update in self._think():
+                    yield update
+                async for update in self._act():
+                    yield update
+            except RetryError as e:
+                logger.warning('Max retries reached for LLM call: %s', e)
+                error_msg = 'Rate limit exceeded. Unable to proceed.'
+                
+                self.add_to_history(ChatMessage(role='assistant', content=error_msg))
+                yield self.response(
+                    rtype='final',
+                    value=error_msg,
+                    channel='run',
+                    metadata={'final_answer_found': False, 'is_error': True}
+                )
+                return
 
             if self.final_answer_found:
                 break
@@ -721,7 +755,23 @@ class ReActAgent(Agent):
             plan_before_update = None
             if self.planner.plan:
                 plan_before_update = self.current_plan
-                await self._update_plan()
+                try:
+                    await self._update_plan()
+                except RetryError:
+                     # If plan update fails, just log and continue (or better, stop?)
+                     # If the main loop continues, it might hit rate limits again.
+                     # Safest to stop here too.
+                    logger.warning('Max retries reached during plan update.')
+                    error_msg = 'Rate limit exceeded during planning. Unable to proceed.'
+                    self.add_to_history(ChatMessage(role='assistant', content=error_msg))
+                    yield self.response(
+                        rtype='final',
+                        value=error_msg,
+                        channel='run',
+                        metadata={'final_answer_found': False, 'is_error': True}
+                    )
+                    return
+
                 self.add_to_history(
                     ChatMessage(
                         role='user',
@@ -729,13 +779,19 @@ class ReActAgent(Agent):
                     )
                 )
 
-            correction_msg = await self.observer.observe(
-                task=self.task,
-                history='\n'.join([str(msg) for msg in self.messages]),
-                plan_before=plan_before_update,
-                plan_after=self.current_plan,
-                iteration=idx + 1
-            )
+            try:
+                correction_msg = await self.observer.observe(
+                    task=self.task,
+                    history='\n'.join([str(msg) for msg in self.messages]),
+                    plan_before=plan_before_update,
+                    plan_after=self.current_plan,
+                    iteration=idx + 1
+                )
+            except RetryError:
+                # Observer failure is non-critical, can potentially continue or just skip observation
+                logger.warning('Observer failed due to rate limit. Skipping observation.')
+                correction_msg = None
+
             if correction_msg:
                 self.add_to_history(
                     ChatMessage(role='user', content=f'Observation: {correction_msg}')
@@ -746,10 +802,17 @@ class ReActAgent(Agent):
             failure_msg = f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
 
             if summarize_progress_on_failure:
-                progress_summary = await self.salvage_response()
-                failure_msg += (
-                    f'\n\nHere\'s a summary of my progress for this task:\n{progress_summary}'
-                )
+                try:
+                    progress_summary = await self.salvage_response()
+                    failure_msg += (
+                        f'\n\nHere\'s a summary of my progress for this task:\n{progress_summary}'
+                    )
+                except RetryError:
+                    logger.warning(
+                        'Failed to salvage response due to rate limit. '
+                        'Skipping progress summary.'
+                    )
+                    # Continue without the summary
 
             yield self.response(
                 rtype='final',
@@ -761,7 +824,13 @@ class ReActAgent(Agent):
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
         else:
             if self.planner.plan:
-                await self._update_plan()
+                try:
+                    await self._update_plan()
+                except RetryError:
+                    logger.warning(
+                        'Failed to update plan on final iteration due to rate limit. '
+                        'Skipping final plan update.'
+                    )
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think about the next step using the new structured response format."""
@@ -853,6 +922,9 @@ class ReActAgent(Agent):
 
                 self.add_to_history(msg)
                 return msg
+
+            except RetryError:
+                raise
 
             except ValueError as ex:
                 logger.error(
@@ -1487,7 +1559,7 @@ async def main():
     """Demonstrate the use of ReActAgent and CodeActAgent."""
     litellm_params = {'temperature': 0, 'timeout': 30}
     model_name = 'gemini/gemini-2.0-flash-lite'
-    model_name = 'openai/gpt-4.1-mini'
+    # model_name = 'openai/gpt-4.1-mini'
 
     agent = ReActAgent(
         name='Simple agent',
@@ -1495,7 +1567,7 @@ async def main():
         tools=[
             dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
         ],
-        max_iterations=5,
+        max_iterations=1,
         litellm_params=litellm_params,
         filter_tools_for_task=False
     )

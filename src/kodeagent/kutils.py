@@ -12,8 +12,17 @@ from typing import Optional, Any, Type
 import litellm
 import pydantic as pyd
 import requests
-from tenacity import wait_random_exponential, AsyncRetrying, stop_after_attempt
+from tenacity import (
+    wait_random_exponential,
+    AsyncRetrying,
+    stop_after_attempt,
+    RetryError,
+    retry_if_exception_type,
+    before_sleep_log
+)
 
+
+DEFAULT_MAX_LLM_RETRIES = 3
 
 LOGGERS_TO_SUPPRESS = [
     'asyncio',
@@ -191,8 +200,10 @@ async def call_llm(
     try:
         # Use AsyncRetrying to handle retries in a non-blocking way
         async for attempt in AsyncRetrying(
-                stop=stop_after_attempt(3),
-                wait=wait_random_exponential(multiplier=1, max=10)
+                stop=stop_after_attempt(DEFAULT_MAX_LLM_RETRIES),
+                wait=wait_random_exponential(multiplier=1, max=60),
+                retry=retry_if_exception_type(Exception),
+                before_sleep=before_sleep_log(logger, logging.WARNING)
         ):
             with attempt:
                 # Use the asynchronous litellm call
@@ -226,6 +237,8 @@ async def call_llm(
                 logger.info(token_usage)
                 return response_content
 
+    except RetryError:
+        raise
     except Exception as e:
         logger.exception(
             'LLM call failed after repeated attempts: %s',

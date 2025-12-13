@@ -8,6 +8,7 @@ from unittest.mock import patch, mock_open, MagicMock
 import pytest
 import requests
 import pydantic as pyd
+from tenacity import RetryError
 
 from kodeagent.kutils import (
     is_it_url,
@@ -259,7 +260,7 @@ async def test_call_llm_empty_response(monkeypatch):
 
 
     monkeypatch.setattr('kodeagent.kutils.litellm.acompletion', dummy_acompletion)
-    with pytest.raises(ValueError):
+    with pytest.raises(RetryError):
         await call_llm(
             'model', {}, [{'role': 'user', 'content': 'hi'}]
         )
@@ -276,7 +277,7 @@ async def test_call_llm_exception(monkeypatch):
 
 
     monkeypatch.setattr('kodeagent.kutils.litellm.acompletion', dummy_acompletion)
-    with pytest.raises(ValueError):
+    with pytest.raises(RetryError):
         await call_llm(
             'model', {}, [{'role': 'user', 'content': 'hi'}]
         )
@@ -285,7 +286,7 @@ async def test_call_llm_exception(monkeypatch):
 @pytest.mark.asyncio
 async def test_call_llm_failure_after_all_retries(monkeypatch):
     """
-    Test if call_llm raises ValueError after all retries fail.
+    Test if call_llm raises RetryError after all retries fail.
     """
     async def dummy_acompletion(**kwargs):
         # Always fail
@@ -294,7 +295,7 @@ async def test_call_llm_failure_after_all_retries(monkeypatch):
     monkeypatch.setattr('kodeagent.kutils.litellm.acompletion', dummy_acompletion)
 
     with patch.object(logger, 'exception'):
-        with pytest.raises(ValueError, match='Failed to get a valid response from LLM after multiple retries'):
+        with pytest.raises(RetryError):
             await call_llm(
                 'model', {}, [{'role': 'user', 'content': 'hi'}]
             )
