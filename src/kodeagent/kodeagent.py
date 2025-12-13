@@ -426,7 +426,6 @@ class Agent(ABC):
         self.task = None
         self.final_answer_found = False
         self.msg_idx_of_new_task = 0
-        self.messages = []
 
         if self.planner:
             self.planner.plan = None
