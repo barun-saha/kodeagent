@@ -30,6 +30,8 @@ import pydantic as pyd
 import rich
 from dotenv import load_dotenv
 
+from tenacity import RetryError
+
 from . import kutils as ku
 from . import tools as dtools
 from .code_runner import CodeRunner, CODE_ENV_NAMES
@@ -56,7 +58,6 @@ litellm.failure_callback = ['langfuse']
 
 logger = ku.get_logger()
 
-
 REACT_SYSTEM_PROMPT = ku.read_prompt('system/react.txt')
 CODE_ACT_SYSTEM_PROMPT = ku.read_prompt('system/codeact.txt')
 AGENT_PLAN_PROMPT = ku.read_prompt('agent_plan.txt')
@@ -76,22 +77,29 @@ ANSWER_MATCH = re.compile(r'Answer:\s*(.+?)(?=\nSuccessful:|$)', re.DOTALL | re.
 SUCCESS_MATCH = re.compile(r'Successful:\s*(true|false)', re.IGNORECASE)
 CODE_MATCH = re.compile(r'Code:\s*```(?:python)?\s*(.+?)\s*```', re.DOTALL | re.IGNORECASE)
 
+MAX_RESPONSE_PARSING_ATTEMPTS = 3
 CODE_ACT_PSEUDO_TOOL_NAME = 'code_execution'
 MAX_TASK_FILES = 10
 
 
 class Planner:
     """Given a task, generate and maintain a step-by-step plan to solve it."""
-    def __init__(self, model_name: str, litellm_params: Optional[dict] = None):
+    def __init__(self,
+            model_name: str,
+            litellm_params: Optional[dict] = None,
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
+    ):
         """
-        Create a Planner instance for the agent.
+        Create a planner using the given model.
 
         Args:
-            model_name: The LLM to use for planning.
-            litellm_params: LiteLLM params.
+            model_name: The name of the LLM to use.
+            litellm_params: LiteLLM parameters.
+            max_retries: Maximum number of retries for LLM calls.
         """
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
+        self.max_retries = max_retries
         self.plan: Optional[AgentPlan] = None
 
     async def create_plan(self, task: Task, agent_type: str) -> AgentPlan:
@@ -118,7 +126,8 @@ class Planner:
             litellm_params=self.litellm_params,
             messages=messages,
             response_format=AgentPlan,
-            trace_id=task.id
+            trace_id=task.id,
+            max_retries=self.max_retries
         )
         self.plan = AgentPlan.model_validate_json(plan_response)
         return self.plan
@@ -145,7 +154,8 @@ class Planner:
             litellm_params=self.litellm_params,
             messages=ku.make_user_message(prompt),
             response_format=AgentPlan,
-            trace_id=task_id
+            trace_id=task_id,
+            max_retries=self.max_retries
         )
         self.plan = AgentPlan.model_validate_json(plan_response)
 
@@ -189,7 +199,8 @@ class Observer:
             model_name: str,
             tool_names: set[str],
             litellm_params: Optional[dict] = None,
-            threshold: Optional[int] = 3
+            threshold: Optional[int] = 3,
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
     ):
         """
         Create an Observer for an agent.
@@ -205,6 +216,7 @@ class Observer:
         self.model_name = model_name
         self.tool_names = tool_names
         self.litellm_params = litellm_params or {}
+        self.max_retries = max_retries
         self.last_correction_iteration: int = 0
 
     async def observe(
@@ -246,6 +258,7 @@ class Observer:
                 model_name=self.model_name,
                 litellm_params=self.litellm_params,
                 messages=[{'role': 'user', 'content': prompt}],
+                max_retries=self.max_retries,
                 response_format=ObserverResponse,
             )
             observation = ObserverResponse.model_validate_json(observation_response)
@@ -292,6 +305,7 @@ class Agent(ABC):
             system_prompt: Optional[str] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
     ):
         """
         Create an agent.
@@ -301,10 +315,11 @@ class Agent(ABC):
             model_name: The (LiteLLM) model name to use.
             description: Optional brief description about the agent.
             tools: An optional list of tools available to the agent.
-            litellm_params: LiteLLM params.
+            litellm_params: LiteLLM parameters.
             system_prompt: Optional system prompt for the agent. If not provided, default is used.
             max_iterations: The max iterations an agent can perform to solve a task.
             filter_tools_for_task: Whether the tools should be filtered for a task. Unused.
+            max_retries: Maximum number of retries for LLM calls.
         """
         self.id = uuid.uuid4()
         self.name: str = name
@@ -316,6 +331,7 @@ class Agent(ABC):
         self.litellm_params: dict = litellm_params or {}
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
+        self.max_retries = max_retries
 
         self.tool_names = {t.name for t in tools} if tools else set()
         self.tool_name_to_func = {t.name: t for t in tools} if tools else {}
@@ -324,11 +340,16 @@ class Agent(ABC):
         self.messages: list[ChatMessage] = []
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
-        self.planner: Optional[Planner] = None
+        self.planner: Optional[Planner] = Planner(
+            model_name=model_name,
+            litellm_params=litellm_params,
+            max_retries=self.max_retries
+        )
         self.observer = Observer(
             model_name=model_name,
             litellm_params=litellm_params,
-            tool_names=self.tool_names
+            tool_names=self.tool_names,
+            max_retries=self.max_retries
         )
 
         self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
@@ -415,7 +436,8 @@ class Agent(ABC):
             model_name=self.model_name,
             litellm_params=self.litellm_params,
             messages=ku.make_user_message(prompt),
-            trace_id=self.task.id
+            trace_id=self.task.id,
+            max_retries=self.max_retries
         )
         return salvaged_response
 
@@ -465,28 +487,33 @@ class Agent(ABC):
             A chat response or an empty string.
 
         Raises:
+            RetryError: If LLM call fails after max retries.
             Exception in case of error.
         """
         formatted_messages = self.formatted_history_for_llm()
 
-        max_retries = 3
-        for attempt in range(max_retries):
+        for attempt in range(MAX_RESPONSE_PARSING_ATTEMPTS):
             try:
                 chat_response: str = await ku.call_llm(
                     model_name=self.model_name,
                     litellm_params=self.litellm_params,
                     messages=formatted_messages,
                     response_format=response_format,
-                    trace_id=self.task.id if self.task else None
+                    trace_id=self.task.id if self.task else None,
+                    max_retries=self.max_retries
                 )
                 return chat_response or ''
 
+            except RetryError:
+                # LLM call failed after max retries; do not retry at this level
+                raise
             except Exception as e:
                 logger.warning(
-                    'LLM call failed (attempt %d/%d): %s', attempt + 1, max_retries, str(e)
+                    'LLM call failed (attempt %d/%d): %s',
+                    attempt + 1, MAX_RESPONSE_PARSING_ATTEMPTS, str(e)
                 )
 
-                if attempt < max_retries - 1:
+                if attempt < MAX_RESPONSE_PARSING_ATTEMPTS - 1:
                     # Add feedback to help LLM correct itself
                     await asyncio.sleep(random.uniform(0.5, 1.5))
                     feedback = (
@@ -589,6 +616,7 @@ class ReActAgent(Agent):
             system_prompt: Optional[str] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
     ):
         super().__init__(
             name=name,
@@ -599,9 +627,10 @@ class ReActAgent(Agent):
             system_prompt=system_prompt or REACT_SYSTEM_PROMPT,
             max_iterations=max_iterations,
             filter_tools_for_task=filter_tools_for_task,
+            max_retries=max_retries
         )
 
-        self.planner = Planner(model_name, litellm_params)
+        self.planner = Planner(model_name, litellm_params, max_retries=max_retries)
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
 
@@ -690,7 +719,23 @@ class ReActAgent(Agent):
             channel='run'
         )
 
-        await self.planner.create_plan(self.task, self.__class__.__name__)
+        try:
+            await self.planner.create_plan(self.task, self.__class__.__name__)
+        except RetryError:
+            logger.warning('Max retries reached during plan creation.')
+            error_msg = (
+                'Unable to start solving the task: Rate limit exceeded while creating '
+                'the initial plan. Please try again later.'
+            )
+            self.add_to_history(ChatMessage(role='assistant', content=error_msg))
+            yield self.response(
+                rtype='final',
+                value=error_msg,
+                channel='run',
+                metadata={'final_answer_found': False, 'is_error': True}
+            )
+            return
+
         yield self.response(
             rtype='log', value=f'Plan:\n{self.planner.get_formatted_plan()}', channel='run'
         )
@@ -710,10 +755,23 @@ class ReActAgent(Agent):
         for idx in range(self.max_iterations):
             yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
 
-            async for update in self._think():
-                yield update
-            async for update in self._act():
-                yield update
+            try:
+                async for update in self._think():
+                    yield update
+                async for update in self._act():
+                    yield update
+            except RetryError as e:
+                logger.warning('Max retries reached for LLM call: %s', e)
+                error_msg = 'Rate limit exceeded. Unable to proceed.'
+                
+                self.add_to_history(ChatMessage(role='assistant', content=error_msg))
+                yield self.response(
+                    rtype='final',
+                    value=error_msg,
+                    channel='run',
+                    metadata={'final_answer_found': False, 'is_error': True}
+                )
+                return
 
             if self.final_answer_found:
                 break
@@ -721,7 +779,23 @@ class ReActAgent(Agent):
             plan_before_update = None
             if self.planner.plan:
                 plan_before_update = self.current_plan
-                await self._update_plan()
+                try:
+                    await self._update_plan()
+                except RetryError:
+                     # If plan update fails, just log and continue (or better, stop?)
+                     # If the main loop continues, it might hit rate limits again.
+                     # Safest to stop here too.
+                    logger.warning('Max retries reached during plan update.')
+                    error_msg = 'Rate limit exceeded during planning. Unable to proceed.'
+                    self.add_to_history(ChatMessage(role='assistant', content=error_msg))
+                    yield self.response(
+                        rtype='final',
+                        value=error_msg,
+                        channel='run',
+                        metadata={'final_answer_found': False, 'is_error': True}
+                    )
+                    return
+
                 self.add_to_history(
                     ChatMessage(
                         role='user',
@@ -729,13 +803,19 @@ class ReActAgent(Agent):
                     )
                 )
 
-            correction_msg = await self.observer.observe(
-                task=self.task,
-                history='\n'.join([str(msg) for msg in self.messages]),
-                plan_before=plan_before_update,
-                plan_after=self.current_plan,
-                iteration=idx + 1
-            )
+            try:
+                correction_msg = await self.observer.observe(
+                    task=self.task,
+                    history='\n'.join([str(msg) for msg in self.messages]),
+                    plan_before=plan_before_update,
+                    plan_after=self.current_plan,
+                    iteration=idx + 1
+                )
+            except RetryError:
+                # Observer failure is non-critical, can potentially continue or just skip observation
+                logger.warning('Observer failed due to rate limit. Skipping observation.')
+                correction_msg = None
+
             if correction_msg:
                 self.add_to_history(
                     ChatMessage(role='user', content=f'Observation: {correction_msg}')
@@ -746,10 +826,17 @@ class ReActAgent(Agent):
             failure_msg = f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
 
             if summarize_progress_on_failure:
-                progress_summary = await self.salvage_response()
-                failure_msg += (
-                    f'\n\nHere\'s a summary of my progress for this task:\n{progress_summary}'
-                )
+                try:
+                    progress_summary = await self.salvage_response()
+                    failure_msg += (
+                        f'\n\nHere\'s a summary of my progress for this task:\n{progress_summary}'
+                    )
+                except RetryError:
+                    logger.warning(
+                        'Failed to salvage response due to rate limit. '
+                        'Skipping progress summary.'
+                    )
+                    # Continue without the summary
 
             yield self.response(
                 rtype='final',
@@ -761,7 +848,13 @@ class ReActAgent(Agent):
             self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
         else:
             if self.planner.plan:
-                await self._update_plan()
+                try:
+                    await self._update_plan()
+                except RetryError:
+                    logger.warning(
+                        'Failed to update plan on final iteration due to rate limit. '
+                        'Skipping final plan update.'
+                    )
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think about the next step using the new structured response format."""
@@ -853,6 +946,9 @@ class ReActAgent(Agent):
 
                 self.add_to_history(msg)
                 return msg
+
+            except RetryError:
+                raise
 
             except ValueError as ex:
                 logger.error(
@@ -1200,6 +1296,7 @@ class CodeActAgent(ReActAgent):
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
             filter_tools_for_task: bool = False,
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
     ):
         super().__init__(
             name=name,
@@ -1210,6 +1307,7 @@ class CodeActAgent(ReActAgent):
             system_prompt=system_prompt or CODE_ACT_SYSTEM_PROMPT,
             description=description,
             filter_tools_for_task=filter_tools_for_task,
+            max_retries=max_retries
         )
         self.tools_source_code: str = 'from typing import *\n\n'
 
@@ -1487,7 +1585,7 @@ async def main():
     """Demonstrate the use of ReActAgent and CodeActAgent."""
     litellm_params = {'temperature': 0, 'timeout': 30}
     model_name = 'gemini/gemini-2.0-flash-lite'
-    model_name = 'openai/gpt-4.1-mini'
+    # model_name = 'openai/gpt-4.1-mini'
 
     agent = ReActAgent(
         name='Simple agent',

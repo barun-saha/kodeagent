@@ -12,9 +12,17 @@ from typing import Optional, Any, Type
 import litellm
 import pydantic as pyd
 import requests
-from tenacity import wait_random_exponential, AsyncRetrying, stop_after_attempt
+from tenacity import (
+    wait_random_exponential,
+    AsyncRetrying,
+    stop_after_attempt,
+    RetryError,
+    retry_if_exception_type,
+    before_sleep_log
+)
 
 
+DEFAULT_MAX_LLM_RETRIES = 3
 LOGGERS_TO_SUPPRESS = [
     'asyncio',
     'cookie_store',
@@ -160,21 +168,24 @@ async def call_llm(
         messages: list[dict],
         response_format: Optional[Type[pyd.BaseModel]] = None,
         trace_id: Optional[str] = None,
+        max_retries: int = DEFAULT_MAX_LLM_RETRIES,
 ) -> str | None:
     """
-    Invoke the LLM to generate a response based on a given list of messages.
+    Call the LLM with the given parameters and response format.
 
     Args:
-        model_name: The name of the LLM to be used.
-        litellm_params: Optional parameters for LiteLLM.
-        messages: A list of messages (and optional images) to be sent to the LLM.
-        response_format: Optional type of message the LLM should respond with.
-        trace_id: (Optional) Langfuse trace ID.
+        model_name: The name of the LLM model to use.
+        litellm_params: Dictionary of parameters to pass to litellm.
+        messages: List of message dictionaries.
+        response_format: Optional pydantic model for structured output.
+        trace_id: Optional trace ID for observability.
+        max_retries: Maximum number of retries for the LLM call.
 
     Returns:
         The LLM response as string.
 
     Raises:
+        RetryError: If the LLM call fails after maximum retries.
         ValueError: If the LLM returns an empty or invalid response body.
     """
     params = {'model': model_name, 'messages': messages}
@@ -191,8 +202,10 @@ async def call_llm(
     try:
         # Use AsyncRetrying to handle retries in a non-blocking way
         async for attempt in AsyncRetrying(
-                stop=stop_after_attempt(3),
-                wait=wait_random_exponential(multiplier=1, max=10)
+                stop=stop_after_attempt(max_retries),
+                wait=wait_random_exponential(multiplier=1, max=60),
+                retry=retry_if_exception_type(Exception),
+                before_sleep=before_sleep_log(logger, logging.WARNING)
         ):
             with attempt:
                 # Use the asynchronous litellm call
@@ -226,6 +239,8 @@ async def call_llm(
                 logger.info(token_usage)
                 return response_content
 
+    except RetryError:
+        raise
     except Exception as e:
         logger.exception(
             'LLM call failed after repeated attempts: %s',
