@@ -436,7 +436,8 @@ class Agent(ABC):
             model_name=self.model_name,
             litellm_params=self.litellm_params,
             messages=ku.make_user_message(prompt),
-            trace_id=self.task.id
+            trace_id=self.task.id,
+            max_retries=self.max_retries
         )
         return salvaged_response
 
