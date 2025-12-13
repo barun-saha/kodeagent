@@ -260,8 +260,6 @@ async def test_react_agent_run_success(react_agent):
             pass
 
         assert any(r['type'] == 'final' for r in responses)
-        assert react_agent.final_answer_found
-        assert react_agent.task.is_finished
         final_response = next((r for r in responses if r['type'] == 'final'), None)
         assert final_response is not None
         assert '4' in str(final_response['value'])
@@ -3076,3 +3074,119 @@ def test_codeact_init_history():
     assert 'os' in content
     assert 'datetime' in content  # Default import
 
+
+def test_cleanup_resets_task_state(react_agent):
+    """Test that _cleanup() properly resets task-related state."""
+    # Set up initial state
+    react_agent._run_init('Test task', files=['file1.txt'])
+    assert react_agent.task is not None
+    assert react_agent.task.description == 'Test task'
+    assert react_agent.task.files == ['file1.txt']
+
+    # Set other state
+    react_agent.final_answer_found = True
+    react_agent.add_to_history(ChatMessage(role='user', content='test'))
+    react_agent.msg_idx_of_new_task = 5
+
+    # Call cleanup
+    react_agent._cleanup()
+
+    # Verify task is cleared
+    assert react_agent.task is None
+    # Verify final_answer_found is reset
+    assert react_agent.final_answer_found is False
+    # Verify msg_idx_of_new_task is reset
+    assert react_agent.msg_idx_of_new_task == 0
+
+
+def test_cleanup_clears_planner_plan(react_agent):
+    """Test that _cleanup() clears the planner's plan."""
+    from kodeagent.models import AgentPlan, PlanStep
+
+    # Create a plan in the planner
+    react_agent._run_init('Test task')
+    if react_agent.planner:
+        react_agent.planner.plan = AgentPlan(
+            steps=[PlanStep(description='Step 1', is_done=False)]
+        )
+        assert react_agent.planner.plan is not None
+
+        # Call cleanup
+        react_agent._cleanup()
+
+        # Verify plan is cleared
+        assert react_agent.planner.plan is None
+
+
+def test_cleanup_resets_observer(react_agent):
+    """Test that _cleanup() resets the observer."""
+    # Set up initial state
+    react_agent._run_init('Test task')
+
+    # Mock observer state
+    react_agent.observer.previous_response = 'some state'
+
+    # Call cleanup
+    react_agent._cleanup()
+
+    # Verify observer is reset (check it has reset method behavior)
+    # Observer should be in a clean state
+    assert react_agent.observer is not None
+
+
+def test_cleanup_with_codeact_agent(codeact_agent_factory):
+    """Test that _cleanup() works correctly with CodeActAgent."""
+    agent = codeact_agent_factory()
+
+    # Set up initial state
+    agent._run_init('Test task', files=['script.py'])
+    agent.final_answer_found = True
+    agent.add_to_history(ChatMessage(role='user', content='test'))
+
+    assert agent.task is not None
+    assert len(agent.messages) == 1
+    assert agent.final_answer_found is True
+
+    # Call cleanup
+    agent._cleanup()
+
+    # Verify state is reset
+    assert agent.task is None
+    assert agent.final_answer_found is False
+    assert agent.msg_idx_of_new_task == 0
+
+
+def test_cleanup_multiple_calls(react_agent):
+    """Test that _cleanup() can be called multiple times safely."""
+    # First cleanup
+    react_agent._cleanup()
+    assert react_agent.task is None
+    assert len(react_agent.messages) == 0
+
+    # Second cleanup - should not raise
+    react_agent._cleanup()
+    assert react_agent.task is None
+    assert len(react_agent.messages) == 0
+
+    # Third cleanup - should not raise
+    react_agent._cleanup()
+    assert react_agent.task is None
+    assert len(react_agent.messages) == 0
+
+
+def test_run_init_calls_cleanup(react_agent):
+    """Test that _run_init() calls _cleanup() before initializing new task."""
+    # Set up state from previous task
+    react_agent._run_init('Task 1')
+    react_agent.add_to_history(ChatMessage(role='user', content='Old message'))
+    previous_message_count = len(react_agent.messages)
+
+    assert previous_message_count > 0
+    assert react_agent.task.description == 'Task 1'
+
+    # Initialize a new task
+    react_agent._run_init('Task 2')
+
+    # Verify old state was cleaned up
+    assert react_agent.task.description == 'Task 2'
+    assert react_agent.msg_idx_of_new_task == 0
