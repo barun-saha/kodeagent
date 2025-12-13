@@ -793,13 +793,16 @@ class ReActAgent(Agent):
                             thought_response_cleaned)
                         parsed_json = json.loads(thought_response_cleaned)
 
-                    if 'args' in parsed_json and isinstance(parsed_json['args'], str):
-                        parsed_json['args'] = ku.clean_json_string(parsed_json['args'])
+                    if 'args' in parsed_json:
+                        if isinstance(parsed_json['args'], str):
+                            parsed_json['args'] = ku.clean_json_string(parsed_json['args'])
+                        elif isinstance(parsed_json['args'], dict):
+                            # Ensure deeply nested args are converted to string for Pydantic
+                            parsed_json['args'] = json.dumps(parsed_json['args'])
 
                     # Handle mutual exclusivity violations
                     if response_format_class == ReActChatMessage:
-                        has_action = parsed_json.get('action') and parsed_json[
-                            'action'] != 'FINISH'
+                        has_action = parsed_json.get('action') and parsed_json['action'] != 'FINISH'
                         has_final_answer = parsed_json.get('final_answer')
 
                         if has_action and has_final_answer:
@@ -823,10 +826,8 @@ class ReActAgent(Agent):
                             parsed_json['final_answer'] = None
                             parsed_json['task_successful'] = False
 
-                    thought_response_cleaned = json.dumps(parsed_json)
-
                     # Validate and create message directly
-                    msg = response_format_class.model_validate_json(thought_response_cleaned)
+                    msg = response_format_class.model_validate(parsed_json)
                     msg.role = 'assistant'  # Set role
 
                     logger.debug('Successfully parsed structured JSON response')
@@ -1025,13 +1026,13 @@ class ReActAgent(Agent):
             Successful: true/false
 
         Args:
-            text: The raw text response from the LLM
+            text: The raw text response from the LLM.
 
         Returns:
-            Parsed structured response
+            Parsed structured response.
 
         Raises:
-            ValueError: If unable to parse required fields
+            ValueError: If unable to parse action or final_answer fields.
         """
         logger.info('Falling back to text-based regex parsing')
 
@@ -1297,15 +1298,30 @@ class CodeActAgent(ReActAgent):
         Uses regex to extract components from free-form text and parse into messages.
 
         Returns:
-            Parsed structured response
+            Parsed structured response.
 
         Raises:
-            ValueError: If unable to parse required fields
+            ValueError: If unable to parse either code or final_answer fields.
         """
-        react_msg: ReActChatMessage = super().parse_text_response(text)
-        thought = react_msg.thought
-        final_answer = react_msg.final_answer
-        task_successful = react_msg.task_successful
+        logger.info('Falling back to text-based regex parsing for CodeAct')
+
+        # NOTE: We intentionally do NOT call super().parse_text_response(text) here.
+        # The parent ReActAgent.parse_text_response() enforces the presence of either
+        # "Action" (for tools) or "Answer" (final response).
+        #
+        # A valid CodeAct response might contain "Code" but NO "Action" or "Answer".
+        # If we called super(), it would recognize the "Thought" but fail to find
+        # "Action"/"Answer" and raise a ValueError before we could check for "Code".
+        # Therefore, we independently parse Thought + Code + Answer here.
+
+        # Extract thought - REQUIRED
+        thought_match = THOUGHT_MATCH.search(text)
+        if not thought_match:
+            raise ValueError(
+                f"Could not extract 'Thought:' field from response. "
+                f"Response must start with reasoning. Text: {text[:200]}..."
+            )
+        thought = thought_match.group(1).strip()
 
         # Parse CodeAct response
         code_match = CODE_MATCH.search(text)
@@ -1319,10 +1335,14 @@ class CodeActAgent(ReActAgent):
                 re.DOTALL | re.IGNORECASE
             )
             if code_alt_match:
-                code = code_alt_match.group(1).strip()
-                code = code.strip('`').strip()
-            else:
-                code = None
+                code_raw = code_alt_match.group(1).strip()
+                code = code_raw.strip('`').strip()
+
+        # Extract final answer and success status
+        answer_match = ANSWER_MATCH.search(text)
+        success_match = SUCCESS_MATCH.search(text)
+        final_answer = answer_match.group(1).strip() if answer_match else None
+        task_successful = success_match.group(1).lower() == 'true' if success_match else False
 
         # Validation: Must have either code OR final_answer
         if final_answer:
@@ -1344,7 +1364,7 @@ class CodeActAgent(ReActAgent):
             )
 
         raise ValueError(
-            f"Could not extract valid Code or Answer from response. Text: {text[:300]}..."
+            f'Could not extract valid Code or Answer from response. Text: {text[:300]}...'
         )
 
     def init_history(self):
@@ -1425,7 +1445,15 @@ class CodeActAgent(ReActAgent):
 
 
 def llm_vision_support(model_names: list[str]) -> list[bool]:
-    """Check whether images can be used with given LLMs."""
+    """
+    Check whether images can be used with given LLMs.
+    
+    Args:
+        model_names (list[str]): List of LLM names.
+    
+    Returns:
+        list[bool]: List of booleans indicating whether each LLM supports vision.
+    """
     status = [litellm.supports_vision(model=model) for model in model_names]
     for model, value in zip(model_names, status):
         print(f'- Vision supported by {model}: {value}')
@@ -1434,7 +1462,13 @@ def llm_vision_support(model_names: list[str]) -> list[bool]:
 
 
 def print_response(response: AgentResponse, only_final: bool = True):
-    """Print agent's response in terminal with colors."""
+    """
+    Print agent's response in terminal with colors.
+    
+    Args:
+        response (AgentResponse): Agent's response.
+        only_final (bool, optional): Whether to print only final response. Defaults to True.
+    """
     if response['type'] == 'final':
         msg = (
             response['value']
@@ -1453,7 +1487,7 @@ async def main():
     """Demonstrate the use of ReActAgent and CodeActAgent."""
     litellm_params = {'temperature': 0, 'timeout': 30}
     model_name = 'gemini/gemini-2.0-flash-lite'
-    # model_name = 'openai/gpt-4.1-mini'
+    model_name = 'openai/gpt-4.1-mini'
 
     agent = ReActAgent(
         name='Simple agent',

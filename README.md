@@ -4,8 +4,10 @@
 [![codecov](https://codecov.io/gh/barun-saha/kodeagent/branch/main/graph/badge.svg)](https://codecov.io/gh/barun-saha/kodeagent)
 [![Documentation Status](https://readthedocs.org/projects/kodeagent/badge/?version=latest)](https://kodeagent.readthedocs.io/en/latest/?badge=latest)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Known Vulnerabilities](https://snyk.io/test/github/barun-saha/kodeagent/badge.svg)](https://snyk.io/test/github/barun-saha/kodeagent)
 
-KodeAgent is a minimalistic, frameworkless approach to building debuggable AI agents. KodeAgent is a small (~2,000 lines of pure Python) engine designed to be the robust reasoning core inside your larger system, not the entire platform.
+
+KodeAgent is a frameworkless, minimalistic approach to building AI agents. KodeAgent is a small (~2,000 lines of pure Python) engine designed to be the robust reasoning core inside your larger system, not the entire platform.
 
 ![KodeAgent Demo](examples/kodeagent_demo.gif)
 
