@@ -59,7 +59,6 @@ KodeAgent's **CodeActAgent** implements a comprehensive multi-layer security sys
 > * Code obfuscation
 > * Resource exhaustion
 
-## Security Architecture
 
 The CodeActAgent uses a **defense-in-depth** approach with 5 security layers:
 
@@ -425,22 +424,6 @@ Env access: is_safe=False, reason=Critical security violations: Dangerous os.env
    * Security checks add ~100-200ms latency
    * **Mitigation**: Acceptable for safety-critical applications
 
-## Security Incident Response
-
-### If Malicious Code Is Detected
-
-1. **Log the incident**:
-
-   ```python
-   logger.critical(f"Malicious code detected: {code}")
-   logger.critical(f"Reason: {review_result.reason}")
-   ```
-
-2. **Block execution** (automatic)
-
-3. **Alert administrators**
-
-4. **Review and improve** detection rules
 
 ## API Reference
 
@@ -451,8 +434,3 @@ See the full API documentation for:
 * `CodeSecurityReviewer` - LLM-based security review
 * `CodeRunner` - Code execution with security checks
 
-## Further Reading
-
-* [API Documentation](api.rst) - Full API reference
-* [Usage Guide](usage.md) - Usage examples
-* [Security Guidelines](https://github.com/barun-saha/kodeagent/blob/main/src/kodeagent/prompts/code_guardrail.txt) - LLM security guidelines

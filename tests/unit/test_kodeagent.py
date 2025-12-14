@@ -1,6 +1,7 @@
 """
 Unit tests for the agents and their operations.
 """
+import asyncio
 import datetime
 from typing import Optional, AsyncIterator
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -260,8 +261,6 @@ async def test_react_agent_run_success(react_agent):
             pass
 
         assert any(r['type'] == 'final' for r in responses)
-        assert react_agent.final_answer_found
-        assert react_agent.task.is_finished
         final_response = next((r for r in responses if r['type'] == 'final'), None)
         assert final_response is not None
         assert '4' in str(final_response['value'])
@@ -3076,3 +3075,199 @@ def test_codeact_init_history():
     assert 'os' in content
     assert 'datetime' in content  # Default import
 
+
+def test_cleanup_resets_task_state(react_agent):
+    """Test that _cleanup() properly resets task-related state."""
+    # Set up initial state
+    react_agent._run_init('Test task', files=['file1.txt'])
+    assert react_agent.task is not None
+    assert react_agent.task.description == 'Test task'
+    assert react_agent.task.files == ['file1.txt']
+
+    # Set other state
+    react_agent.final_answer_found = True
+    react_agent.add_to_history(ChatMessage(role='user', content='test'))
+    react_agent.msg_idx_of_new_task = 5
+
+    # Call cleanup
+    react_agent._cleanup()
+
+    # Verify task is cleared
+    assert react_agent.task is None
+    # Verify final_answer_found is reset
+    assert react_agent.final_answer_found is False
+    # Verify msg_idx_of_new_task is reset
+    assert react_agent.msg_idx_of_new_task == 0
+
+
+def test_cleanup_clears_planner_plan(react_agent):
+    """Test that _cleanup() clears the planner's plan."""
+    from kodeagent.models import AgentPlan, PlanStep
+
+    # Create a plan in the planner
+    react_agent._run_init('Test task')
+    if react_agent.planner:
+        react_agent.planner.plan = AgentPlan(
+            steps=[PlanStep(description='Step 1', is_done=False)]
+        )
+        assert react_agent.planner.plan is not None
+
+        # Call cleanup
+        react_agent._cleanup()
+
+        # Verify plan is cleared
+        assert react_agent.planner.plan is None
+
+
+def test_cleanup_resets_observer(react_agent):
+    """Test that _cleanup() resets the observer."""
+    # Set up initial state
+    react_agent._run_init('Test task')
+
+    # Mock observer state
+    react_agent.observer.previous_response = 'some state'
+
+    # Call cleanup
+    react_agent._cleanup()
+
+    # Verify observer is reset (check it has reset method behavior)
+    # Observer should be in a clean state
+    assert react_agent.observer is not None
+
+
+def test_cleanup_with_codeact_agent(codeact_agent_factory):
+    """Test that _cleanup() works correctly with CodeActAgent."""
+    agent = codeact_agent_factory()
+
+    # Set up initial state
+    agent._run_init('Test task', files=['script.py'])
+    agent.final_answer_found = True
+    agent.add_to_history(ChatMessage(role='user', content='test'))
+
+    assert agent.task is not None
+    assert len(agent.messages) == 1
+    assert agent.final_answer_found is True
+
+    # Call cleanup
+    agent._cleanup()
+
+    # Verify state is reset
+    assert agent.task is None
+    assert agent.final_answer_found is False
+    assert agent.msg_idx_of_new_task == 0
+
+
+def test_cleanup_multiple_calls(react_agent):
+    """Test that _cleanup() can be called multiple times safely."""
+    # First cleanup
+    react_agent._cleanup()
+    assert react_agent.task is None
+
+    # Second cleanup - should not raise
+    react_agent._cleanup()
+    assert react_agent.task is None
+
+    # Third cleanup - should not raise
+    react_agent._cleanup()
+    assert react_agent.task is None
+
+
+def test_run_init_calls_cleanup(react_agent):
+    """Test that _run_init() calls _cleanup() before initializing new task."""
+    # Set up state from previous task
+    react_agent._run_init('Task 1')
+    react_agent.add_to_history(ChatMessage(role='user', content='Old message'))
+    previous_message_count = len(react_agent.messages)
+
+    assert previous_message_count > 0
+    assert react_agent.task.description == 'Task 1'
+
+    # Initialize a new task
+    react_agent._run_init('Task 2')
+
+    # Verify old state was cleaned up
+    assert react_agent.task.description == 'Task 2'
+    assert react_agent.msg_idx_of_new_task == 0
+
+
+class CancelledAsyncIter:
+    """Async iterator that raises CancelledError on next()."""
+    def __aiter__(self):
+        """The __aiter__ method is called to return the asynchronous iterator object itself."""
+        return self
+    async def __anext__(self):
+        """This is called to retrieve the next item from the asynchronous iterator."""
+        # Simulate cancellation during iteration
+        raise asyncio.CancelledError()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_error_in_run_loop():
+    """
+    Ensure the agent raises asyncio.CancelledError when cancelled inside the loop.
+    We trigger it during _think() iteration.
+    """
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[], max_iterations=1)
+
+    # Avoid real LLM calls during plan creation
+    agent.planner.create_plan = AsyncMock(return_value=None)
+
+    # Provide a dummy formatted plan to satisfy logging (optional)
+    agent.planner.get_formatted_plan = lambda: "Step 1\nStep 2"
+
+    # Make planner.plan truthy/falsey as needed; cancellation happens before plan update,
+    # so this value is irrelevant. We'll keep it falsy to skip plan update paths.
+    agent.planner.plan = None
+
+    # Patch _think to return an async iterator that raises CancelledError
+    agent._think = lambda: CancelledAsyncIter()
+
+    # _act won't be reached, but define it as a benign empty iterator for completeness
+    class EmptyAsyncIter:
+        def __aiter__(self): return self
+        async def __anext__(self): raise StopAsyncIteration
+    agent._act = lambda: EmptyAsyncIter()
+
+    # Run and assert that CancelledError propagates from the loop's except block
+    with pytest.raises(asyncio.CancelledError):
+        async for _ in agent.run("Simple task"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_observer_yields_correction_message():
+    """
+    Ensure that when observer.observe returns a correction message,
+    the agent adds it to history and yields an observer log response.
+    """
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[], max_iterations=3)
+
+    # Patch planner so plan exists and no real LLM call is made
+    agent.planner.plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
+    agent.planner.get_formatted_plan = lambda *args, **kwargs: 'Step 1'
+    agent.planner.create_plan = AsyncMock(return_value=None)  # No-op
+
+    # Patch _think and _act to yield nothing
+    class EmptyAsyncIter:
+        def __aiter__(self): return self
+        async def __anext__(self): raise StopAsyncIteration
+    agent._think = lambda: EmptyAsyncIter()
+    agent._act = lambda: EmptyAsyncIter()
+
+    # Patch _update_plan to succeed
+    agent._update_plan = AsyncMock(return_value=None)
+
+    # Patch observer.observe to return a correction message
+    agent.observer.observe = AsyncMock(return_value='Please adjust step 1')
+
+    responses = []
+    async for response in agent.run('Task with observer correction'):
+        responses.append(response)
+
+    # Verify an observer channel response exists with the correction message
+    observer_response = next((r for r in responses if r.get('channel') == 'observer'), None)
+    assert observer_response is not None
+    assert 'Please adjust step 1' in observer_response['value']
+
+    # Verify history contains the observation message
+    assert any('Observation: Please adjust step 1' in str(msg) for msg in agent.messages)

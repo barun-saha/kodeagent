@@ -6,6 +6,7 @@ omit =
     setup.py
 
 [report]
+show_missing = True
 exclude_lines =
     pragma: no cover
     def __repr__

@@ -1,13 +1,13 @@
 """
 Unit tests for retry logic in call_llm and agent behavior on rate limit errors.
 """
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 from tenacity import RetryError
 from litellm.exceptions import RateLimitError
 
-from kodeagent import ReActAgent
+from kodeagent import ReActAgent, AgentPlan, PlanStep
 from kodeagent.kutils import call_llm, DEFAULT_MAX_LLM_RETRIES
 
 
@@ -196,13 +196,12 @@ async def test_graceful_exit_on_exhaustion():
             '{"steps": [{"description": "Step 1", "is_done": false}]}', # Plan
             RetryError(last_attempt=MagicMock())
         ]
-        
         agent = ReActAgent(
-            name='test_agent', 
-            model_name=MODEL_NAME, 
+            name='test_agent',
+            model_name=MODEL_NAME,
             tools=[],
             max_iterations=1,
-            system_prompt="You are a test agent."
+            system_prompt='You are a test agent.'
         )
         
         responses = []
@@ -210,13 +209,83 @@ async def test_graceful_exit_on_exhaustion():
             async for response in agent.run('Simple task'):
                 responses.append(response)
         except Exception as e:
-            pytest.fail(f"Agent raised an exception instead of exiting gracefully: {e}")
+            pytest.fail(f'Agent raised an exception instead of exiting gracefully: {e}')
             
         # Verify final response is an error
         final_response = next((r for r in responses if r['type'] == 'final'), None)
         assert final_response is not None
         assert final_response['metadata']['is_error'] is True
-        assert "Rate limit exceeded" in final_response['value']
+        assert 'Rate limit exceeded' in final_response['value']
         
         # Verify history contains the error message
-        assert any("Rate limit exceeded" in str(msg) for msg in agent.messages)
+        assert any('Rate limit exceeded' in str(msg) for msg in agent.messages)
+
+
+@pytest.mark.asyncio
+async def test_graceful_exit_on_rate_limit_during_plan_update():
+    """
+    Ensure the agent exits gracefully when rate limit is hit during plan update.
+    This forces the _update_plan() path to raise RetryError.
+    """
+    with patch('kodeagent.kutils.call_llm') as mock_call_llm:
+        # Keep call order simple: create_plan -> think -> act
+        mock_call_llm.side_effect = [
+            # Initial plan creation: make planner.plan truthy
+            '{"steps": [{"description": "Step 1", "is_done": false}]}',
+            # Think
+            'Thinking about Step 1.',
+            # Act
+            'Acting on Step 1 now.',
+        ]
+
+        agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[], max_iterations=1)
+
+        # Force _update_plan to raise RetryError so we hit the plan-update error branch
+        with patch.object(agent, '_update_plan', side_effect=RetryError(last_attempt=MagicMock())):
+            responses = []
+            try:
+                async for response in agent.run('Simple task'):
+                    responses.append(response)
+            except Exception as e:
+                pytest.fail(f'Agent raised an exception instead of exiting gracefully: {e}')
+
+    # Verify final response is the plan-update error
+    final_response = next((r for r in responses if r['type'] == 'final'), None)
+    assert final_response is not None, 'No final response found'
+    assert final_response['metadata']['final_answer_found'] is False
+    assert final_response['metadata'].get('is_error') is True
+    assert final_response['value'] == 'Rate limit exceeded during plan update. Unable to proceed.'
+
+
+class EmptyAsyncIter:
+    """An async iterator that yields nothing."""
+    def __aiter__(self): return self
+    async def __anext__(self): raise StopAsyncIteration
+
+
+@pytest.mark.asyncio
+async def test_observer_returns_none_on_retryerror():
+    """
+    Ensure that when observer.observe raises RetryError,
+    correction_msg is set to None and no observer response is yielded.
+    """
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[], max_iterations=3)
+
+    # Make planner.plan truthy so plan update path runs
+    agent.planner.plan = True
+    agent.planner.get_formatted_plan = lambda: 'Step 1'
+    agent._update_plan = AsyncMock(return_value=None)
+
+    # Patch _think and _act to yield nothing
+    agent._think = lambda: EmptyAsyncIter()
+    agent._act = lambda: EmptyAsyncIter()
+
+    # Force observer.observe to raise RetryError
+    agent.observer.observe = AsyncMock(side_effect=RetryError(last_attempt=MagicMock()))
+
+    responses = []
+    async for response in agent.run('Task with observer failure'):
+        responses.append(response)
+
+    # Verify no observer channel response exists
+    assert all(r.get('channel') != 'observer' for r in responses)

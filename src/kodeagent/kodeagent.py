@@ -411,12 +411,25 @@ class Agent(ABC):
             files: Optional files for the task.
             task_id: Optional task ID.
         """
+        self._cleanup()
         self.task = Task(description=description, files=files)
         if task_id:
             self.task.id = task_id
+
+    def _cleanup(self):
+        """
+        Clean up resources after task execution.
+
+        Called automatically via try/finally in run().
+        Resets state so the agent is ready for the next task.
+        """
+        self.task = None
         self.final_answer_found = False
+        self.msg_idx_of_new_task = 0
+
         if self.planner:
             self.planner.plan = None
+
         self.observer.reset()
 
     @abstractmethod
@@ -699,11 +712,15 @@ class ReActAgent(Agent):
             task: A task to be solved by the agent.
             files: An optional list of files related to the task.
             task_id: Optional task ID.
-            summarize_progress_on_failure: Whether to summarize the progress if the agent fails
-             to successfully solve the task in max iterations.
+            summarize_progress_on_failure: Whether to summarize progress if
+             the agent fails to solve the task in max iterations.
 
         Returns:
             Step updates on the task and the final response.
+
+        Raises:
+            ValueError: If task is empty or too many files provided.
+            RetryError: If LLM calls fail after max retries.
         """
         if not task or not task.strip():
             raise ValueError('Task description cannot be empty!')
@@ -711,82 +728,71 @@ class ReActAgent(Agent):
             raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
 
         self._run_init(task, files, task_id)
-        self.init_history()            
-
-        yield self.response(
-            rtype='log',
-            value=f'Solving task: `{self.task.description}`',
-            channel='run'
-        )
+        self.init_history()
 
         try:
-            await self.planner.create_plan(self.task, self.__class__.__name__)
-        except RetryError:
-            logger.warning('Max retries reached during plan creation.')
-            error_msg = (
-                'Unable to start solving the task: Rate limit exceeded while creating '
-                'the initial plan. Please try again later.'
-            )
-            self.add_to_history(ChatMessage(role='assistant', content=error_msg))
             yield self.response(
-                rtype='final',
-                value=error_msg,
-                channel='run',
-                metadata={'final_answer_found': False, 'is_error': True}
+                rtype='log',
+                value=f'Solving task: `{self.task.description}`',
+                channel='run'
             )
-            return
-
-        yield self.response(
-            rtype='log', value=f'Plan:\n{self.planner.get_formatted_plan()}', channel='run'
-        )
-
-        self.add_to_history(
-            ChatMessage(
-                role='user',
-                content=f'New Task:\n{self.task.description}',
-                files=self.task.files
-            )
-        )
-        self.add_to_history(
-            ChatMessage(role='user', content=f'Plan:\n{self.planner.get_formatted_plan()}')
-        )
-
-        idx = 0
-        for idx in range(self.max_iterations):
-            yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
 
             try:
-                async for update in self._think():
-                    yield update
-                async for update in self._act():
-                    yield update
-            except RetryError as e:
-                logger.warning('Max retries reached for LLM call: %s', e)
-                error_msg = 'Rate limit exceeded. Unable to proceed.'
-                
+                await self.planner.create_plan(self.task, self.__class__.__name__)
+            except RetryError:
+                logger.warning('Max retries reached during plan creation.')
+                error_msg = (
+                    'Unable to start solving the task: Rate limit exceeded while '
+                    'creating the initial plan. Please try again later.'
+                )
                 self.add_to_history(ChatMessage(role='assistant', content=error_msg))
                 yield self.response(
                     rtype='final',
                     value=error_msg,
                     channel='run',
-                    metadata={'final_answer_found': False, 'is_error': True}
+                    metadata={
+                        'final_answer_found': False,
+                        'is_error': True
+                    }
                 )
                 return
 
-            if self.final_answer_found:
-                break
+            yield self.response(
+                rtype='log',
+                value=f'Plan:\n{self.planner.get_formatted_plan()}',
+                channel='run'
+            )
 
-            plan_before_update = None
-            if self.planner.plan:
-                plan_before_update = self.current_plan
+            self.add_to_history(
+                ChatMessage(
+                    role='user',
+                    content=f'New Task:\n{self.task.description}',
+                    files=self.task.files
+                )
+            )
+            self.add_to_history(
+                ChatMessage(role='user', content=f'Plan:\n{self.planner.get_formatted_plan()}')
+            )
+
+            idx = 0
+            for idx in range(self.max_iterations):
+                yield self.response(
+                    rtype='log',
+                    channel='run',
+                    value=f'* Executing step {idx + 1}'
+                )
+
                 try:
-                    await self._update_plan()
-                except RetryError:
-                     # If plan update fails, just log and continue (or better, stop?)
-                     # If the main loop continues, it might hit rate limits again.
-                     # Safest to stop here too.
-                    logger.warning('Max retries reached during plan update.')
-                    error_msg = 'Rate limit exceeded during planning. Unable to proceed.'
+                    async for update in self._think():
+                        yield update
+                    async for update in self._act():
+                        yield update
+                except asyncio.CancelledError:
+                    logger.info('Task cancelled by consumer')
+                    raise
+                except RetryError as e:
+                    logger.warning('Max retries reached for LLM call: %s', e)
+                    error_msg = 'Rate limit exceeded. Unable to proceed.'
                     self.add_to_history(ChatMessage(role='assistant', content=error_msg))
                     yield self.response(
                         rtype='final',
@@ -796,65 +802,98 @@ class ReActAgent(Agent):
                     )
                     return
 
-                self.add_to_history(
-                    ChatMessage(
-                        role='user',
-                        content=f'Plan progress:\n{self.planner.get_formatted_plan()}'
+                if self.final_answer_found:
+                    break
+
+                plan_before_update = None
+                if self.planner.plan:
+                    plan_before_update = self.current_plan
+                    try:
+                        await self._update_plan()
+                    except RetryError:
+                        logger.warning('Max retries reached during plan update.')
+                        error_msg = 'Rate limit exceeded during plan update. Unable to proceed.'
+                        self.add_to_history(ChatMessage(role='assistant', content=error_msg))
+                        yield self.response(
+                            rtype='final',
+                            value=error_msg,
+                            channel='run',
+                            metadata={'final_answer_found': False, 'is_error': True}
+                        )
+                        return
+
+                    self.add_to_history(
+                        ChatMessage(
+                            role='user',
+                            content=(
+                                f'Plan progress:\n{self.planner.get_formatted_plan()}'
+                            )
+                        )
                     )
-                )
 
-            try:
-                correction_msg = await self.observer.observe(
-                    task=self.task,
-                    history='\n'.join([str(msg) for msg in self.messages]),
-                    plan_before=plan_before_update,
-                    plan_after=self.current_plan,
-                    iteration=idx + 1
-                )
-            except RetryError:
-                # Observer failure is non-critical, can potentially continue or just skip observation
-                logger.warning('Observer failed due to rate limit. Skipping observation.')
-                correction_msg = None
-
-            if correction_msg:
-                self.add_to_history(
-                    ChatMessage(role='user', content=f'Observation: {correction_msg}')
-                )
-                yield self.response(rtype='log', value=correction_msg, channel='observer')
-
-        if not self.final_answer_found:
-            failure_msg = f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
-
-            if summarize_progress_on_failure:
                 try:
-                    progress_summary = await self.salvage_response()
-                    failure_msg += (
-                        f'\n\nHere\'s a summary of my progress for this task:\n{progress_summary}'
+                    correction_msg = await self.observer.observe(
+                        task=self.task,
+                        history='\n'.join([str(msg) for msg in self.messages]),
+                        plan_before=plan_before_update,
+                        plan_after=self.current_plan,
+                        iteration=idx + 1
                     )
                 except RetryError:
-                    logger.warning(
-                        'Failed to salvage response due to rate limit. '
-                        'Skipping progress summary.'
-                    )
-                    # Continue without the summary
+                    logger.warning('Observer failed due to rate limit. Skipping observation.')
+                    correction_msg = None
 
-            yield self.response(
-                rtype='final',
-                value=failure_msg,
-                channel='run',
-                metadata={'final_answer_found': False}
+                if correction_msg:
+                    self.add_to_history(
+                        ChatMessage(role='user', content=f'Observation: {correction_msg}')
+                    )
+                    yield self.response(rtype='log', value=correction_msg, channel='observer')
+
+            # Loop iteration over
+            if not self.final_answer_found:
+                failure_msg = (
+                    f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
+                )
+
+                if summarize_progress_on_failure:
+                    try:
+                        progress_summary = await self.salvage_response()
+                        failure_msg += (
+                            f'\n\nHere\'s a summary of progress for the task:\n{progress_summary}'
+                        )
+                    except RetryError:
+                        logger.warning(
+                            'Failed to salvage response due to rate limit.'
+                            ' Skipping progress summary.'
+                        )
+
+                yield self.response(
+                    rtype='final',
+                    value=failure_msg,
+                    channel='run',
+                    metadata={'final_answer_found': False}
+                )
+
+                self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
+            else:
+                if self.planner.plan:
+                    try:
+                        await self._update_plan()
+                    except RetryError:
+                        logger.warning(
+                            'Failed to update plan on final iteration due to '
+                            'rate limit. Skipping final plan update.'
+                        )
+
+        except asyncio.CancelledError:
+            logger.warning('Iteration cancelled; cleaning up pending resources')
+            raise
+        finally:
+            logger.debug(
+                'Cleaning up after task: %s',f'{self.task.id if self.task else "unknown"}'
             )
-
-            self.add_to_history(ChatMessage(role='assistant', content=failure_msg))
-        else:
-            if self.planner.plan:
-                try:
-                    await self._update_plan()
-                except RetryError:
-                    logger.warning(
-                        'Failed to update plan on final iteration due to rate limit. '
-                        'Skipping final plan update.'
-                    )
+            self._cleanup()
+            logger.debug('Agent cleanup completed')
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think about the next step using the new structured response format."""
@@ -1180,13 +1219,11 @@ class ReActAgent(Agent):
             # This is a tool call
             if action == 'FINISH':
                 raise ValueError(
-                    f"Action is 'FINISH' but no Answer field found. "
-                    f"Text: {text[:200]}..."
+                    f"Action is 'FINISH' but no Answer field found. Text: {text[:200]}..."
                 )
             if not args:
                 raise ValueError(
-                    f"Action '{action}' specified but no valid Args found. "
-                    f"Text: {text[:200]}..."
+                    f"Action '{action}' specified but no valid Args found. Text: {text[:200]}..."
                 )
             return ReActChatMessage(
                 role='assistant',
