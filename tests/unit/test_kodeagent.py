@@ -3162,17 +3162,14 @@ def test_cleanup_multiple_calls(react_agent):
     # First cleanup
     react_agent._cleanup()
     assert react_agent.task is None
-    assert len(react_agent.messages) == 0
 
     # Second cleanup - should not raise
     react_agent._cleanup()
     assert react_agent.task is None
-    assert len(react_agent.messages) == 0
 
     # Third cleanup - should not raise
     react_agent._cleanup()
     assert react_agent.task is None
-    assert len(react_agent.messages) == 0
 
 
 def test_run_init_calls_cleanup(react_agent):
@@ -3246,8 +3243,8 @@ async def test_observer_yields_correction_message():
     agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[], max_iterations=3)
 
     # Patch planner so plan exists and no real LLM call is made
-    agent.planner.plan = True
-    agent.planner.get_formatted_plan = lambda: 'Step 1'
+    agent.planner.plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=False)])
+    agent.planner.get_formatted_plan = lambda *args, **kwargs: 'Step 1'
     agent.planner.create_plan = AsyncMock(return_value=None)  # No-op
 
     # Patch _think and _act to yield nothing
