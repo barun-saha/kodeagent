@@ -798,10 +798,7 @@ class ReActAgent(Agent):
                         rtype='final',
                         value=error_msg,
                         channel='run',
-                        metadata={
-                            'final_answer_found': False,
-                            'is_error': True
-                        }
+                        metadata={'final_answer_found': False, 'is_error': True}
                     )
                     return
 
@@ -815,7 +812,7 @@ class ReActAgent(Agent):
                         await self._update_plan()
                     except RetryError:
                         logger.warning('Max retries reached during plan update.')
-                        error_msg = 'Rate limit exceeded during planning. Unable to proceed.'
+                        error_msg = 'Rate limit exceeded during plan update. Unable to proceed.'
                         self.add_to_history(ChatMessage(role='assistant', content=error_msg))
                         yield self.response(
                             rtype='final',
@@ -852,6 +849,7 @@ class ReActAgent(Agent):
                     )
                     yield self.response(rtype='log', value=correction_msg, channel='observer')
 
+            # Loop iteration over
             if not self.final_answer_found:
                 failure_msg = (
                     f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
@@ -1221,13 +1219,11 @@ class ReActAgent(Agent):
             # This is a tool call
             if action == 'FINISH':
                 raise ValueError(
-                    f"Action is 'FINISH' but no Answer field found. "
-                    f"Text: {text[:200]}..."
+                    f"Action is 'FINISH' but no Answer field found. Text: {text[:200]}..."
                 )
             if not args:
                 raise ValueError(
-                    f"Action '{action}' specified but no valid Args found. "
-                    f"Text: {text[:200]}..."
+                    f"Action '{action}' specified but no valid Args found. Text: {text[:200]}..."
                 )
             return ReActChatMessage(
                 role='assistant',
