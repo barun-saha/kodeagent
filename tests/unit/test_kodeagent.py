@@ -1,6 +1,7 @@
 """
 Unit tests for the agents and their operations.
 """
+import asyncio
 import datetime
 from typing import Optional, AsyncIterator
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -3190,3 +3191,85 @@ def test_run_init_calls_cleanup(react_agent):
     # Verify old state was cleaned up
     assert react_agent.task.description == 'Task 2'
     assert react_agent.msg_idx_of_new_task == 0
+
+
+class CancelledAsyncIter:
+    """Async iterator that raises CancelledError on next()."""
+    def __aiter__(self):
+        """The __aiter__ method is called to return the asynchronous iterator object itself."""
+        return self
+    async def __anext__(self):
+        """This is called to retrieve the next item from the asynchronous iterator."""
+        # Simulate cancellation during iteration
+        raise asyncio.CancelledError()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_error_in_run_loop():
+    """
+    Ensure the agent raises asyncio.CancelledError when cancelled inside the loop.
+    We trigger it during _think() iteration.
+    """
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[], max_iterations=1)
+
+    # Avoid real LLM calls during plan creation
+    agent.planner.create_plan = AsyncMock(return_value=None)
+
+    # Provide a dummy formatted plan to satisfy logging (optional)
+    agent.planner.get_formatted_plan = lambda: "Step 1\nStep 2"
+
+    # Make planner.plan truthy/falsey as needed; cancellation happens before plan update,
+    # so this value is irrelevant. We'll keep it falsy to skip plan update paths.
+    agent.planner.plan = None
+
+    # Patch _think to return an async iterator that raises CancelledError
+    agent._think = lambda: CancelledAsyncIter()
+
+    # _act won't be reached, but define it as a benign empty iterator for completeness
+    class EmptyAsyncIter:
+        def __aiter__(self): return self
+        async def __anext__(self): raise StopAsyncIteration
+    agent._act = lambda: EmptyAsyncIter()
+
+    # Run and assert that CancelledError propagates from the loop's except block
+    with pytest.raises(asyncio.CancelledError):
+        async for _ in agent.run("Simple task"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_observer_yields_correction_message():
+    """
+    Ensure that when observer.observe returns a correction message,
+    the agent adds it to history and yields an observer log response.
+    """
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[], max_iterations=3)
+
+    # Patch planner so plan exists
+    agent.planner.plan = True
+    agent.planner.get_formatted_plan = lambda: "Step 1"
+
+    # Patch _think and _act to yield nothing
+    class EmptyAsyncIter:
+        def __aiter__(self): return self
+        async def __anext__(self): raise StopAsyncIteration
+    agent._think = lambda: EmptyAsyncIter()
+    agent._act = lambda: EmptyAsyncIter()
+
+    # Patch _update_plan to succeed
+    agent._update_plan = AsyncMock(return_value=None)
+
+    # Patch observer.observe to return a correction message
+    agent.observer.observe = AsyncMock(return_value="Please adjust step 1")
+
+    responses = []
+    async for response in agent.run("Task with observer correction"):
+        responses.append(response)
+
+    # Verify an observer channel response exists with the correction message
+    observer_response = next((r for r in responses if r.get("channel") == "observer"), None)
+    assert observer_response is not None
+    assert "Please adjust step 1" in observer_response["value"]
+
+    # Verify history contains the observation message
+    assert any("Observation: Please adjust step 1" in str(msg) for msg in agent.messages)
