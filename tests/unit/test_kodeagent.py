@@ -3245,9 +3245,10 @@ async def test_observer_yields_correction_message():
     """
     agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[], max_iterations=3)
 
-    # Patch planner so plan exists
+    # Patch planner so plan exists and no real LLM call is made
     agent.planner.plan = True
-    agent.planner.get_formatted_plan = lambda: "Step 1"
+    agent.planner.get_formatted_plan = lambda: 'Step 1'
+    agent.planner.create_plan = AsyncMock(return_value=None)  # No-op
 
     # Patch _think and _act to yield nothing
     class EmptyAsyncIter:
@@ -3260,16 +3261,16 @@ async def test_observer_yields_correction_message():
     agent._update_plan = AsyncMock(return_value=None)
 
     # Patch observer.observe to return a correction message
-    agent.observer.observe = AsyncMock(return_value="Please adjust step 1")
+    agent.observer.observe = AsyncMock(return_value='Please adjust step 1')
 
     responses = []
-    async for response in agent.run("Task with observer correction"):
+    async for response in agent.run('Task with observer correction'):
         responses.append(response)
 
     # Verify an observer channel response exists with the correction message
-    observer_response = next((r for r in responses if r.get("channel") == "observer"), None)
+    observer_response = next((r for r in responses if r.get('channel') == 'observer'), None)
     assert observer_response is not None
-    assert "Please adjust step 1" in observer_response["value"]
+    assert 'Please adjust step 1' in observer_response['value']
 
     # Verify history contains the observation message
-    assert any("Observation: Please adjust step 1" in str(msg) for msg in agent.messages)
+    assert any('Observation: Please adjust step 1' in str(msg) for msg in agent.messages)
