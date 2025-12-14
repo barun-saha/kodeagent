@@ -3271,3 +3271,188 @@ async def test_observer_yields_correction_message():
 
     # Verify history contains the observation message
     assert any('Observation: Please adjust step 1' in str(msg) for msg in agent.messages)
+
+# ============================================================================
+# NEW INCREMENTAL HISTORY TESTS
+# ============================================================================
+
+def test_incremental_history_react_agent():
+    """Test incremental history logic for ReActAgent from start to finish."""
+    agent = ReActAgent(name="test", model_name="gpt-4o", tools=[])
+    
+    # 0. Initial state (system prompt)
+    agent.init_history()
+    assert len(agent.messages) == 1
+    assert agent._history_processed_idx == -1
+    
+    # 1. First call - should process system prompt
+    h1 = agent.formatted_history_for_llm()
+    assert len(h1) == 1
+    assert h1[0]['role'] == 'system'
+    assert agent._history_processed_idx == 0
+    assert len(agent._formatted_history_cache) == 1
+    
+    # 2. Add user message
+    agent.add_to_history(ChatMessage(role='user', content='Hello'))
+    h2 = agent.formatted_history_for_llm()
+    assert len(h2) == 2
+    assert agent._history_processed_idx == 1
+    assert h2[1]['role'] == 'user'
+    
+    # 3. Add another user message (should merge content)
+    agent.add_to_history(ChatMessage(role='user', content='World'))
+    h3 = agent.formatted_history_for_llm()
+    assert len(h3) == 2 # Still 2 messages due to merge
+    assert agent._history_processed_idx == 2
+    content = h3[1]['content']
+    # Verify merge structure
+    assert isinstance(content, list)
+    assert len(content) == 2
+    assert content[0]['text'] == 'Hello'
+    assert content[1]['text'] == 'World'
+    
+    # 4. Add assistant thought/action (tool call)
+    msg = ReActChatMessage(
+        role='assistant',
+        thought='Thinking',
+        action='test_tool',
+        args='{}',
+        task_successful=False,
+        final_answer=None
+    )
+    agent.add_to_history(msg)
+    h4 = agent.formatted_history_for_llm()
+    # Expected: System, User(merged), Assistant(Action), PendingPlaceholder
+    assert len(h4) == 4
+    assert agent._history_processed_idx == 3
+    assert agent._pending_tool_call is True
+    assert agent._last_tool_call_id is not None
+    
+    # Verify structure of assistant message
+    asst_msg = h4[2]
+    assert asst_msg['tool_calls'][0]['function']['name'] == 'test_tool'
+    assert asst_msg['tool_calls'][0]['id'] == agent._last_tool_call_id
+    
+    # Verify placeholder
+    placeholder = h4[3]
+    assert placeholder['role'] == 'tool'
+    assert placeholder['tool_call_id'] == agent._last_tool_call_id
+    assert 'Error' in placeholder['content']
+    
+    # 5. Add tool response
+    agent.add_to_history(ChatMessage(role='tool', content='Success'))
+    h5 = agent.formatted_history_for_llm()
+    # Expected: System, User(merged), Assistant(Action), ToolResponse
+    assert len(h5) == 4
+    assert agent._history_processed_idx == 4
+    assert agent._pending_tool_call is False
+    assert agent._last_tool_call_id is None
+    
+    # Verify tool response
+    tool_msg = h5[3]
+    assert tool_msg['role'] == 'tool'
+    assert tool_msg['content'] == 'Success'
+    assert 'tool_call_id' in tool_msg # Should have ID attached
+    
+    # 6. Add final answer
+    final_msg = ReActChatMessage(
+        role='assistant',
+        thought='Done',
+        action='FINISH',
+        final_answer='42',
+        task_successful=True
+    )
+    agent.add_to_history(final_msg)
+    h6 = agent.formatted_history_for_llm()
+    assert len(h6) == 5
+    assert h6[4]['content'] == '42'
+
+
+def test_incremental_history_codeact_agent():
+    """Test incremental history logic for CodeActAgent."""
+    agent = CodeActAgent(name="test", model_name="gpt-4o", run_env="host", allowed_imports=[])
+    
+    # 0. Init
+    agent.init_history()
+    assert len(agent.messages) == 1
+    
+    # 1. Process System
+    h1 = agent.formatted_history_for_llm()
+    assert len(h1) == 1
+    
+    # 2. Add User
+    agent.add_to_history(ChatMessage(role='user', content='Run code'))
+    agent.formatted_history_for_llm()
+    
+    # 3. Add Code Action
+    msg = CodeActChatMessage(
+        role='assistant',
+        thought='Coding',
+        code='print("hi")',
+        task_successful=False,
+        final_answer=None
+    )
+    agent.add_to_history(msg)
+    h3 = agent.formatted_history_for_llm()
+    
+    # Note: CodeActAgent doesn't use pending placeholder logic in the same way 
+    # because it doesn't have the same strict tool-call/response pairing requirement 
+    # visible in the loop structure (it yields steps differently), BUT 
+    # the formatted_history_for_llm logic DOES NOT implement the placeholder logic 
+    # for CodeActAgent in the provided code (it was just `pass` in `if pending...`).
+    # Wait, let me check the implementation I wrote.
+    # checking `formatted_history_for_llm` in CodeActAgent...
+    # I did NOT add the placeholder logic block at the end of CodeActAgent.
+    # So we expect NO placeholder.
+    
+    assert len(h3) == 3 # System, User, Assistant
+    code_msg = h3[2]
+    assert code_msg['tool_calls'][0]['function']['name'] == 'code_execution'
+    
+    # 4. Add Tool Output
+    agent.add_to_history(ChatMessage(role='tool', content='hi'))
+    h4 = agent.formatted_history_for_llm()
+    assert len(h4) == 4
+    assert h4[3]['role'] == 'tool'
+    assert 'tool_call_id' in h4[3]
+
+
+def test_incremental_history_reset_logic():
+    """Test that history cache is correctly reset on clear/init."""
+    agent = ReActAgent(name="test", model_name="gpt-4o", tools=[])
+    agent.init_history()
+    agent.formatted_history_for_llm()
+    
+    # Modify state
+    agent.add_to_history(ChatMessage(role='user', content='test'))
+    agent.formatted_history_for_llm()
+    assert agent._history_processed_idx == 1
+    assert len(agent._formatted_history_cache) == 2
+    
+    # Clear
+    agent.clear_history()
+    assert agent._history_processed_idx == -1
+    assert len(agent._formatted_history_cache) == 0
+    assert len(agent.messages) == 0
+    
+    # Init again
+    agent.init_history()
+    result = agent.formatted_history_for_llm()
+    assert result
+    assert len(result) == 1
+
+
+def test_incremental_history_no_new_messages():
+    """Test behavior when called multiple times with no new messages."""
+    agent = ReActAgent(name="test", model_name="gpt-4o", tools=[])
+    agent.init_history()
+    
+    # First call
+    h1 = agent.formatted_history_for_llm()
+    
+    # Second call - no changes
+    h2 = agent.formatted_history_for_llm()
+    
+    assert h1 == h2
+    assert h1 is not h2 # Should be a copy (list constructor used)
+
