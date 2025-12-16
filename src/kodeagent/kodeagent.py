@@ -345,6 +345,10 @@ class Agent(ABC):
         self._last_tool_call_id: Optional[str] = None
         self._pending_tool_call: bool = False
         
+        # Cache for observer history (accumulated string)
+        self._observer_history_str: str = ''
+        self._observer_history_idx: int = -1
+        
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
         self.planner: Optional[Planner] = Planner(
@@ -437,6 +441,8 @@ class Agent(ABC):
         if self.planner:
             self.planner.plan = None
 
+        self._observer_history_str = ''
+        self._observer_history_idx = -1
         self.observer.reset()
 
     @abstractmethod
@@ -597,6 +603,47 @@ class Agent(ABC):
 
         return description
 
+    def _get_observer_history(self) -> str:
+        """
+        Get the history string specifically optimized for the Observer.
+        
+        Optimization strategy:
+        1. Maintain an incremental string buffer to avoid O(N) list join operations.
+        2. exclude system prompt (Observer knows the task context separately).
+        3. Truncate long tool outputs to 1000 chars to save tokens.
+        """
+        # Start from the next index
+        start_idx = self._observer_history_idx + 1
+
+        # If there are new messages, process them
+        if start_idx < len(self.messages):
+            new_msgs = self.messages[start_idx:]
+            new_segments = []
+            
+            for msg in new_msgs:
+                # Skip system messages
+                if msg.role == 'system':
+                    continue
+                
+                content = str(msg)
+                
+                # Truncate content for tool messages or large outputs if needed
+                if len(content) > 1000:
+                    content = content[:1000] + '... [TRUNCATED]'
+                
+                new_segments.append(f'[{msg.role}]: {content}')
+            
+            if new_segments:
+                new_block = '\n'.join(new_segments)
+                if self._observer_history_str:
+                    self._observer_history_str += '\n' + new_block
+                else:
+                    self._observer_history_str = new_block
+            
+            self._observer_history_idx = len(self.messages) - 1
+
+        return self._observer_history_str
+
     def get_history(self, start_idx: int = 0, truncate_text: bool = False) -> str:
         """
         Get a formatted string representation of all the messages.
@@ -620,6 +667,8 @@ class Agent(ABC):
         self._history_processed_idx = -1
         self._last_tool_call_id = None
         self._pending_tool_call = False
+        self._observer_history_str = ''
+        self._observer_history_idx = -1
 
     def init_history(self):
         """Initialize the agent's message history, e.g., with a system prompt."""
@@ -849,7 +898,7 @@ class ReActAgent(Agent):
                 try:
                     correction_msg = await self.observer.observe(
                         task=self.task,
-                        history='\n'.join([str(msg) for msg in self.messages]),
+                        history=self._get_observer_history(),
                         plan_before=plan_before_update,
                         plan_after=self.current_plan,
                         iteration=idx + 1
