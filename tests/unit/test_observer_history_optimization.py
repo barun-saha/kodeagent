@@ -12,11 +12,11 @@ class TestObserverOptimization:
     def agent(self):
         # Create a simple agent for testing
         return ReActAgent(
-            name="TestAgent",
-            model_name="test-model",
+            name='TestAgent',
+            model_name='test-model',
             tools=[],
-            description="A test agent",
-            system_prompt="You are a helpful assistant."
+            description='A test agent',
+            system_prompt='You are a helpful assistant.'
         )
 
     def test_exclude_system_prompt(self, agent):
@@ -37,15 +37,15 @@ class TestObserverOptimization:
         agent.add_to_history(ChatMessage(role='user', content="Hello"))
         
         history = agent._get_observer_history()
-        assert "[user]: Hello" in history
-        assert "You are a helpful assistant" not in history
+        assert '[user]: Hello' in history
+        assert 'You are a helpful assistant' not in history
 
     def test_truncate_long_tool_output(self, agent):
         """Test that detailed tool outputs are truncated."""
         agent.init_history()
         
         # Create a huge tool output
-        huge_text = "Data " * 300  # 300 * 5 = 1500 chars
+        huge_text = 'Data ' * 300  # 300 * 5 = 1500 chars
         assert len(huge_text) > 1000
         
         agent.add_to_history(ChatMessage(role='tool', content=huge_text))
@@ -53,7 +53,7 @@ class TestObserverOptimization:
         history = agent._get_observer_history()
         
         # Verify truncation marker
-        assert "... [TRUNCATED]" in history
+        assert '... [TRUNCATED]' in history
         # Verify length constraint (roughly 1000 + formatting overhead)
         assert len(history) < 1100
 
@@ -67,31 +67,31 @@ class TestObserverOptimization:
         
         history1 = agent._get_observer_history()
         assert agent._observer_history_idx == 1
-        assert agent._observer_history_str == "[user]: Step 1"
-        assert history1 == "[user]: Step 1"
+        assert agent._observer_history_str == '[user]: Step 1'
+        assert history1 == '[user]: Step 1'
         
         # Add second message
-        msg2 = ChatMessage(role='assistant', content="I am thinking...")
+        msg2 = ChatMessage(role='assistant', content='I am thinking...')
         agent.add_to_history(msg2)
         
-        history2 = agent._get_observer_history()
+        agent._get_observer_history()
         assert agent._observer_history_idx == 2
         
         # Check that history contains both steps
-        assert "[user]: Step 1" in agent._observer_history_str
-        assert "I am thinking..." in agent._observer_history_str
-        assert agent._observer_history_str == "[user]: Step 1\n[assistant]: I am thinking..."
+        assert '[user]: Step 1' in agent._observer_history_str
+        assert 'I am thinking...' in agent._observer_history_str
+        assert agent._observer_history_str == '[user]: Step 1\n[assistant]: I am thinking...'
 
     def test_observer_history_consistency(self, agent):
         """Verify the content matches expected string format."""
         agent.init_history()
-        agent.add_to_history(ChatMessage(role='user', content="User request"))
+        agent.add_to_history(ChatMessage(role='user', content='User request'))
         
         # Mocking a ReAct-style message behavior by string manual check
         # Since we use valid ChatMessage objects, str(msg) is reliable
         
         history = agent._get_observer_history()
-        expected = "[user]: User request"
+        expected = '[user]: User request'
         assert history == expected
         
         # Verify formatting matches standard string
