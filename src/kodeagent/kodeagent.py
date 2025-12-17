@@ -60,8 +60,11 @@ logger = ku.get_logger()
 
 REACT_SYSTEM_PROMPT = ku.read_prompt('system/react.txt')
 CODE_ACT_SYSTEM_PROMPT = ku.read_prompt('system/codeact.txt')
+PLANNER_SYSTEM_PROMPT = ku.read_prompt('system/planner.txt')
+PLAN_UPDATER_SYSTEM_PROMPT = ku.read_prompt('system/plan_updater.txt')
 AGENT_PLAN_PROMPT = ku.read_prompt('agent_plan.txt')
 UPDATE_PLAN_PROMPT = ku.read_prompt('update_plan.txt')
+OBSERVER_SYSTEM_PROMPT = ku.read_prompt('system/observer.txt')
 OBSERVATION_PROMPT = ku.read_prompt('observation.txt')
 SALVAGE_RESPONSE_PROMPT = ku.read_prompt('salvage_response.txt')
 RELEVANT_TOOLS_PROMPT = ku.read_prompt('relevant_tools.txt')
@@ -121,6 +124,10 @@ class Planner:
             ),
             files=task.files,
         )
+        messages = [
+            {'role': 'system', 'content': PLANNER_SYSTEM_PROMPT},
+            *messages
+        ]
         plan_response = await ku.call_llm(
             model_name=self.model_name,
             litellm_params=self.litellm_params,
@@ -149,10 +156,14 @@ class Planner:
             thought=thought,
             observation=observation
         )
+        messages = [
+            {'role': 'system', 'content': PLAN_UPDATER_SYSTEM_PROMPT},
+            {'role': 'user', 'content': prompt}
+        ]
         plan_response = await ku.call_llm(
             model_name=self.model_name,
             litellm_params=self.litellm_params,
-            messages=ku.make_user_message(prompt),
+            messages=messages,
             response_format=AgentPlan,
             trace_id=task_id,
             max_retries=self.max_retries
@@ -257,7 +268,10 @@ class Observer:
             observation_response = await ku.call_llm(
                 model_name=self.model_name,
                 litellm_params=self.litellm_params,
-                messages=[{'role': 'user', 'content': prompt}],
+                messages=[
+                    {'role': 'system', 'content': OBSERVER_SYSTEM_PROMPT},
+                    {'role': 'user', 'content': prompt}
+                ],
                 max_retries=self.max_retries,
                 response_format=ObserverResponse,
             )

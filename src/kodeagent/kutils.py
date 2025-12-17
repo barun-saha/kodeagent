@@ -44,7 +44,7 @@ LOGGERS_TO_SUPPRESS = [
 
 for _lg in LOGGERS_TO_SUPPRESS:
     logger_obj = logging.getLogger(_lg)
-    logger_obj.setLevel(logging.WARNING)
+    logger_obj.setLevel(logging.ERROR)
     # Prevent these logs from propagating to the root logger
     logger_obj.propagate = False
 
