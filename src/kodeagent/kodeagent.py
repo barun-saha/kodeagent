@@ -441,9 +441,7 @@ class Agent(ABC):
         if self.planner:
             self.planner.plan = None
 
-        self._observer_history_str = ''
-        self._observer_history_idx = -1
-        self.observer.reset()
+        self._reset_observer()
 
     @abstractmethod
     def parse_text_response(self, text: str) -> ChatMessage:
@@ -610,7 +608,7 @@ class Agent(ABC):
         Optimization strategy:
         1. Maintain an incremental string buffer to avoid O(N) list join operations.
         2. exclude system prompt (Observer knows the task context separately).
-        3. Truncate long tool outputs to 1000 chars to save tokens.
+        3. Truncate long message content to 1000 chars to save tokens.
         """
         # Start from the next index
         start_idx = self._observer_history_idx + 1
@@ -627,7 +625,7 @@ class Agent(ABC):
                 
                 content = str(msg)
                 
-                # Truncate content for tool messages or large outputs if needed
+                # Truncate any message content exceeding 1000 chars
                 if len(content) > 1000:
                     content = content[:1000] + '... [TRUNCATED]'
                 
@@ -660,6 +658,14 @@ class Agent(ABC):
             messages.append(f'[{msg.role}]: {content}')
         return '\n'.join(messages)
 
+    def _reset_observer(self):
+        """
+        Reset the observer's internal state.
+        """
+        self._observer_history_str = ''
+        self._observer_history_idx = -1
+        self.observer.reset()
+
     def clear_history(self):
         """Clear the agent's message history."""
         self.messages = []
@@ -667,12 +673,11 @@ class Agent(ABC):
         self._history_processed_idx = -1
         self._last_tool_call_id = None
         self._pending_tool_call = False
-        self._observer_history_str = ''
-        self._observer_history_idx = -1
 
     def init_history(self):
         """Initialize the agent's message history, e.g., with a system prompt."""
         self.clear_history()
+        self._reset_observer()
 
 
 class ReActAgent(Agent):
@@ -761,6 +766,7 @@ class ReActAgent(Agent):
         self._history_processed_idx = -1
         self._last_tool_call_id = None
         self._pending_tool_call = False
+        self._reset_observer()
 
     async def run(
             self,
@@ -1665,6 +1671,7 @@ class CodeActAgent(ReActAgent):
         self._history_processed_idx = -1
         self._last_tool_call_id = None
         self._pending_tool_call = False
+        self._reset_observer()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think step for CodeAct agent."""
