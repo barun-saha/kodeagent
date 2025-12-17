@@ -62,6 +62,7 @@ REACT_SYSTEM_PROMPT = ku.read_prompt('system/react.txt')
 CODE_ACT_SYSTEM_PROMPT = ku.read_prompt('system/codeact.txt')
 AGENT_PLAN_PROMPT = ku.read_prompt('agent_plan.txt')
 UPDATE_PLAN_PROMPT = ku.read_prompt('update_plan.txt')
+OBSERVER_SYSTEM_PROMPT = ku.read_prompt('system/observer.txt')
 OBSERVATION_PROMPT = ku.read_prompt('observation.txt')
 SALVAGE_RESPONSE_PROMPT = ku.read_prompt('salvage_response.txt')
 RELEVANT_TOOLS_PROMPT = ku.read_prompt('relevant_tools.txt')
@@ -257,7 +258,10 @@ class Observer:
             observation_response = await ku.call_llm(
                 model_name=self.model_name,
                 litellm_params=self.litellm_params,
-                messages=[{'role': 'user', 'content': prompt}],
+                messages=[
+                    {'role': 'system', 'content': OBSERVER_SYSTEM_PROMPT},
+                    {'role': 'user', 'content': prompt}
+                ],
                 max_retries=self.max_retries,
                 response_format=ObserverResponse,
             )
