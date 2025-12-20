@@ -70,12 +70,23 @@ class CodeRunnerEnv(ABC):
         Initialize the code runner environment.
 
         Args:
-            work_dir: Optional local workspace directory.
+            work_dir: Optional local workspace directory. Output files from code execution will be
+             stored here.
         """
-        if not work_dir or not os.path.exists(work_dir):
-            self.work_dir = tempfile.mkdtemp(prefix='kodeagent_run_')
+        if work_dir:
+            if os.path.isabs(work_dir):
+                if os.path.exists(work_dir):
+                    self.work_dir = os.path.abspath(work_dir)
+                else:
+                    self.work_dir = tempfile.mkdtemp(prefix='kodeagent_run_')
+            else:
+                abs_path = os.path.abspath(work_dir)
+                if os.path.exists(abs_path):
+                    self.work_dir = abs_path
+                else:
+                    self.work_dir = tempfile.mkdtemp(prefix='kodeagent_run_')
         else:
-            self.work_dir = work_dir
+            self.work_dir = tempfile.mkdtemp(prefix='kodeagent_run_')
         logger.info('Local workspace dir for copying files: %s', self.work_dir)
 
         self.local_modules_to_copy = []
