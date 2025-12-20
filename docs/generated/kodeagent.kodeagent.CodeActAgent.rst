@@ -14,6 +14,7 @@ kodeagent.kodeagent.CodeActAgent
    .. autosummary::
    
       ~CodeActAgent.__init__
+      ~CodeActAgent.add_output_file
       ~CodeActAgent.add_to_history
       ~CodeActAgent.clear_history
       ~CodeActAgent.formatted_history_for_llm
@@ -34,6 +35,7 @@ kodeagent.kodeagent.CodeActAgent
 
    .. autosummary::
    
+      ~CodeActAgent.artifacts
       ~CodeActAgent.current_plan
       ~CodeActAgent.purpose
    

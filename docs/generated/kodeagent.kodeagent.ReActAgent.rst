@@ -14,6 +14,7 @@ kodeagent.kodeagent.ReActAgent
    .. autosummary::
    
       ~ReActAgent.__init__
+      ~ReActAgent.add_output_file
       ~ReActAgent.add_to_history
       ~ReActAgent.clear_history
       ~ReActAgent.formatted_history_for_llm
@@ -34,6 +35,7 @@ kodeagent.kodeagent.ReActAgent
 
    .. autosummary::
    
+      ~ReActAgent.artifacts
       ~ReActAgent.current_plan
       ~ReActAgent.purpose
    
