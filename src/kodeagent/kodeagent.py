@@ -1233,12 +1233,6 @@ class ReActAgent(Agent):
                         for f in generated_files:
                             self.add_output_file(f)
 
-                        # Download files from remote environment if necessary
-                        # Note: For ReActAgent, tools currently run locally, but we add this for consistency.
-                        if generated_files and hasattr(self, 'code_runner') and \
-                           self.code_runner and self.code_runner.env_name != 'host':
-                            await self.code_runner.download_files_from_remote(generated_files)
-
                     # Always use role='tool' for tool results
                     self.add_to_history(ChatMessage(role='tool', content=str(result)))
                     yield self.response(

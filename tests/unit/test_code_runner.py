@@ -2,11 +2,11 @@
 Unit tests for the CodeRunner class in kodeagent.code_runner.
 """
 import os
-import re
 import sys
 import tempfile
+from unittest.mock import MagicMock, patch, mock_open
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch, mock_open
 
 from kodeagent.code_runner import CodeRunner, CodeSecurityError, UnknownCodeEnvError
 from kodeagent.models import CodeReview
@@ -46,7 +46,7 @@ def test_code_runner_security_violation():
 async def test_code_runner_unknown_env(mock_security_reviewer):
     """Test that an unknown environment raises the correct exception."""
     with pytest.raises(UnknownCodeEnvError) as excinfo:
-        runner = CodeRunner(env='invalid_env', allowed_imports=[], model_name='test-model')
+        _runner = CodeRunner(env='invalid_env', allowed_imports=[], model_name='test-model')
     
     assert 'Unsupported code execution env: invalid_env' in str(excinfo.value)
 
@@ -64,7 +64,7 @@ async def test_run_code_host_warning_and_files(mock_security_reviewer):
 
     with patch('shutil.copy2') as mock_copy, \
          patch('subprocess.run') as mock_sp_run, \
-         patch('os.remove') as mock_remove, \
+         patch('os.remove') as _mock_remove, \
          pytest.warns(UserWarning, match='dangerous'):
 
         # Setup mock return for subprocess
@@ -79,10 +79,6 @@ async def test_run_code_host_warning_and_files(mock_security_reviewer):
         # Verify file copy was attempted
         assert mock_copy.call_count == 1
         assert stdout == 'Output'
-        # Verify temp directory was created (prefix check)
-        # Note: In the new implementation we might not call os.remove directly on the script 
-        # but cleanup the whole directory. 
-        # For now, let's adjust the test to either mock mkdtemp or expect no remove if we didn't implement it.
 
 
 @pytest.mark.asyncio
@@ -104,7 +100,9 @@ async def test_run_code_e2b_execution_error(mock_security_reviewer):
         mock_sbx_instance.files.list.return_value = []
         mock_sbx_instance.get_info.return_value = {}
 
-        stdout, stderr, exit_status, _ = await runner.run('', "print('test')", task_id='1')
+        _stdout, _stderr, _exit_status, _ = await runner.run(
+            '', "print('test')", task_id='1'
+        )
 
         # Since mock_exec_result.error is None, exit_status should be 0 
         # but in this test we might want to simulate an error.

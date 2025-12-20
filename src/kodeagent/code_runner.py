@@ -72,8 +72,6 @@ class CodeRunnerEnv(ABC):
         Args:
             work_dir: Optional local workspace directory.
         """
-        self.work_dir = work_dir
-
         if not work_dir or not os.path.exists(work_dir):
             self.work_dir = tempfile.mkdtemp(prefix='kodeagent_run_')
         else:

@@ -37,7 +37,7 @@ class TestCodeRunnerEnv(unittest.IsolatedAsyncioTestCase):
         """Test running code in HostCodeRunnerEnv."""
         mock_run.return_value = MagicMock(stdout='hello', stderr='', returncode=0)
         env = HostCodeRunnerEnv(work_dir=self.temp_dir)
-        stdout, stderr, exit_code, generated_files = await env.run(
+        stdout, _stderr, exit_code, generated_files = await env.run(
             'print("hello")', 'task1', 30
         )
         self.assertEqual(stdout, 'hello')
@@ -57,7 +57,7 @@ class TestCodeRunnerEnv(unittest.IsolatedAsyncioTestCase):
         mock_cls.create.return_value = mock_sbx
 
         env = E2BCodeRunnerEnv(work_dir=self.temp_dir)
-        stdout, stderr, exit_code, generated_files = await env.run(
+        stdout, _stderr, _exit_code, generated_files = await env.run(
             'print("ok")', 'task2', 30
         )
         
@@ -70,7 +70,7 @@ class TestCodeRunnerEnv(unittest.IsolatedAsyncioTestCase):
         
         self.assertEqual(len(local_files), 1)
         self.assertEqual(os.path.basename(local_files[0]), 'new.txt')
-        with open(local_files[0], 'r') as f:
+        with open(local_files[0], 'r', encoding='utf-8') as f:
             self.assertEqual(f.read(), 'file content')
 
         env.cleanup()
