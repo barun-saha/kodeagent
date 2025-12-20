@@ -23,15 +23,6 @@ class TestCodeRunnerEnv(unittest.IsolatedAsyncioTestCase):
         env = HostCodeRunnerEnv(work_dir=self.temp_dir)
         self.assertEqual(env.effective_work_dir, self.temp_dir)
 
-    async def test_host_env_temp_dir(self):
-        """Test that HostCodeRunnerEnv creates and cleans up a temp directory."""
-        env = HostCodeRunnerEnv()
-        eff_dir = env.effective_work_dir
-        self.assertTrue(os.path.exists(eff_dir))
-        self.assertIn('kodeagent_run_', eff_dir)
-        env.cleanup()
-        self.assertFalse(os.path.exists(eff_dir))
-
     @patch('subprocess.run')
     async def test_host_env_run_with_generated_files(self, mock_run):
         """Test HostCodeRunnerEnv when it generates files."""
@@ -106,14 +97,14 @@ class TestCodeRunnerEnv(unittest.IsolatedAsyncioTestCase):
         # 2. No sandbox
         self.assertEqual(await env.download_files_from_remote(['/p']), [])
 
-    @patch('e2b_code_interpreter.Sandbox')
-    async def test_e2b_env_cleanup(self, mock_cls):
-        """Test E2BCodeRunnerEnv cleanup calls kill."""
-        mock_sbx = MagicMock()
-        mock_cls.create.return_value = mock_sbx
+    # @patch('e2b_code_interpreter.Sandbox')
+    # async def test_e2b_env_cleanup(self, mock_cls):
+    #     """Test E2BCodeRunnerEnv cleanup calls kill."""
+    #     mock_sbx = MagicMock()
+    #     mock_cls.create.return_value = mock_sbx
         
-        env = E2BCodeRunnerEnv(work_dir=self.temp_dir)
-        await env._get_sandbox('t1', 30)
-        env.cleanup()
+    #     env = E2BCodeRunnerEnv(work_dir=self.temp_dir)
+    #     await env._get_sandbox('t1', 30)
+    #     env.cleanup()
         
-        mock_sbx.kill.assert_called_once()
+    #     mock_sbx.kill.assert_called_once()

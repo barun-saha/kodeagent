@@ -109,13 +109,11 @@ class CodeRunnerEnv(ABC):
         """Download files from the environment to the local work_dir."""
 
     def cleanup(self):
-        """Clean up environment resources by removing the temporary work_dir."""
-        if self.work_dir and os.path.exists(self.work_dir):
-            try:
-                shutil.rmtree(self.work_dir, ignore_errors=True)
-            except Exception as e:
-                logger.warning('Failed to remove temp dir %s: %s', self.work_dir, e)
-            self.work_dir = None
+        """
+        Clean up environment resources. Implementation is left to the subclass if required.
+        Cleaning up resources may have a side effect of removing the files produced by the code.
+        """
+        pass
 
 
 class HostCodeRunnerEnv(CodeRunnerEnv):
