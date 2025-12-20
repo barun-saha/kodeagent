@@ -1277,6 +1277,71 @@ def test_current_plan_property():
     assert 'Step 2' in current
 
 
+def test_artifacts_property_empty():
+    """Test artifacts property returns empty list initially."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+
+    # Artifacts should be empty initially
+    assert agent.artifacts == []
+    assert isinstance(agent.artifacts, list)
+
+
+def test_artifacts_property_with_files():
+    """Test artifacts property returns task output files."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+
+    # Initialize task
+    agent._run_init('Generate output files')
+
+    # Add output files
+    agent.add_output_file('/path/to/file1.txt')
+    agent.add_output_file('/path/to/file2.csv')
+    agent.add_output_file('/path/to/file3.json')
+
+    # Check artifacts property
+    artifacts = agent.artifacts
+    assert len(artifacts) == 3
+    assert '/path/to/file1.txt' in artifacts
+    assert '/path/to/file2.csv' in artifacts
+    assert '/path/to/file3.json' in artifacts
+
+
+def test_artifacts_property_no_duplicates():
+    """Test artifacts property handles duplicate files correctly."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+
+    agent._run_init('Generate output files')
+
+    # Add the same file twice
+    agent.add_output_file('/path/to/file1.txt')
+    agent.add_output_file('/path/to/file1.txt')
+
+    # Should only have one entry
+    artifacts = agent.artifacts
+    assert len(artifacts) == 1
+    assert artifacts[0] == '/path/to/file1.txt'
+
+
+def test_artifacts_property_after_task_reset():
+    """Test artifacts property is reset when initializing new task."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+
+    # First task
+    agent._run_init('Task 1')
+    agent.add_output_file('/path/to/output1.txt')
+    assert len(agent.artifacts) == 1
+
+    # Initialize new task (should reset artifacts)
+    agent._run_init('Task 2')
+    assert agent.artifacts == []
+
+    # Add new files
+    agent.add_output_file('/path/to/output2.txt')
+    assert len(agent.artifacts) == 1
+    assert '/path/to/output2.txt' in agent.artifacts
+    assert '/path/to/output1.txt' not in agent.artifacts
+
+
 @pytest.mark.asyncio
 async def test_salvage_response():
     """Test salvage_response method."""
