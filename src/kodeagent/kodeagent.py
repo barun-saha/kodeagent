@@ -1783,7 +1783,7 @@ class CodeActAgent(ReActAgent):
                 )
                 
                 # Download files from remote environment if necessary
-                if generated_files and self.code_runner.env_name != 'host':
+                if generated_files:
                     files = await self.code_runner.download_files_from_remote(generated_files)
                     for f in files:
                         self.add_output_file(f)

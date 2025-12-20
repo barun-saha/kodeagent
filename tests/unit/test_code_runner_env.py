@@ -35,14 +35,16 @@ class TestCodeRunnerEnv(unittest.IsolatedAsyncioTestCase):
     @patch('subprocess.run')
     async def test_host_env_run_with_generated_files(self, mock_run):
         """Test HostCodeRunnerEnv when it generates files."""
-        mock_run.return_value = MagicMock(stdout='hello', stderr='', returncode=0)
+        dummy_file = os.path.join(self.temp_dir, 'output.txt')
+        
+        def mock_run_side_effect(*_args, **_kwargs):
+            with open(dummy_file, 'w') as f:
+                f.write('new content')
+            return MagicMock(stdout='hello', stderr='', returncode=0)
+            
+        mock_run.side_effect = mock_run_side_effect
         env = HostCodeRunnerEnv(work_dir=self.temp_dir)
         
-        # Create a "generated" file manually in the temp_dir
-        dummy_file = os.path.join(self.temp_dir, 'output.txt')
-        with open(dummy_file, 'w') as f:
-            f.write('new content')
-            
         stdout, _stderr, exit_code, generated_files = await env.run(
             'print("hello")', 'task1', 30
         )

@@ -139,30 +139,34 @@ class HostCodeRunnerEnv(CodeRunnerEnv):
             UserWarning
         )
         
-        temp_dir = self.effective_work_dir
-        code_file_path = os.path.join(temp_dir, 'task_code.py')
+        code_file_path = os.path.join(self.work_dir, 'task_code.py')
         
         with open(code_file_path, mode='w+t', encoding='utf-8') as code_file:
             code_file.write(source_code)
 
         for a_file in self.local_modules_to_copy:
-            shutil.copy2(os.path.join(os.path.dirname(__file__), a_file), temp_dir)
+            shutil.copy2(os.path.join(os.path.dirname(__file__), a_file), self.work_dir)
+
+        # List files before to identify NEW files
+        files_before = set(os.listdir(self.work_dir))
 
         result = sp.run(
             [sys.executable, 'task_code.py'],
             shell=False, capture_output=True, text=True,
             timeout=timeout,
-            cwd=temp_dir,
+            cwd=self.work_dir,
             check=False,
             encoding='utf-8'
         )
-        
+        files_after = set(os.listdir(self.work_dir))
+        new_files = list(files_after - files_before)
+
         # Identify generated files (anything in temp_dir that wasn't there originally)
-        excluded_files = {'task_code.py'} | set(self.local_modules_to_copy)
+        # excluded_files = {'task_code.py'} | set(self.local_modules_to_copy)
         generated_files = []
-        for item in os.listdir(temp_dir):
-            full_path = str(Path(temp_dir) / item)
-            if item not in excluded_files and os.path.isfile(full_path):
+        for item in new_files:
+            full_path = os.path.join(self.work_dir, item)
+            if os.path.isfile(full_path):
                 generated_files.append(full_path)
 
         return CodeRunResult(result.stdout, result.stderr, result.returncode, generated_files)
@@ -263,7 +267,6 @@ class E2BCodeRunnerEnv(CodeRunnerEnv):
         
         # List files before to identify NEW files
         files_before = set(f.path for f in sbx.files.list('/home/user'))
-        
         execution = sbx.run_code(code=source_code, timeout=timeout)
         
         # List files after
