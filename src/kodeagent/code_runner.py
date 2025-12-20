@@ -230,10 +230,11 @@ class CodeRunner:
             )
             
             # Identify generated files (anything in temp_dir that wasn't there originally)
+            excluded_files = {'task_code.py'} | set(self.local_modules_to_copy)
             generated_files = []
             for item in os.listdir(temp_dir):
                 full_path = str(Path(temp_dir) / item)
-                if item != 'task_code.py' and os.path.isfile(full_path):
+                if item not in excluded_files and os.path.isfile(full_path):
                     generated_files.append(full_path)
 
             return result.stdout, result.stderr, result.returncode, generated_files
