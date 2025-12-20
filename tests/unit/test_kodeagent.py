@@ -97,7 +97,7 @@ def codeact_agent_factory():
         with patch('kodeagent.kodeagent.CodeRunner') as mock_runner_class:
             mock_runner = MagicMock()
             # Use AsyncMock for the async run() method
-            mock_runner.run = AsyncMock(return_value=('output', '', 0))
+            mock_runner.run = AsyncMock(return_value=('output', '', 0, []))
             mock_runner_class.return_value = mock_runner
 
             defaults = {
@@ -444,7 +444,7 @@ async def test_codeact_agent_host():
         with patch('kodeagent.kodeagent.CodeRunner') as mock_runner_class:
             # Create a mock runner instance
             mock_runner_instance = MagicMock()
-            mock_runner_instance.run = AsyncMock(return_value=(current_month, '', 0))
+            mock_runner_instance.run = AsyncMock(return_value=(current_month, '', 0, []))
             mock_runner_class.return_value = mock_runner_instance
 
             code_agent = CodeActAgent(
