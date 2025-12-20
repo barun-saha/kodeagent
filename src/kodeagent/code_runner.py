@@ -14,9 +14,16 @@ User Code
     ↓
 [5] Execute Code (locally or in Sandbox)
 """
+import os
 import re
+import shutil
+import subprocess as sp
+import sys
+import tempfile
 import warnings
-from typing import Optional, Literal
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Optional, Literal, NamedTuple
 
 from . import kutils as ku
 from .code_reviewer import CodeSecurityReviewer
@@ -25,11 +32,13 @@ from .pattern_detector import analyze_code_patterns
 
 CODE_ENV_NAMES = Literal['host', 'docker', 'e2b']
 """Allowed code execution environment names."""
+
 DEFAULT_ALLOWED_IMPORTS = {
     'ast', 'operator', 're',  # calculator tool
     'time', 'random',
 }
 """ Default allowed imports for code execution."""
+
 # Check for the use of dangerous builtins
 DANGEROUS_BUILTINS = {'exec', 'eval', '__import__', 'compile'}
 """Dangerous built-in functions that are not allowed in code execution."""
@@ -45,6 +54,280 @@ class UnknownCodeEnvError(Exception):
     """Exception raised for unknown code execution environments."""
 
 
+class CodeRunResult(NamedTuple):
+    """Named tuple for code run results."""
+    stdout: str
+    stderr: str
+    return_code: int
+    generated_files: list[str]
+
+
+class CodeRunnerEnv(ABC):
+    """Abstract base class for code execution environments."""
+
+    def __init__(self, work_dir: Optional[str] = None):
+        """
+        Initialize the code runner environment.
+
+        Args:
+            work_dir: Optional local workspace directory.
+        """
+        self.work_dir = work_dir
+
+        if not work_dir or not os.path.exists(work_dir):
+            self.work_dir = tempfile.mkdtemp(prefix='kodeagent_run_')
+        else:
+            self.work_dir = work_dir
+        logger.info('Local workspace dir for copying files: %s', self.work_dir)
+
+        self.local_modules_to_copy = []
+
+    @property
+    def effective_work_dir(self) -> str:
+        """
+        Return the effective working directory specified or creating a temporary one if needed.
+
+        Returns:
+            The effective working directory path.
+        """
+        return self.work_dir
+
+    @abstractmethod
+    async def run(self, source_code: str, task_id: str, timeout: int) -> CodeRunResult:
+        """
+        Execute Python code in the environment.
+
+        Args:
+            source_code: The Python source code to execute.
+            task_id: Unique task identifier.
+            timeout: Timeout for code execution.
+
+        Returns:
+            A tuple of (stdout, stderr, return_code, generated_files).
+        """
+
+    @abstractmethod
+    async def download_files_from_remote(self, remote_paths: list[str]) -> list[str]:
+        """Download files from the environment to the local work_dir."""
+
+    def cleanup(self):
+        """Clean up environment resources by removing the temporary work_dir."""
+        if self.work_dir and os.path.exists(self.work_dir):
+            try:
+                shutil.rmtree(self.work_dir, ignore_errors=True)
+            except Exception as e:
+                logger.warning('Failed to remove temp dir %s: %s', self.work_dir, e)
+            self.work_dir = None
+
+
+class HostCodeRunnerEnv(CodeRunnerEnv):
+    """Execution environment for the local host."""
+
+    async def run(self, source_code: str, task_id: str, timeout: int) -> CodeRunResult:
+        """
+        Execute Python code on the local host.
+
+        Args:
+            source_code: The Python source code to execute.
+            task_id: Unique task identifier.
+            timeout: Timeout for code execution.
+
+        Returns:
+            A tuple of (stdout, stderr, return_code, generated_files).
+        """
+        warnings.warn(
+            'You are running LLM-generated code on your host. This could be potentially'
+            ' dangerous! Please consider using a different code runner environment.',
+            UserWarning
+        )
+        
+        temp_dir = self.effective_work_dir
+        code_file_path = os.path.join(temp_dir, 'task_code.py')
+        
+        with open(code_file_path, mode='w+t', encoding='utf-8') as code_file:
+            code_file.write(source_code)
+
+        for a_file in self.local_modules_to_copy:
+            shutil.copy2(os.path.join(os.path.dirname(__file__), a_file), temp_dir)
+
+        result = sp.run(
+            [sys.executable, 'task_code.py'],
+            shell=False, capture_output=True, text=True,
+            timeout=timeout,
+            cwd=temp_dir,
+            check=False,
+            encoding='utf-8'
+        )
+        
+        # Identify generated files (anything in temp_dir that wasn't there originally)
+        excluded_files = {'task_code.py'} | set(self.local_modules_to_copy)
+        generated_files = []
+        for item in os.listdir(temp_dir):
+            full_path = str(Path(temp_dir) / item)
+            if item not in excluded_files and os.path.isfile(full_path):
+                generated_files.append(full_path)
+
+        return CodeRunResult(result.stdout, result.stderr, result.returncode, generated_files)
+
+    async def download_files_from_remote(self, remote_paths: list[str]) -> list[str]:
+        """
+        On host, files are already local.
+
+        Args:
+            remote_paths: List of absolute paths in the host environment.
+
+        Returns:
+            The same list of paths, as they are already local.
+        """
+        return remote_paths
+
+
+class E2BCodeRunnerEnv(CodeRunnerEnv):
+    """Execution environment for the E2B sandbox."""
+
+    def __init__(
+        self,
+        work_dir: Optional[str] = None,
+        env_vars: Optional[dict[str, str]] = None,
+        pip_packages_str: Optional[str] = None
+    ):
+        """
+        Initialize the E2B code runner environment.
+
+        Args:
+            work_dir: Optional local workspace directory.
+            env_vars: Optional environment variables to set in the E2B sandbox.
+            pip_packages_str: Optional string of pip packages to install in the E2B sandbox.
+        """
+        super().__init__(work_dir)
+        self.env_vars = env_vars or {}
+        self.pip_packages_str = pip_packages_str
+        self._sbx = None
+
+    async def _get_sandbox(self, task_id: str, timeout: int):
+        """
+        Create or return the existing sandbox.
+
+        Args:
+            task_id: Unique task identifier.
+            timeout: Timeout for code execution.
+
+        Returns:
+            An E2B Sandbox instance.
+        """
+        if self._sbx:
+            return self._sbx
+
+        try:
+            import e2b_code_interpreter as e2b
+        except ModuleNotFoundError:
+            logger.critical(
+                'The module `e2b_code_interpreter` was not found. Please install E2B as:'
+                ' `pip install e2b-code-interpreter`\nExecution will halt now.'
+            )
+            sys.exit(-1)
+
+        self._sbx = e2b.Sandbox.create(
+            timeout=timeout + 15,
+            envs=self.env_vars,
+            metadata={'task_id': task_id}
+        )
+        
+        if self.pip_packages_str:
+            self._sbx.commands.run(f'pip install {self.pip_packages_str}')
+
+        for a_file in self.local_modules_to_copy:
+            with open(
+                    os.path.join(os.path.dirname(__file__), a_file),
+                    'r',
+                    encoding='utf-8'
+            ) as py_file:
+                self._sbx.files.write(f'/home/user/{a_file}', py_file.read())
+                logger.info('Copied file %s...', a_file)
+
+        return self._sbx
+
+    async def run(self, source_code: str, task_id: str, timeout: int) -> CodeRunResult:
+        """
+        Execute Python code in the E2B sandbox.
+
+        Args:
+            source_code: The Python source code to execute.
+            task_id: Unique task identifier.
+            timeout: Timeout for code execution.
+
+        Returns:
+            A tuple of (stdout, stderr, return_code, generated_files).
+        """
+        sbx = await self._get_sandbox(task_id, timeout)
+        
+        logger.debug('E2B sandbox: %s', sbx.get_info())
+        
+        # List files before to identify NEW files
+        files_before = set(f.path for f in sbx.files.list('/home/user'))
+        
+        execution = sbx.run_code(code=source_code, timeout=timeout)
+        
+        # List files after
+        files_after = set(f.path for f in sbx.files.list('/home/user'))
+        new_files = list(files_after - files_before)
+        
+        std_out: str = '\n'.join(execution.logs.stdout)
+        std_err: str = '\n'.join(execution.logs.stderr)
+        if execution.error:
+            std_err += f'\n{execution.error.name}\n{execution.error.value}'
+        ret_code: int = -1 if execution.error else 0
+
+        return CodeRunResult(std_out, std_err, ret_code, new_files)
+
+    async def download_files_from_remote(self, remote_paths: list[str]) -> list[str]:
+        """
+        Download files from the E2B sandbox to the local work_dir.
+
+        Args:
+            remote_paths: List of absolute paths in the E2B sandbox.
+
+        Returns:
+            List of local absolute paths for the downloaded files.
+        """
+        if not remote_paths or not self._sbx:
+            return []
+
+        local_dir = self.effective_work_dir
+        local_files = []
+
+        for remote_path in remote_paths:
+            try:
+                content = self._sbx.files.read(remote_path)
+                filename = os.path.basename(remote_path)
+                local_path = os.path.join(local_dir, filename)
+                
+                # E2B read returns bytes (usually) or str?
+                # Documentation says it returns content. Let's assume bytes for safety or check.
+                mode = 'wb' if isinstance(content, bytes) else 'w'
+                encoding = None if isinstance(content, bytes) else 'utf-8'
+                
+                with open(local_path, mode, encoding=encoding) as f:
+                    f.write(content)
+                local_files.append(local_path)
+                logger.info('Downloaded file from E2B: %s -> %s', remote_path, local_path)
+            except Exception as e:
+                logger.error('Failed to download file %s from E2B: %s', remote_path, e)
+
+        return local_files
+
+    def cleanup(self):
+        """Close the sandbox and clean up."""
+        if self._sbx:
+            try:
+                self._sbx.kill()
+            except Exception as e:
+                logger.warning('Failed to close E2B sandbox: %s', e)
+            self._sbx = None
+
+        super().cleanup()
+
+
 class CodeRunner:
     """Run Python code generated by an LLM in a given environment."""
     def __init__(
@@ -55,7 +338,8 @@ class CodeRunner:
             pip_packages: Optional[str] = None,
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
-            litellm_params: Optional[dict] = None
+            litellm_params: Optional[dict] = None,
+            work_dir: Optional[str] = None
     ):
         """
         Create an environment to run Python code.
@@ -69,21 +353,56 @@ class CodeRunner:
             env_vars_to_set: Optional environment variables to set in the code execution
              environment (E2B only).
             litellm_params: Optional parameters for LiteLLM.
+            work_dir: Optional local workspace directory.
         """
         self.allowed_imports: set[str] = set(allowed_imports).union(DEFAULT_ALLOWED_IMPORTS)
-        self.env: CODE_ENV_NAMES = env
+        self.env_name: CODE_ENV_NAMES = env
+        self.work_dir = work_dir
+        
         if pip_packages and len(pip_packages.strip()) > 0:
             self.pip_packages: list[str] = re.split('[,;]', pip_packages)
         else:
             self.pip_packages = []
+        
         self.default_timeout = timeout
-        self.local_modules_to_copy = []
         self.pip_packages_str = ' '.join(self.pip_packages) if self.pip_packages else None
-        self.env_vars_to_set = env_vars_to_set
+        
         self.code_reviewer = CodeSecurityReviewer(
             model_name=model_name,
             litellm_params=litellm_params
         )
+
+        # Initialize the implementation
+        if self.env_name == 'host':
+            self.env_impl = HostCodeRunnerEnv(work_dir=self.work_dir)
+        elif self.env_name == 'e2b':
+            self.env_impl = E2BCodeRunnerEnv(
+                work_dir=self.work_dir,
+                env_vars=env_vars_to_set,
+                pip_packages_str=self.pip_packages_str
+            )
+        else:
+            raise UnknownCodeEnvError(f'Unsupported code execution env: {self.env_name}')
+
+    @property
+    def local_modules_to_copy(self) -> list[str]:
+        """
+        Get the list of local modules to copy to the execution environment.
+
+        Returns:
+            A list of local module filenames.
+        """
+        return self.env_impl.local_modules_to_copy
+        
+    @local_modules_to_copy.setter
+    def local_modules_to_copy(self, value: list[str]):
+        """
+        Set the list of local modules to copy to the execution environment.
+
+        Args:
+            value: A list of local module filenames.
+        """
+        self.env_impl.local_modules_to_copy = value
 
     def check_imports(self, code: str) -> set[str]:
         """
@@ -118,7 +437,7 @@ class CodeRunner:
         disallowed = imported_modules - self.allowed_imports
         return disallowed
 
-    async def run(self, tools_code: str, generated_code: str, task_id: str) -> tuple[str, str, int, list[str]]:
+    async def run(self, tools_code: str, generated_code: str, task_id: str) -> CodeRunResult:
         """
         Run Python code in pre-specified environment after security review.
 
@@ -128,7 +447,7 @@ class CodeRunner:
             task_id: Unique task identifier for tracking.
 
         Returns:
-            A tuple of (stdout, stderr, return_code).
+            A tuple of (stdout, stderr, return_code, generated_files).
 
         Raises:
             UnknownCodeEnvError: If the specified environment is unsupported.
@@ -141,7 +460,7 @@ class CodeRunner:
         try:
             ast.parse(source_code)
         except SyntaxError as se:
-            return (
+            return CodeRunResult(
                 '',
                 f'Code parsing failed due to: {type(se).__name__}\n{se.text}\nError: {str(se)}',
                 -1,
@@ -152,7 +471,7 @@ class CodeRunner:
         if len(disallowed_imports) > 0:
             modules = '\n'.join(list(disallowed_imports))
             logger.error('CodeRunner found disallowed imports: %s', modules)
-            return (
+            return CodeRunResult(
                 '',
                 f'The following imports are disallowed:{modules}'
                 '\nPlease only use the allowed modules for importing.',
@@ -161,15 +480,11 @@ class CodeRunner:
             )
 
         # Security review before execution
-        # We check only the AI-generated code; tools are assumed to be "safe"
-        # At first, do a static analysis check for dangerous patterns in the generated code
         logger.debug('Performing static analysis of code...')
         is_safe, reason, _ = analyze_code_patterns(generated_code)
         if not is_safe:
             raise CodeSecurityError(f'Pattern detection blocked: {reason}')
        
-        # If the code fails the static analysis, it is not executed
-        # If the code passes the static analysis, do another round of check by the LLM
         logger.debug('Performing security review of code...')
         review_result = await self.code_reviewer.review(generated_code)
         if not review_result.is_secure:
@@ -179,127 +494,20 @@ class CodeRunner:
             )
         logger.info('Code security review passed: %s', review_result.reason)
 
-        if self.env == 'host':
-            return self._run_code_host(source_code)
+        return await self.env_impl.run(source_code, task_id, self.default_timeout)
 
-        if self.env =='e2b':
-            return await self._run_code_e2b(source_code, task_id)
-
-        raise UnknownCodeEnvError(f'Unsupported code execution env: {self.env}')
-
-    def _run_code_host(self, source_code: str) -> tuple[str, str, int, list[str]]:
+    async def download_files_from_remote(self, remote_paths: list[str]) -> list[str]:
         """
-        Run code on the host machine.
+        Download files from the remote environment to the local workspace.
 
         Args:
-            source_code: The Python source code to execute.
+            remote_paths: List of absolute paths in the remote environment.
 
         Returns:
-            A tuple of (stdout, stderr, return_code, generated_files).
+            List of local absolute paths for the downloaded files.
         """
-        import os
-        import shutil
-        import subprocess as sp
-        import sys
-        import tempfile
-        from pathlib import Path
+        return await self.env_impl.download_files_from_remote(remote_paths)
 
-        warnings.warn(
-            'You are running LLM-generated code on your host. This could be potentially'
-            ' dangerous! Please consider using a different code runner environment.',
-            UserWarning
-        )
-        
-        # Use a dedicated temporary directory for this execution to capture outputs
-        temp_dir = tempfile.mkdtemp(prefix='kodeagent_run_')
-        try:
-            code_file_path = os.path.join(temp_dir, 'task_code.py')
-            with open(code_file_path, mode='w+t', encoding='utf-8') as code_file:
-                code_file.write(source_code)
-
-            for a_file in self.local_modules_to_copy:
-                shutil.copy2(os.path.join(os.path.dirname(__file__), a_file), temp_dir)
-
-            result = sp.run(
-                [sys.executable, 'task_code.py'],
-                shell=False, capture_output=True, text=True,
-                timeout=self.default_timeout,
-                cwd=temp_dir,
-                check=False,
-                encoding='utf-8'
-            )
-            
-            # Identify generated files (anything in temp_dir that wasn't there originally)
-            excluded_files = {'task_code.py'} | set(self.local_modules_to_copy)
-            generated_files = []
-            for item in os.listdir(temp_dir):
-                full_path = str(Path(temp_dir) / item)
-                if item not in excluded_files and os.path.isfile(full_path):
-                    generated_files.append(full_path)
-
-            return result.stdout, result.stderr, result.returncode, generated_files
-        finally:
-            # We don't remove temp_dir here because the agent might need the files?
-            # If we remove them, the paths returned become invalid.
-            # Usually, we should return valid paths.
-            pass
-
-    async def _run_code_e2b(self, source_code: str, task_id: str) -> tuple[str, str, int, list[str]]:
-        """
-        Run code in the E2B sandbox environment.
-
-        Args:
-            source_code: The Python source code to execute.
-            task_id: Unique task identifier for tracking.
-
-        Returns:
-            A tuple of (stdout, stderr, return_code, generated_files).
-        """
-        import os
-        import sys
-
-        try:
-            import e2b_code_interpreter as e2b
-        except ModuleNotFoundError:
-            logger.critical(
-                'The module `e2b_code_interpreter` was not found. Please install E2B as:'
-                ' `pip install e2b-code-interpreter`\nExecution will halt now.'
-            )
-            sys.exit(-1)
-
-        # Do not reuse existing sandboxes due to security reasons, as they may leak other tasks
-        with e2b.Sandbox.create(
-                timeout=self.default_timeout + 15,
-                envs=self.env_vars_to_set or {},
-                metadata={'task_id': task_id}
-        ) as sbx:
-            if self.pip_packages_str:
-                sbx.commands.run(f'pip install {self.pip_packages_str}')
-
-            for a_file in self.local_modules_to_copy:
-                with open(
-                        os.path.join(os.path.dirname(__file__), a_file),
-                        'r',
-                        encoding='utf-8'
-                ) as py_file:
-                    sbx.files.write(f'/home/user/{a_file}', py_file.read())
-                    logger.info('Copied file %s...', a_file)
-
-            logger.debug('E2B sandbox: %s', sbx.get_info())
-            
-            # List files before to identify NEW files
-            files_before = set(f.path for f in sbx.files.list('/home/user'))
-            
-            execution = sbx.run_code(code=source_code, timeout=self.default_timeout)
-            
-            # List files after
-            files_after = set(f.path for f in sbx.files.list('/home/user'))
-            new_files = list(files_after - files_before)
-            
-            std_out: str = '\n'.join(execution.logs.stdout)
-            std_err: str = '\n'.join(execution.logs.stderr)
-            if execution.error:
-                std_err += f'\n{execution.error.name}\n{execution.error.value}'
-            ret_code: int = -1 if execution.error else 0
-
-        return std_out, std_err, ret_code, new_files
+    def cleanup(self):
+        """Clean up resources in the environment."""
+        self.env_impl.cleanup()

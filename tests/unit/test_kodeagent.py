@@ -444,7 +444,9 @@ async def test_codeact_agent_host():
         with patch('kodeagent.kodeagent.CodeRunner') as mock_runner_class:
             # Create a mock runner instance
             mock_runner_instance = MagicMock()
+            mock_runner_instance.env_name = 'host'
             mock_runner_instance.run = AsyncMock(return_value=(current_month, '', 0, []))
+            mock_runner_instance.cleanup = MagicMock()
             mock_runner_class.return_value = mock_runner_instance
 
             code_agent = CodeActAgent(
@@ -522,6 +524,8 @@ async def test_codeact_agent_unsupported_env():
         with patch('kodeagent.kodeagent.CodeRunner') as mock_runner_class:
             # Create a mock runner that simulates unsupported env error
             mock_runner_instance = MagicMock()
+            mock_runner_instance.env_name = 'unknown_env'
+            mock_runner_instance.cleanup = MagicMock()
 
             async def mock_run_with_error(*args, **kwargs):
                 # Return error tuple instead of raising exception
@@ -3138,6 +3142,10 @@ def test_cleanup_resets_observer(react_agent):
 def test_cleanup_with_codeact_agent(codeact_agent_factory):
     """Test that _cleanup() works correctly with CodeActAgent."""
     agent = codeact_agent_factory()
+    
+    # Mock code_runner as MagicMock
+    agent.code_runner = MagicMock()
+    agent.code_runner.cleanup = MagicMock()
 
     # Set up initial state
     agent._run_init('Test task', files=['script.py'])
