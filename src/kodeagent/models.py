@@ -36,6 +36,9 @@ class Task(pyd.BaseModel):
     is_error: bool = pyd.Field(
         description='Whether the task execution resulted in any error', default=False
     )
+    output_files: list[str] = pyd.Field(
+        description='List of file paths generated during task execution', default_factory=list
+    )
 
 
 class PlanStep(pyd.BaseModel):

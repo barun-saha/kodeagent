@@ -118,7 +118,7 @@ class CodeRunner:
         disallowed = imported_modules - self.allowed_imports
         return disallowed
 
-    async def run(self, tools_code: str, generated_code: str, task_id: str) -> tuple[str, str, int]:
+    async def run(self, tools_code: str, generated_code: str, task_id: str) -> tuple[str, str, int, list[str]]:
         """
         Run Python code in pre-specified environment after security review.
 
@@ -144,7 +144,8 @@ class CodeRunner:
             return (
                 '',
                 f'Code parsing failed due to: {type(se).__name__}\n{se.text}\nError: {str(se)}',
-                -1
+                -1,
+                []
             )
 
         disallowed_imports: set = self.check_imports(source_code)
@@ -155,7 +156,8 @@ class CodeRunner:
                 '',
                 f'The following imports are disallowed:{modules}'
                 '\nPlease only use the allowed modules for importing.',
-                -1
+                -1,
+                []
             )
 
         # Security review before execution
@@ -181,11 +183,11 @@ class CodeRunner:
             return self._run_code_host(source_code)
 
         if self.env =='e2b':
-            return self._run_code_e2b(source_code, task_id)
+            return await self._run_code_e2b(source_code, task_id)
 
         raise UnknownCodeEnvError(f'Unsupported code execution env: {self.env}')
 
-    def _run_code_host(self, source_code: str) -> tuple[str, str, int]:
+    def _run_code_host(self, source_code: str) -> tuple[str, str, int, list[str]]:
         """
         Run code on the host machine.
 
@@ -193,42 +195,56 @@ class CodeRunner:
             source_code: The Python source code to execute.
 
         Returns:
-            A tuple of (stdout, stderr, return_code).
+            A tuple of (stdout, stderr, return_code, generated_files).
         """
         import os
         import shutil
         import subprocess as sp
         import sys
         import tempfile
+        from pathlib import Path
 
         warnings.warn(
             'You are running LLM-generated code on your host. This could be potentially'
             ' dangerous! Please consider using a different code runner environment.',
             UserWarning
         )
-        with tempfile.NamedTemporaryFile(
-                mode='w+t', suffix='.py', delete=False, encoding='utf-8'
-        ) as code_file:
-            code_file.write(source_code)
-            code_file.close()
+        
+        # Use a dedicated temporary directory for this execution to capture outputs
+        temp_dir = tempfile.mkdtemp(prefix='kodeagent_run_')
+        try:
+            code_file_path = os.path.join(temp_dir, 'task_code.py')
+            with open(code_file_path, mode='w+t', encoding='utf-8') as code_file:
+                code_file.write(source_code)
 
             for a_file in self.local_modules_to_copy:
-                shutil.copy2(
-                    os.path.join(os.path.dirname(__file__), a_file),
-                    tempfile.gettempdir()
-                )
+                shutil.copy2(os.path.join(os.path.dirname(__file__), a_file), temp_dir)
 
             result = sp.run(
-                [sys.executable, code_file.name],
+                [sys.executable, 'task_code.py'],
                 shell=False, capture_output=True, text=True,
                 timeout=self.default_timeout,
+                cwd=temp_dir,
                 check=False,
                 encoding='utf-8'
             )
-            os.remove(code_file.name)
-            return result.stdout, result.stderr, result.returncode
+            
+            # Identify generated files (anything in temp_dir that wasn't there originally)
+            excluded_files = {'task_code.py'} | set(self.local_modules_to_copy)
+            generated_files = []
+            for item in os.listdir(temp_dir):
+                full_path = str(Path(temp_dir) / item)
+                if item not in excluded_files and os.path.isfile(full_path):
+                    generated_files.append(full_path)
 
-    def _run_code_e2b(self, source_code: str, task_id: str) -> tuple[str, str, int]:
+            return result.stdout, result.stderr, result.returncode, generated_files
+        finally:
+            # We don't remove temp_dir here because the agent might need the files?
+            # If we remove them, the paths returned become invalid.
+            # Usually, we should return valid paths.
+            pass
+
+    async def _run_code_e2b(self, source_code: str, task_id: str) -> tuple[str, str, int, list[str]]:
         """
         Run code in the E2B sandbox environment.
 
@@ -237,7 +253,7 @@ class CodeRunner:
             task_id: Unique task identifier for tracking.
 
         Returns:
-            A tuple of (stdout, stderr, return_code).
+            A tuple of (stdout, stderr, return_code, generated_files).
         """
         import os
         import sys
@@ -269,12 +285,21 @@ class CodeRunner:
                     sbx.files.write(f'/home/user/{a_file}', py_file.read())
                     logger.info('Copied file %s...', a_file)
 
-            logger.info('E2B sandbox info: %s', sbx.get_info())
+            logger.debug('E2B sandbox: %s', sbx.get_info())
+            
+            # List files before to identify NEW files
+            files_before = set(f.path for f in sbx.files.list('/home/user'))
+            
             execution = sbx.run_code(code=source_code, timeout=self.default_timeout)
+            
+            # List files after
+            files_after = set(f.path for f in sbx.files.list('/home/user'))
+            new_files = list(files_after - files_before)
+            
             std_out: str = '\n'.join(execution.logs.stdout)
             std_err: str = '\n'.join(execution.logs.stderr)
             if execution.error:
                 std_err += f'\n{execution.error.name}\n{execution.error.value}'
             ret_code: int = -1 if execution.error else 0
 
-        return std_out, std_err, ret_code
+        return std_out, std_err, ret_code, new_files
