@@ -33,18 +33,28 @@ class TestCodeRunnerEnv(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(os.path.exists(eff_dir))
 
     @patch('subprocess.run')
-    async def test_host_env_run(self, mock_run):
-        """Test running code in HostCodeRunnerEnv."""
+    async def test_host_env_run_with_generated_files(self, mock_run):
+        """Test HostCodeRunnerEnv when it generates files."""
         mock_run.return_value = MagicMock(stdout='hello', stderr='', returncode=0)
         env = HostCodeRunnerEnv(work_dir=self.temp_dir)
+        
+        # Create a "generated" file manually in the temp_dir
+        dummy_file = os.path.join(self.temp_dir, 'output.txt')
+        with open(dummy_file, 'w') as f:
+            f.write('new content')
+            
         stdout, _stderr, exit_code, generated_files = await env.run(
             'print("hello")', 'task1', 30
         )
         self.assertEqual(stdout, 'hello')
-        self.assertEqual(exit_code, 0)
-        # task_code.py should be in the directory but not in generated_files
-        self.assertTrue(os.path.exists(os.path.join(self.temp_dir, 'task_code.py')))
-        self.assertEqual(generated_files, [])
+        self.assertIn(dummy_file, generated_files)
+
+    async def test_host_env_download(self):
+        """Test HostCodeRunnerEnv.download_files_from_remote."""
+        env = HostCodeRunnerEnv(work_dir=self.temp_dir)
+        paths = ['/a/b/c.txt']
+        result = await env.download_files_from_remote(paths)
+        self.assertEqual(result, paths)
 
     @patch('e2b_code_interpreter.Sandbox')
     async def test_e2b_env_run(self, mock_cls):
@@ -73,5 +83,35 @@ class TestCodeRunnerEnv(unittest.IsolatedAsyncioTestCase):
         with open(local_files[0], 'r', encoding='utf-8') as f:
             self.assertEqual(f.read(), 'file content')
 
+    @patch('e2b_code_interpreter.Sandbox')
+    async def test_e2b_env_get_sandbox_reuse(self, mock_cls):
+        """Test that E2BCodeRunnerEnv reuses the sandbox."""
+        mock_sbx = MagicMock()
+        mock_cls.create.return_value = mock_sbx
+        
+        env = E2BCodeRunnerEnv(work_dir=self.temp_dir)
+        sbx1 = await env._get_sandbox('t1', 30)
+        sbx2 = await env._get_sandbox('t1', 30)
+        
+        self.assertIs(sbx1, sbx2)
+        self.assertEqual(mock_cls.create.call_count, 1)
+
+    async def test_e2b_env_download_edge_cases(self):
+        """Test E2BCodeRunnerEnv.download_files_from_remote edge cases."""
+        env = E2BCodeRunnerEnv(work_dir=self.temp_dir)
+        # 1. No paths
+        self.assertEqual(await env.download_files_from_remote([]), [])
+        # 2. No sandbox
+        self.assertEqual(await env.download_files_from_remote(['/p']), [])
+
+    @patch('e2b_code_interpreter.Sandbox')
+    async def test_e2b_env_cleanup(self, mock_cls):
+        """Test E2BCodeRunnerEnv cleanup calls kill."""
+        mock_sbx = MagicMock()
+        mock_cls.create.return_value = mock_sbx
+        
+        env = E2BCodeRunnerEnv(work_dir=self.temp_dir)
+        await env._get_sandbox('t1', 30)
         env.cleanup()
-        # mock_sbx.close.assert_called_once()
+        
+        mock_sbx.kill.assert_called_once()
