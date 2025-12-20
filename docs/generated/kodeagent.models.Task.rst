@@ -57,5 +57,6 @@ kodeagent.models.Task
       ~Task.result
       ~Task.is_finished
       ~Task.is_error
+      ~Task.output_files
    
    

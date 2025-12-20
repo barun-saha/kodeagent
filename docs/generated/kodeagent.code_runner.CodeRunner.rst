@@ -15,10 +15,18 @@ kodeagent.code\_runner.CodeRunner
    
       ~CodeRunner.__init__
       ~CodeRunner.check_imports
+      ~CodeRunner.cleanup
+      ~CodeRunner.download_files_from_remote
       ~CodeRunner.run
    
    
 
    
+   
+   .. rubric:: Attributes
+
+   .. autosummary::
+   
+      ~CodeRunner.local_modules_to_copy
    
    

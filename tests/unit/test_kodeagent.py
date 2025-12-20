@@ -444,7 +444,9 @@ async def test_codeact_agent_host():
         with patch('kodeagent.kodeagent.CodeRunner') as mock_runner_class:
             # Create a mock runner instance
             mock_runner_instance = MagicMock()
+            mock_runner_instance.env_name = 'host'
             mock_runner_instance.run = AsyncMock(return_value=(current_month, '', 0, []))
+            mock_runner_instance.cleanup = MagicMock()
             mock_runner_class.return_value = mock_runner_instance
 
             code_agent = CodeActAgent(
@@ -522,6 +524,8 @@ async def test_codeact_agent_unsupported_env():
         with patch('kodeagent.kodeagent.CodeRunner') as mock_runner_class:
             # Create a mock runner that simulates unsupported env error
             mock_runner_instance = MagicMock()
+            mock_runner_instance.env_name = 'unknown_env'
+            mock_runner_instance.cleanup = MagicMock()
 
             async def mock_run_with_error(*args, **kwargs):
                 # Return error tuple instead of raising exception
@@ -578,6 +582,44 @@ def test_code_chat_message_validation():
             task_successful=False,
             final_answer=None
         )
+
+
+@pytest.mark.asyncio
+async def test_code_act_remote_file_download():
+    """Test that CodeActAgent downloads files from remote env."""
+    with patch('kodeagent.kutils.call_llm') as mock_llm:
+        with patch('kodeagent.kodeagent.CodeRunner') as mock_runner_class:
+            mock_runner = MagicMock()
+            mock_runner.env_name = 'e2b'
+            # Mock run to return a generated file
+            mock_runner.run = AsyncMock(return_value=('output', '', 0, ['/home/user/test.txt']))
+            # Mock download to return local path
+            mock_runner.download_files_from_remote = AsyncMock(return_value=['/tmp/test.txt'])
+            mock_runner_class.return_value = mock_runner
+
+            agent = CodeActAgent(
+                name='test_agent',
+                model_name=MODEL_NAME,
+                run_env='e2b'
+            )
+            agent.code_runner = mock_runner
+            agent._run_init('task')
+            
+            # Add a message with code
+            agent.add_to_history(CodeActChatMessage(
+                role='assistant',
+                thought='running code',
+                code='print(1)'
+            ))
+            
+            responses = []
+            async for resp in agent._act():
+                responses.append(resp)
+            
+            # Verify download was called
+            mock_runner.download_files_from_remote.assert_called_once_with(['/home/user/test.txt'])
+            # Verify file was added to output files
+            assert '/tmp/test.txt' in agent.task_output_files
 
 
 @pytest.mark.asyncio
@@ -1271,6 +1313,71 @@ def test_current_plan_property():
     assert current is not None
     assert 'Step 1' in current
     assert 'Step 2' in current
+
+
+def test_artifacts_property_empty():
+    """Test artifacts property returns empty list initially."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+
+    # Artifacts should be empty initially
+    assert agent.artifacts == []
+    assert isinstance(agent.artifacts, list)
+
+
+def test_artifacts_property_with_files():
+    """Test artifacts property returns task output files."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+
+    # Initialize task
+    agent._run_init('Generate output files')
+
+    # Add output files
+    agent.add_output_file('/path/to/file1.txt')
+    agent.add_output_file('/path/to/file2.csv')
+    agent.add_output_file('/path/to/file3.json')
+
+    # Check artifacts property
+    artifacts = agent.artifacts
+    assert len(artifacts) == 3
+    assert '/path/to/file1.txt' in artifacts
+    assert '/path/to/file2.csv' in artifacts
+    assert '/path/to/file3.json' in artifacts
+
+
+def test_artifacts_property_no_duplicates():
+    """Test artifacts property handles duplicate files correctly."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+
+    agent._run_init('Generate output files')
+
+    # Add the same file twice
+    agent.add_output_file('/path/to/file1.txt')
+    agent.add_output_file('/path/to/file1.txt')
+
+    # Should only have one entry
+    artifacts = agent.artifacts
+    assert len(artifacts) == 1
+    assert artifacts[0] == '/path/to/file1.txt'
+
+
+def test_artifacts_property_after_task_reset():
+    """Test artifacts property is reset when initializing new task."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
+
+    # First task
+    agent._run_init('Task 1')
+    agent.add_output_file('/path/to/output1.txt')
+    assert len(agent.artifacts) == 1
+
+    # Initialize new task (should reset artifacts)
+    agent._run_init('Task 2')
+    assert agent.artifacts == []
+
+    # Add new files
+    agent.add_output_file('/path/to/output2.txt')
+    assert len(agent.artifacts) == 1
+    assert '/path/to/output2.txt' in agent.artifacts
+    assert '/path/to/output1.txt' not in agent.artifacts
 
 
 @pytest.mark.asyncio
@@ -3012,22 +3119,22 @@ def test_agent_init_history():
     class ConcreteAgent(Agent):
         def parse_text_response(self, text):
             return ChatMessage(role='assistant', content=text)
-        
+
         async def run(self, task, files=None, task_id=None):
             yield {'type': 'final', 'value': 'done', 'channel': 'test', 'metadata': {}}
-            
+
         def formatted_history_for_llm(self):
             return []
 
     agent = ConcreteAgent(name='test', model_name='test-model')
-    
+
     # Add some history
     agent.add_to_history(ChatMessage(role='user', content='test'))
     assert len(agent.messages) == 1
-    
+
     # Call init_history
     agent.init_history()
-    
+
     # Verify history is cleared
     assert len(agent.messages) == 0
 
@@ -3037,10 +3144,10 @@ def test_react_init_history(react_agent):
     # Add some history first
     react_agent.add_to_history(ChatMessage(role='user', content='test'))
     assert len(react_agent.messages) == 1
-    
+
     # Call init_history
     react_agent.init_history()
-    
+
     # Verify history is cleared and system prompt is added
     assert len(react_agent.messages) == 1
     assert react_agent.messages[0].role == 'system'
@@ -3052,23 +3159,23 @@ def test_codeact_init_history():
     """Test CodeActAgent init_history method."""
     # Create agent
     agent = CodeActAgent(
-        name='test_codeact', 
+        name='test_codeact',
         model_name='test-model',
         run_env='host',
         allowed_imports=['json', 'os']
     )
-    
+
     # Add some history
     agent.add_to_history(ChatMessage(role='user', content='test'))
     assert len(agent.messages) == 1
-    
+
     # Call init_history
     agent.init_history()
-    
+
     # Verify history is cleared and system prompt is added
     assert len(agent.messages) == 1
     assert agent.messages[0].role == 'system'
-    
+
     # Check content of system prompt
     content = agent.messages[0].content
     assert 'json' in content
@@ -3138,6 +3245,10 @@ def test_cleanup_resets_observer(react_agent):
 def test_cleanup_with_codeact_agent(codeact_agent_factory):
     """Test that _cleanup() works correctly with CodeActAgent."""
     agent = codeact_agent_factory()
+
+    # Mock code_runner as MagicMock
+    agent.code_runner = MagicMock()
+    agent.code_runner.cleanup = MagicMock()
 
     # Set up initial state
     agent._run_init('Test task', files=['script.py'])
@@ -3279,26 +3390,26 @@ async def test_observer_yields_correction_message():
 def test_incremental_history_react_agent():
     """Test incremental history logic for ReActAgent from start to finish."""
     agent = ReActAgent(name="test", model_name="gpt-4o", tools=[])
-    
+
     # 0. Initial state (system prompt)
     agent.init_history()
     assert len(agent.messages) == 1
     assert agent._history_processed_idx == -1
-    
+
     # 1. First call - should process system prompt
     h1 = agent.formatted_history_for_llm()
     assert len(h1) == 1
     assert h1[0]['role'] == 'system'
     assert agent._history_processed_idx == 0
     assert len(agent._formatted_history_cache) == 1
-    
+
     # 2. Add user message
     agent.add_to_history(ChatMessage(role='user', content='Hello'))
     h2 = agent.formatted_history_for_llm()
     assert len(h2) == 2
     assert agent._history_processed_idx == 1
     assert h2[1]['role'] == 'user'
-    
+
     # 3. Add another user message (should merge content)
     agent.add_to_history(ChatMessage(role='user', content='World'))
     h3 = agent.formatted_history_for_llm()
@@ -3310,7 +3421,7 @@ def test_incremental_history_react_agent():
     assert len(content) == 2
     assert content[0]['text'] == 'Hello'
     assert content[1]['text'] == 'World'
-    
+
     # 4. Add assistant thought/action (tool call)
     msg = ReActChatMessage(
         role='assistant',
@@ -3327,18 +3438,18 @@ def test_incremental_history_react_agent():
     assert agent._history_processed_idx == 3
     assert agent._pending_tool_call is True
     assert agent._last_tool_call_id is not None
-    
+
     # Verify structure of assistant message
     asst_msg = h4[2]
     assert asst_msg['tool_calls'][0]['function']['name'] == 'test_tool'
     assert asst_msg['tool_calls'][0]['id'] == agent._last_tool_call_id
-    
+
     # Verify placeholder
     placeholder = h4[3]
     assert placeholder['role'] == 'tool'
     assert placeholder['tool_call_id'] == agent._last_tool_call_id
     assert 'Error' in placeholder['content']
-    
+
     # 5. Add tool response
     agent.add_to_history(ChatMessage(role='tool', content='Success'))
     h5 = agent.formatted_history_for_llm()
@@ -3347,13 +3458,13 @@ def test_incremental_history_react_agent():
     assert agent._history_processed_idx == 4
     assert agent._pending_tool_call is False
     assert agent._last_tool_call_id is None
-    
+
     # Verify tool response
     tool_msg = h5[3]
     assert tool_msg['role'] == 'tool'
     assert tool_msg['content'] == 'Success'
     assert 'tool_call_id' in tool_msg # Should have ID attached
-    
+
     # 6. Add final answer
     final_msg = ReActChatMessage(
         role='assistant',
@@ -3371,19 +3482,19 @@ def test_incremental_history_react_agent():
 def test_incremental_history_codeact_agent():
     """Test incremental history logic for CodeActAgent."""
     agent = CodeActAgent(name="test", model_name="gpt-4o", run_env="host", allowed_imports=[])
-    
+
     # 0. Init
     agent.init_history()
     assert len(agent.messages) == 1
-    
+
     # 1. Process System
     h1 = agent.formatted_history_for_llm()
     assert len(h1) == 1
-    
+
     # 2. Add User
     agent.add_to_history(ChatMessage(role='user', content='Run code'))
     agent.formatted_history_for_llm()
-    
+
     # 3. Add Code Action
     msg = CodeActChatMessage(
         role='assistant',
@@ -3394,21 +3505,21 @@ def test_incremental_history_codeact_agent():
     )
     agent.add_to_history(msg)
     h3 = agent.formatted_history_for_llm()
-    
-    # Note: CodeActAgent doesn't use pending placeholder logic in the same way 
-    # because it doesn't have the same strict tool-call/response pairing requirement 
-    # visible in the loop structure (it yields steps differently), BUT 
-    # the formatted_history_for_llm logic DOES NOT implement the placeholder logic 
+
+    # Note: CodeActAgent doesn't use pending placeholder logic in the same way
+    # because it doesn't have the same strict tool-call/response pairing requirement
+    # visible in the loop structure (it yields steps differently), BUT
+    # the formatted_history_for_llm logic DOES NOT implement the placeholder logic
     # for CodeActAgent in the provided code (it was just `pass` in `if pending...`).
     # Wait, let me check the implementation I wrote.
     # checking `formatted_history_for_llm` in CodeActAgent...
     # I did NOT add the placeholder logic block at the end of CodeActAgent.
     # So we expect NO placeholder.
-    
+
     assert len(h3) == 3 # System, User, Assistant
     code_msg = h3[2]
     assert code_msg['tool_calls'][0]['function']['name'] == 'code_execution'
-    
+
     # 4. Add Tool Output
     agent.add_to_history(ChatMessage(role='tool', content='hi'))
     h4 = agent.formatted_history_for_llm()
@@ -3422,19 +3533,19 @@ def test_incremental_history_reset_logic():
     agent = ReActAgent(name="test", model_name="gpt-4o", tools=[])
     agent.init_history()
     agent.formatted_history_for_llm()
-    
+
     # Modify state
     agent.add_to_history(ChatMessage(role='user', content='test'))
     agent.formatted_history_for_llm()
     assert agent._history_processed_idx == 1
     assert len(agent._formatted_history_cache) == 2
-    
+
     # Clear
     agent.clear_history()
     assert agent._history_processed_idx == -1
     assert len(agent._formatted_history_cache) == 0
     assert len(agent.messages) == 0
-    
+
     # Init again
     agent.init_history()
     result = agent.formatted_history_for_llm()
@@ -3446,13 +3557,13 @@ def test_incremental_history_no_new_messages():
     """Test behavior when called multiple times with no new messages."""
     agent = ReActAgent(name="test", model_name="gpt-4o", tools=[])
     agent.init_history()
-    
+
     # First call
     h1 = agent.formatted_history_for_llm()
-    
+
     # Second call - no changes
     h2 = agent.formatted_history_for_llm()
-    
+
     assert h1 == h2
     assert h1 is not h2 # Should be a copy (list constructor used)
 

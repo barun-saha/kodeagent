@@ -323,7 +323,8 @@ class Agent(ABC):
             system_prompt: Optional[str] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
-            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
+            work_dir: Optional[str] = None
     ):
         """
         Create an agent.
@@ -338,11 +339,13 @@ class Agent(ABC):
             max_iterations: The max iterations an agent can perform to solve a task.
             filter_tools_for_task: Whether the tools should be filtered for a task. Unused.
             max_retries: Maximum number of retries for LLM calls.
+            work_dir: Optional local workspace directory.
         """
         self.id = uuid.uuid4()
         self.name: str = name
         self.description = description
         self.model_name: str = model_name
+        self.work_dir = work_dir
 
         self.tools = tools or []
         self.filter_tools_for_task = filter_tools_for_task
@@ -396,6 +399,11 @@ class Agent(ABC):
             return None
         return self.planner.get_formatted_plan()
 
+    @property
+    def artifacts(self) -> list[str]:
+        """Returns the list of output files generated during task execution."""
+        return self.task_output_files
+
     async def get_relevant_tools(
             self,
             task_description: str,
@@ -441,7 +449,7 @@ class Agent(ABC):
             files: Optional files for the task.
             task_id: Optional task ID.
         """
-        self._cleanup()
+        # self._cleanup()
         self.task = Task(description=description, files=files)
         self.task_output_files = []
         if task_id:
@@ -470,10 +478,16 @@ class Agent(ABC):
         self.task = None
         self.final_answer_found = False
         self.msg_idx_of_new_task = 0
-        self.task_output_files = []
+        # self.task_output_files = []
 
         if self.planner:
             self.planner.plan = None
+
+        # TODO:
+        #  Cleaning up code runner will delete all files in its workspace.
+        #  How to handle persistent files across tasks?
+        # if hasattr(self, 'code_runner') and self.code_runner:
+        #     self.code_runner.cleanup()
 
         self._reset_observer()
 
@@ -728,7 +742,8 @@ class ReActAgent(Agent):
             system_prompt: Optional[str] = None,
             max_iterations: int = 20,
             filter_tools_for_task: bool = False,
-            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
+            work_dir: Optional[str] = None
     ):
         super().__init__(
             name=name,
@@ -739,7 +754,8 @@ class ReActAgent(Agent):
             system_prompt=system_prompt or REACT_SYSTEM_PROMPT,
             max_iterations=max_iterations,
             filter_tools_for_task=filter_tools_for_task,
-            max_retries=max_retries
+            max_retries=max_retries,
+            work_dir=work_dir
         )
 
         self.planner = Planner(model_name, litellm_params, max_retries=max_retries)
@@ -1213,7 +1229,8 @@ class ReActAgent(Agent):
                     with OutputInterceptor() as interceptor:
                         result = self.tool_name_to_func[tool_name](**tool_args_dict)
                         # Record any files captured by the interceptor
-                        for f in interceptor.get_manifest():
+                        generated_files = interceptor.get_manifest()
+                        for f in generated_files:
                             self.add_output_file(f)
 
                     # Always use role='tool' for tool results
@@ -1225,7 +1242,7 @@ class ReActAgent(Agent):
                         metadata={
                             'tool': tool_name,
                             'args': tool_args_dict,
-                            'generated_files': interceptor.get_manifest()
+                            'generated_files': generated_files
                         }
                     )
                 else:
@@ -1496,7 +1513,8 @@ class CodeActAgent(ReActAgent):
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
             filter_tools_for_task: bool = False,
-            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
+            work_dir: Optional[str] = None
     ):
         super().__init__(
             name=name,
@@ -1507,7 +1525,8 @@ class CodeActAgent(ReActAgent):
             system_prompt=system_prompt or CODE_ACT_SYSTEM_PROMPT,
             description=description,
             filter_tools_for_task=filter_tools_for_task,
-            max_retries=max_retries
+            max_retries=max_retries,
+            work_dir=work_dir
         )
         self.tools_source_code: str = 'from typing import *\n\n'
 
@@ -1522,12 +1541,14 @@ class CodeActAgent(ReActAgent):
 
         self.allowed_imports = allowed_imports + ['datetime', 'typing', 'mimetypes']
         self.code_runner = CodeRunner(
-            model_name=self.model_name,
             env=run_env,
             allowed_imports=self.allowed_imports,
-            pip_packages=self.pip_packages,
+            model_name=model_name,
+            pip_packages=pip_packages,
             timeout=timeout,
             env_vars_to_set=env_vars_to_set,
+            litellm_params=litellm_params,
+            work_dir=self.work_dir
         )
 
     def formatted_history_for_llm(self) -> list[dict]:
@@ -1761,10 +1782,12 @@ class CodeActAgent(ReActAgent):
                     self.tools_source_code, code, self.task.id
                 )
                 
-                # Record any files generated by the code
-                for f in generated_files:
-                    self.add_output_file(f)
-                
+                # Download files from remote environment if necessary
+                if generated_files:
+                    files = await self.code_runner.download_files_from_remote(generated_files)
+                    for f in files:
+                        self.add_output_file(f)
+
                 observation = f'{stdout}\n{stderr}'.strip()
                 msg = ChatMessage(role='tool', content=observation)
                 self.add_to_history(msg)
@@ -1847,22 +1870,23 @@ async def main():
         litellm_params=litellm_params,
         filter_tools_for_task=False
     )
-    # agent = CodeActAgent(
-    #     name='Simple agent',
-    #     model_name=model_name,
-    #     tools=[
-    #         dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
-    #     ],
-    #     max_iterations=7,
-    #     litellm_params=litellm_params,
-    #     run_env='host',
-    #     allowed_imports=[
-    #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
-    #         'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
-    #     ],
-    #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
-    #     filter_tools_for_task=False
-    # )
+    agent = CodeActAgent(
+        name='Simple agent',
+        model_name=model_name,
+        tools=[
+            dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
+        ],
+        max_iterations=7,
+        litellm_params=litellm_params,
+        run_env='host',
+        allowed_imports=[
+            'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
+            'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
+        ],
+        pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
+        filter_tools_for_task=False,
+        work_dir='./agent_workspace'
+    )
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
@@ -1884,17 +1908,21 @@ async def main():
             ['https://web.stanford.edu/class/cs102/lectureslides/ClassificationSlides.pdf',]
         ),
         (
-            'Write an elegant haiku in Basho style. Save it as poem.txt',
-            None
+            'Write an elegant haiku in Basho style. Save it as poem.txt', None
         )
     ]
 
     print(f'{agent.__class__.__name__} demo\n')
 
-    for task, img_urls in the_tasks:
+    for task, img_urls in the_tasks[-1:]:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in agent.run(task, files=img_urls):
             print_response(response, only_final=True)
+
+        if agent.artifacts:
+            print('Artifacts generated:')
+            for art in agent.artifacts:
+                print(f'- {art} (size: {os.path.getsize(art)} bytes)')
 
         if agent.current_plan:
             print(f'Plan:\n{agent.current_plan}')
