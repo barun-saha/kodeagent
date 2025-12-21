@@ -2491,10 +2491,7 @@ async def test_update_plan_with_history():
     agent.add_to_history(ChatMessage(role='tool', content='4'))
 
     # Create initial plan
-    agent.planner.plan = AgentPlan(steps=[
-        PlanStep(description='Use calculator', is_done=False)
-    ])
-
+    agent.planner.plan = AgentPlan(steps=[PlanStep(description='Use calculator', is_done=False)])
     mock_response = '{"steps": [{"description": "Use calculator", "is_done": true}]}'
 
     with patch('kodeagent.kutils.call_llm', return_value=mock_response):
@@ -2760,6 +2757,7 @@ def test_agent_msg_idx_of_new_task():
 
     # Initially 0
     assert agent.msg_idx_of_new_task == 0
+    assert agent.task_output_files == []
 
     # Add some messages
     agent.add_to_history(ChatMessage(role='user', content='First task'))
@@ -2770,6 +2768,7 @@ def test_agent_msg_idx_of_new_task():
 
     # msg_idx should still be 0 (it's set in run(), not _run_init())
     assert agent.msg_idx_of_new_task == 0
+    assert agent.task_output_files == []
 
 
 def test_parse_text_response_with_no_action_or_answer():
