@@ -109,7 +109,7 @@ class ReActChatMessage(ChatMessage):
         default=None
     )
     task_successful: bool = pyd.Field(
-        description='Task completed or failed?',
+        description='Task completed or failed? False when `args` is set.',
         default=False
     )
 
@@ -231,7 +231,7 @@ class CodeActChatMessage(ChatMessage):
         default=None
     )
     task_successful: bool = pyd.Field(
-        description='Task completed or failed?',
+        description='Task completed or failed? False when `code` is set.',
         default=False
     )
 
