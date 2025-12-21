@@ -469,7 +469,6 @@ class Agent(ABC):
         self._last_tool_call_id = None
         self._pending_tool_call = False
         self.final_answer_found = False
-        self.task_output_files = []
 
     def add_output_file(self, path: str):
         """
@@ -1846,23 +1845,23 @@ async def main():
         litellm_params=litellm_params,
         filter_tools_for_task=False
     )
-    # agent = CodeActAgent(
-    #     name='Simple agent',
-    #     model_name=model_name,
-    #     tools=[
-    #         dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
-    #     ],
-    #     max_iterations=7,
-    #     litellm_params=litellm_params,
-    #     run_env='host',
-    #     allowed_imports=[
-    #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
-    #         'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
-    #     ],
-    #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
-    #     filter_tools_for_task=False,
-    #     work_dir='./agent_workspace'
-    # )
+    agent = CodeActAgent(
+        name='Simple agent',
+        model_name=model_name,
+        tools=[
+            dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
+        ],
+        max_iterations=7,
+        litellm_params=litellm_params,
+        run_env='host',
+        allowed_imports=[
+            'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
+            'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
+        ],
+        pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
+        filter_tools_for_task=False,
+        work_dir='./agent_workspace'
+    )
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
