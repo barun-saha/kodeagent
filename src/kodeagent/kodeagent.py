@@ -469,6 +469,7 @@ class Agent(ABC):
         self._last_tool_call_id = None
         self._pending_tool_call = False
         self.final_answer_found = False
+        self.task_output_files = []
 
     def add_output_file(self, path: str):
         """
