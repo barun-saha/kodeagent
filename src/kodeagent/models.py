@@ -85,6 +85,10 @@ class ReActChatMessage(ChatMessage):
     Messages for the ReAct agent with built-in validation.
     Combines functionality of ReActAgentResponse and ReActChatMessage.
     """
+    role: MESSAGE_ROLES = pyd.Field(
+        description='Role of the message sender',
+        default='assistant'  # Add default
+    )
     content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True, default=None)
     thought: str = pyd.Field(description='Thoughts behind the tool use')
     action: str = pyd.Field(
@@ -212,6 +216,10 @@ class CodeActChatMessage(ChatMessage):
     Messages for the CodeActAgent with built-in validation.
     Combines functionality of CodeActAgentResponse and CodeActChatMessage.
     """
+    role: MESSAGE_ROLES = pyd.Field(
+        description='Role of the message sender',
+        default='assistant'
+    )
     content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True, default=None)
     thought: str = pyd.Field(description='Thoughts behind the code')
     code: Optional[str] = pyd.Field(
@@ -259,6 +267,7 @@ class CodeActChatMessage(ChatMessage):
         return self.final_answer is not None
 
     def __str__(self) -> str:
+        """Return a string representation of the message."""
         if self.is_final:
             return f'{self.final_answer}'
             

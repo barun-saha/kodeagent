@@ -1057,8 +1057,9 @@ class ReActAgent(Agent):
                             parsed_json['task_successful'] = False
 
                     # Validate and create message directly
+                    if 'role' not in parsed_json:
+                        parsed_json['role'] = 'assistant'  # Add role BEFORE validation
                     msg = response_format_class.model_validate(parsed_json)
-                    msg.role = 'assistant'  # Set role
 
                     logger.debug('Successfully parsed structured JSON response')
 
