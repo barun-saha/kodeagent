@@ -1,7 +1,7 @@
 """
 Unit tests for the agents and their operations.
 """
-import asyncio
+import json
 import datetime
 from typing import Optional, AsyncIterator
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -597,11 +597,7 @@ async def test_code_act_remote_file_download():
             mock_runner.download_files_from_remote = AsyncMock(return_value=['/tmp/test.txt'])
             mock_runner_class.return_value = mock_runner
 
-            agent = CodeActAgent(
-                name='test_agent',
-                model_name=MODEL_NAME,
-                run_env='e2b'
-            )
+            agent = CodeActAgent(name='test_agent', model_name=MODEL_NAME, run_env='e2b')
             agent.code_runner = mock_runner
             agent._run_init('task')
             
@@ -663,19 +659,14 @@ Code: print("Raw code")"""
 
 def test_code_act_parser_invalid():
     """Test CodeAct parser with missing Code and Final Answer (should raise ValueError)."""
-    agent = CodeActAgent(
-        name='test_codeact',
-        model_name=MODEL_NAME,
-        run_env='host'
-    )
-    
+    agent = CodeActAgent(name='test_codeact', model_name=MODEL_NAME, run_env='host')
     # Response with Thought but no Code/Answer
-    text_response = """Thought: I am thinking..."""
+    text_response = '''Thought: I am thinking...'''
     
     with pytest.raises(ValueError) as excinfo:
         agent.parse_text_response(text_response)
     
-    assert "Could not extract valid Code or Answer" in str(excinfo.value)
+    assert 'Could not extract valid Code or Answer' in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -699,12 +690,7 @@ async def test_agent_with_no_tools():
         )
 
     with patch('kodeagent.kutils.call_llm', side_effect=llm_side_effect):
-        agent = ReActAgent(
-            name='no_tools_agent',
-            model_name=MODEL_NAME,
-            tools=[],
-            max_iterations=1
-        )
+        agent = ReActAgent(name='no_tool_agent', model_name=MODEL_NAME, tools=[], max_iterations=1)
         assert len(agent.tools) == 0
         assert len(agent.tool_names) == 0
 
@@ -720,11 +706,7 @@ async def test_agent_with_no_tools():
 
 def test_agent_response_helper():
     """Test the response helper method of Agent."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
 
     step_response = agent.response('step', 'test value', 'test_channel')
     assert step_response['type'] == 'step'
@@ -863,10 +845,7 @@ def test_observer_response_validation():
 @pytest.fixture
 def planner():
     """Fixture to create a Planner instance for testing."""
-    return Planner(
-        model_name=MODEL_NAME,
-        litellm_params={'max_tokens': 1000}
-    )
+    return Planner(model_name=MODEL_NAME, litellm_params={'max_tokens': 1000})
 
 
 @pytest.mark.asyncio
@@ -1252,11 +1231,7 @@ def test_react_chat_message_args_validation():
 @pytest.mark.asyncio
 async def test_record_thought_with_json_repair():
     """Test _record_thought with JSON repair."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     agent._run_init('Test task')
 
     # Mock response with slightly malformed JSON
@@ -1271,11 +1246,7 @@ async def test_record_thought_with_json_repair():
 @pytest.mark.asyncio
 async def test_record_thought_max_retries():
     """Test _record_thought max retries."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     agent._run_init('Test task')
 
     # Mock response that always fails
@@ -1301,12 +1272,7 @@ def test_get_tools_description_with_filter():
 
 def test_current_plan_property():
     """Test current_plan property."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
-
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     # No plan initially
     assert agent.current_plan is None
 
@@ -1356,7 +1322,6 @@ def test_artifacts_property_with_files():
 def test_artifacts_property_no_duplicates():
     """Test artifacts property handles duplicate files correctly."""
     agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
-
     agent._run_init('Generate output files')
 
     # Add the same file twice
@@ -1392,14 +1357,9 @@ def test_artifacts_property_after_task_reset():
 @pytest.mark.asyncio
 async def test_salvage_response():
     """Test salvage_response method."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     agent._run_init('Calculate 2+2')
     agent.add_to_history(ChatMessage(role='user', content='Calculate 2+2'))
-
     mock_response = 'I attempted to calculate but failed'
 
     with patch('kodeagent.kutils.call_llm', return_value=mock_response):
@@ -1409,12 +1369,7 @@ async def test_salvage_response():
 
 def test_get_history():
     """Test get_history method."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
-
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     agent.add_to_history(ChatMessage(role='user', content='Hello'))
     agent.add_to_history(ChatMessage(role='assistant', content='Hi'))
 
@@ -1430,12 +1385,7 @@ def test_get_history():
 
 def test_run_init():
     """Test _run_init method."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
-
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     agent._run_init('Test task', files=['file1.txt'], task_id='custom_id')
 
     assert agent.task is not None
@@ -1453,7 +1403,6 @@ async def test_observer_with_negative_threshold():
         tool_names={'calculator'},
         threshold=None  # Disabled observer
     )
-
     task = Task(description='Test', files=None)
     correction = await observer.observe(
         iteration=5,
@@ -1475,7 +1424,6 @@ async def test_observer_exception_handling():
         tool_names={'calculator'},
         threshold=1
     )
-
     task = Task(description='Test', files=None)
 
     with patch('kodeagent.kutils.call_llm', side_effect=Exception('LLM error')):
@@ -1493,12 +1441,7 @@ async def test_observer_exception_handling():
 
 def test_formatted_history_for_llm_react():
     """Test formatted_history_for_llm for ReActAgent."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
-
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     agent.add_to_history(ChatMessage(role='system', content='You are helpful'))
     agent.add_to_history(ChatMessage(role='user', content='Calculate 2+2', files=['file.txt']))
     agent.add_to_history(ReActChatMessage(
@@ -1578,7 +1521,6 @@ def test_chat_message_with_files():
         content='Analyze this file',
         files=['file1.txt', 'file2.txt']
     )
-
     assert msg.files == ['file1.txt', 'file2.txt']
     assert msg.role == 'user'
 
@@ -1588,7 +1530,6 @@ def test_task_with_custom_id():
     custom_id = 'my-custom-task-id'
     task = Task(description='Test', files=None)
     task.id = custom_id
-
     assert task.id == custom_id
 
 
@@ -1630,23 +1571,13 @@ def test_planner_with_litellm_params():
 
 def test_observer_with_custom_threshold():
     """Test Observer with custom threshold."""
-    observer = Observer(
-        model_name=MODEL_NAME,
-        tool_names={'calculator'},
-        threshold=5
-    )
-
+    observer = Observer(model_name=MODEL_NAME, tool_names={'calculator'}, threshold=5)
     assert observer.threshold == 5
 
 
 def test_agent_is_visual_model():
     """Test agent visual model detection."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
-
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     # is_visual_model should be set during initialization
     assert isinstance(agent.is_visual_model, bool)
 
@@ -1654,12 +1585,7 @@ def test_agent_is_visual_model():
 @pytest.mark.asyncio
 async def test_act_with_malformed_response():
     """Test _act with malformed response."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
-
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     # Create a message without thought
     msg = ChatMessage(role='assistant', content='No thought here')
     agent.add_to_history(msg)
@@ -1736,11 +1662,7 @@ def test_codeact_chat_message_is_final():
 @pytest.mark.asyncio
 async def test_record_thought_with_mutual_exclusivity_fix():
     """Test _record_thought fixes mutual exclusivity violations."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     agent._run_init('Test task')
 
     # Mock response with both action and final_answer (violation)
@@ -1780,11 +1702,7 @@ async def test_record_thought_codeact_mutual_exclusivity_fix():
 @pytest.mark.asyncio
 async def test_act_with_tool_execution_success():
     """Test _act with successful tool execution."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator]
-    )
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     agent._run_init('Calculate 2+2')
 
     msg = ReActChatMessage(
@@ -3431,3 +3349,42 @@ def test_incremental_history_no_new_messages():
     assert h1 == h2
     assert h1 is not h2 # Should be a copy (list constructor used)
 
+
+@pytest.mark.asyncio
+async def test_run_with_invalid_files_type(react_agent):
+    """
+    Test that run raises ValueError when files is not a list.
+    Covers line: raise ValueError('Task files must be a list of file paths!')
+    """
+    # Valid task, invalid files type (string instead of list)
+    with pytest.raises(ValueError, match='Task files must be a list of file paths!'):
+        # Iterate over the async generator to trigger execution
+        async for _ in react_agent.run(task='Do something', files='invalid_file_arg'):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_record_thought_adds_missing_role(react_agent):
+    """
+    Test that _record_thought adds 'role': 'assistant' if missing from LLM JSON.
+    Covers line: parsed_json['role'] = 'assistant'  # Add role BEFORE validation
+    """
+    # JSON response missing strict 'role' field
+    response_no_role = json.dumps({
+        "thought": "I will calculate 2+2",
+        "action": "calculator",
+        "args": {"expression": "2+2"},
+        "task_successful": False,
+        "final_answer": None
+    })
+
+    # Patch _chat to return our specific JSON string
+    with patch.object(react_agent, '_chat', return_value=response_no_role):
+        # Call _record_thought using ReActChatMessage schema
+        msg = await react_agent._record_thought(ReActChatMessage)
+
+        assert msg is not None
+        assert isinstance(msg, ReActChatMessage)
+        # Check that role was automatically added
+        assert msg.role == 'assistant'
+        assert msg.thought == 'I will calculate 2+2'
