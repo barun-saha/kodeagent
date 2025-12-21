@@ -963,6 +963,15 @@ def test_planner_empty_plan(planner):
     assert planner.plan is None
 
 
+def test_planner_reset(planner):
+    """Test resetting the planner."""
+    # Create a plan manually for testing
+    plan = AgentPlan(steps=[PlanStep(description='Step 1', is_done=True)])
+    planner.plan = plan
+    planner.reset()
+    assert planner.plan is None
+
+
 def test_abstract_agent(mock_llm):
     """Test agent initialization."""
     with pytest.raises(TypeError):
