@@ -1753,6 +1753,7 @@ class CodeActAgent(ReActAgent):
                 code = code.replace('```python', '')
                 code = code.replace('```', '').strip()
 
+                logger.debug('🛠 Running code [truncated]: ... %s', code[-100:])
                 stdout, stderr, exit_status, generated_files = await self.code_runner.run(
                     self.tools_source_code, code, self.task.id
                 )
