@@ -989,7 +989,7 @@ class ReActAgent(Agent):
                         )
 
         except asyncio.CancelledError:
-            logger.warning('Iteration cancelled; cleaning up pending resources')
+            logger.warning('Iteration cancelled')
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think about the next step using the new structured response format."""
