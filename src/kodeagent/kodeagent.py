@@ -826,6 +826,8 @@ class ReActAgent(Agent):
         """
         if not task or not task.strip():
             raise ValueError('Task description cannot be empty!')
+        if files and not isinstance(files, list):
+            raise ValueError('Task files must be a list of file paths!')
         if files and len(files) > MAX_TASK_FILES:
             raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
 
