@@ -826,6 +826,8 @@ class ReActAgent(Agent):
         """
         if not task or not task.strip():
             raise ValueError('Task description cannot be empty!')
+        if files and not isinstance(files, list):
+            raise ValueError('Task files must be a list of file paths!')
         if files and len(files) > MAX_TASK_FILES:
             raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
 
@@ -1055,8 +1057,9 @@ class ReActAgent(Agent):
                             parsed_json['task_successful'] = False
 
                     # Validate and create message directly
+                    if 'role' not in parsed_json:
+                        parsed_json['role'] = 'assistant'  # Add role BEFORE validation
                     msg = response_format_class.model_validate(parsed_json)
-                    msg.role = 'assistant'  # Set role
 
                     logger.debug('Successfully parsed structured JSON response')
 
@@ -1753,6 +1756,7 @@ class CodeActAgent(ReActAgent):
                 code = code.replace('```python', '')
                 code = code.replace('```', '').strip()
 
+                logger.debug('🛠 Running code [truncated]: ... %s', code[-100:])
                 stdout, stderr, exit_status, generated_files = await self.code_runner.run(
                     self.tools_source_code, code, self.task.id
                 )
