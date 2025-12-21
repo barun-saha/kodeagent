@@ -453,11 +453,22 @@ class Agent(ABC):
             files: Optional files for the task.
             task_id: Optional task ID.
         """
-        # self._cleanup()
         self.task = Task(description=description, files=files)
         self.task_output_files = []
         if task_id:
             self.task.id = task_id
+
+        if self.planner:
+            self.planner.reset()
+
+        if self.observer:
+            self.observer.reset()
+
+        self._observer_history_str = ''
+        self._observer_history_idx = -1
+        self._last_tool_call_id = None
+        self._pending_tool_call = False
+        self.final_answer_found = False
 
     def add_output_file(self, path: str):
         """
@@ -471,29 +482,6 @@ class Agent(ABC):
             if self.task:
                 self.task.output_files = self.task.output_files + [path]
             logger.info('Recorded output file: %s', path)
-
-    def _cleanup(self):
-        """
-        Clean up resources after task execution.
-
-        Called automatically via try/finally in run().
-        Resets state so the agent is ready for the next task.
-        """
-        self.task = None
-        self.final_answer_found = False
-        self.msg_idx_of_new_task = 0
-        # self.task_output_files = []
-
-        if self.planner:
-            self.planner.plan = None
-
-        # TODO:
-        #  Cleaning up code runner will delete all files in its workspace.
-        #  How to handle persistent files across tasks?
-        # if hasattr(self, 'code_runner') and self.code_runner:
-        #     self.code_runner.cleanup()
-
-        self._reset_observer()
 
     @abstractmethod
     def parse_text_response(self, text: str) -> ChatMessage:
@@ -710,14 +698,6 @@ class Agent(ABC):
             messages.append(f'[{msg.role}]: {content}')
         return '\n'.join(messages)
 
-    def _reset_observer(self):
-        """
-        Reset the observer's internal state.
-        """
-        self._observer_history_str = ''
-        self._observer_history_idx = -1
-        self.observer.reset()
-
     def clear_history(self):
         """Clear the agent's message history."""
         self.messages = []
@@ -729,7 +709,6 @@ class Agent(ABC):
     def init_history(self):
         """Initialize the agent's message history, e.g., with a system prompt."""
         self.clear_history()
-        self._reset_observer()
 
 
 class ReActAgent(Agent):
@@ -820,7 +799,6 @@ class ReActAgent(Agent):
         self._history_processed_idx = -1
         self._last_tool_call_id = None
         self._pending_tool_call = False
-        self._reset_observer()
 
     async def run(
             self,
@@ -900,6 +878,7 @@ class ReActAgent(Agent):
 
             idx = 0
             for idx in range(self.max_iterations):
+                logger.debug('ITERATION %d/%d', idx + 1, self.max_iterations)
                 yield self.response(
                     rtype='log',
                     channel='run',
@@ -1011,13 +990,6 @@ class ReActAgent(Agent):
 
         except asyncio.CancelledError:
             logger.warning('Iteration cancelled; cleaning up pending resources')
-            raise
-        finally:
-            logger.debug(
-                'Cleaning up after task: %s',f'{self.task.id if self.task else "unknown"}'
-            )
-            self._cleanup()
-            logger.debug('Agent cleanup completed')
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think about the next step using the new structured response format."""
@@ -1741,7 +1713,6 @@ class CodeActAgent(ReActAgent):
         self._history_processed_idx = -1
         self._last_tool_call_id = None
         self._pending_tool_call = False
-        self._reset_observer()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think step for CodeAct agent."""
