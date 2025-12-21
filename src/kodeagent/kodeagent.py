@@ -204,6 +204,10 @@ class Planner:
             todo_list.append(f'- [{status}] {step.description}')
         return '\n'.join(todo_list)
 
+    def reset(self):
+        """Reset the planner state."""
+        self.plan = None
+
 
 class Observer:
     """
