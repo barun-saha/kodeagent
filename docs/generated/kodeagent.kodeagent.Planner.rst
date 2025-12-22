@@ -1,4 +1,4 @@
-kodeagent.kodeagent.Planner
+﻿kodeagent.kodeagent.Planner
 ===========================
 
 .. currentmodule:: kodeagent.kodeagent
@@ -18,6 +18,7 @@ kodeagent.kodeagent.Planner
       ~Planner.get_formatted_plan
       ~Planner.get_steps_done
       ~Planner.get_steps_pending
+      ~Planner.reset
       ~Planner.update_plan
    
    

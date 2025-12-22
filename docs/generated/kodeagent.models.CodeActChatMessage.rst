@@ -1,4 +1,4 @@
-kodeagent.models.CodeActChatMessage
+﻿kodeagent.models.CodeActChatMessage
 ===================================
 
 .. currentmodule:: kodeagent.models
@@ -53,12 +53,12 @@ kodeagent.models.CodeActChatMessage
       ~CodeActChatMessage.model_extra
       ~CodeActChatMessage.model_fields
       ~CodeActChatMessage.model_fields_set
+      ~CodeActChatMessage.role
       ~CodeActChatMessage.content
       ~CodeActChatMessage.thought
       ~CodeActChatMessage.code
       ~CodeActChatMessage.final_answer
       ~CodeActChatMessage.task_successful
-      ~CodeActChatMessage.role
       ~CodeActChatMessage.files
    
    

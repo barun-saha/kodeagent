@@ -71,7 +71,8 @@ class CodeRunnerEnv(ABC):
 
         Args:
             work_dir: Optional local workspace directory. Output files from code execution will be
-             stored here.
+             stored here. It will be used only if the path already exists. Otherwise, a temporary
+             directory will be created.
         """
         if work_dir:
             if os.path.isabs(work_dir):
@@ -206,7 +207,9 @@ class E2BCodeRunnerEnv(CodeRunnerEnv):
         Initialize the E2B code runner environment.
 
         Args:
-            work_dir: Optional local workspace directory.
+            work_dir: Optional local workspace directory. Output files from code execution will be
+             stored here. It will be used only if the path already exists. Otherwise, a temporary
+             directory will be created.
             env_vars: Optional environment variables to set in the E2B sandbox.
             pip_packages_str: Optional string of pip packages to install in the E2B sandbox.
         """
