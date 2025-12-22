@@ -30,6 +30,8 @@ autosummary_generate = True
 # --- Autodoc configuration for sorting ---
 autodoc_member_order = 'alphabetical'
 
+autoclass_content = 'both'
+
 # Tell Sphinx to look for custom templates
 templates_path = ['_templates']
 

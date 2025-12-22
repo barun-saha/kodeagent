@@ -16,6 +16,13 @@ class CodeSecurityReviewer:
     Review code for security vulnerabilities.
     """
     def __init__(self, model_name: str, litellm_params: Optional[dict] = None):
+        """
+        Initialize the CodeSecurityReviewer.
+
+        Args:
+            model_name: The name of the LLM model to use.
+            litellm_params: Optional parameters for the LLM.
+        """
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
 

@@ -25,31 +25,41 @@ class Task(pyd.BaseModel):
     id: str = pyd.Field(
         description='Auto-generated task ID', default_factory=lambda: str(uuid.uuid4())
     )
+    """Auto-generated task ID."""
     description: str = pyd.Field(description='Task description')
+    """Task description."""
     files: Optional[list[str]] = pyd.Field(
         description='A list of file paths or URLs', default=None
     )
+    """A list of file paths or URLs."""
     result: Optional[Any] = pyd.Field(description='Task result', default=None)
+    """Task result."""
     is_finished: bool = pyd.Field(
         description='Whether the task has finished running', default=False
     )
+    """Whether the task has finished running."""
     is_error: bool = pyd.Field(
         description='Whether the task execution resulted in any error', default=False
     )
+    """Whether the task execution resulted in any error."""
     output_files: list[str] = pyd.Field(
         description='List of file paths generated during task execution', default_factory=list
     )
+    """List of file paths generated during task execution."""
 
 
 class PlanStep(pyd.BaseModel):
     """A single step in an agent's plan."""
     description: str = pyd.Field(description='A brief description of the step')
+    """A brief description of the step."""
     is_done: bool = pyd.Field(description='Whether the step has been completed', default=False)
+    """Whether the step has been completed."""
 
 
 class AgentPlan(pyd.BaseModel):
     """A structured plan for an agent to follow."""
     steps: list[PlanStep] = pyd.Field(description='List of steps to accomplish the task')
+    """List of steps to accomplish the task."""
 
 
 class ObserverResponse(pyd.BaseModel):
@@ -57,23 +67,30 @@ class ObserverResponse(pyd.BaseModel):
     is_progressing: bool = pyd.Field(
         description='True if the agent is making meaningful progress on the plan'
     )
+    """True if the agent is making meaningful progress on the plan."""
     is_in_loop: bool = pyd.Field(
         description='True if the agent is stuck in a repetitive loop'
     )
+    """True if the agent is stuck in a repetitive loop."""
     reasoning: str = pyd.Field(description='A short reason for the assessment (max 15--20 words)')
+    """A short reason for the assessment (max 15--20 words)."""
     correction_message: Optional[str] = pyd.Field(
         description='A specific, actionable feedback to help the agent self-correct'
     )
+    """A specific, actionable feedback to help the agent self-correct."""
 
 
 class ChatMessage(pyd.BaseModel):
     """Generic chat message."""
     role: MESSAGE_ROLES = pyd.Field(description='Role of the message sender')
+    """Role of the message sender."""
     content: Any = pyd.Field(description='Content of the message')
+    """Content of the message."""
     files: Optional[list[str]] = pyd.Field(
         description='Optional list of file paths or URLs associated with the message',
         default=None
     )
+    """Optional list of file paths or URLs associated with the message."""
 
     def __str__(self) -> str:
         """Return proper string representation of the message."""
@@ -89,14 +106,18 @@ class ReActChatMessage(ChatMessage):
         description='Role of the message sender',
         default='assistant'  # Add default
     )
+    """Role of the message sender. Defaults to 'assistant'."""
     content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True, default=None)
+    """Content of the message. Always `None` for ReAct messages."""
     thought: str = pyd.Field(description='Thoughts behind the tool use')
+    """Thoughts behind the tool use."""
     action: str = pyd.Field(
         description=(
             "Name of the tool to use from available tools, or 'FINISH' to provide final answer. "
             "Must be exact tool name as listed in Available Tools section."
         )
     )
+    """Name of the tool to use from available tools, or 'FINISH' to provide final answer."""
     args: Optional[str] = pyd.Field(
         default=None,
         description=(
@@ -104,14 +125,17 @@ class ReActChatMessage(ChatMessage):
             "Must be valid JSON with double quotes."
         )
     )
+    """Tool arguments as JSON string; `None` when `final_answer` is available."""
     final_answer: Optional[str] = pyd.Field(
         description='Final answer for the task; set only in the final step',
         default=None
     )
+    """Final answer for the task; set only in the final step."""
     task_successful: bool = pyd.Field(
         description='Task completed or failed? False when `args` is set.',
         default=False
     )
+    """Task completed or failed? False when `args` is set."""
 
     @pyd.field_validator('args')
     @classmethod
@@ -155,7 +179,7 @@ class ReActChatMessage(ChatMessage):
                 )
 
     @pyd.model_validator(mode='after')
-    def validate_mutual_exclusivity(self) -> "ReActChatMessage":
+    def validate_mutual_exclusivity(self) -> 'ReActChatMessage':
         """
         Ensure tool call and final answer are mutually exclusive.
 
@@ -197,6 +221,7 @@ class ReActChatMessage(ChatMessage):
         return self.action == 'FINISH' and self.final_answer is not None
 
     def __str__(self) -> str:
+        """Return a string representation of the message."""
         if self.is_final:
             return f'{self.final_answer}'
         
@@ -220,23 +245,29 @@ class CodeActChatMessage(ChatMessage):
         description='Role of the message sender',
         default='assistant'
     )
+    """Role of the message sender. Defaults to 'assistant'."""
     content: Optional[str] = pyd.Field(description='ALWAYS `None`', exclude=True, default=None)
+    """Content of the message. Always `None` for CodeAct messages."""
     thought: str = pyd.Field(description='Thoughts behind the code')
+    """Thoughts behind the code."""
     code: Optional[str] = pyd.Field(
         default=None,
         description='Python code with tool use to run; `None` when providing final answer'
     )
+    """Python code with tool use to run; `None` when providing final answer."""
     final_answer: Optional[str] = pyd.Field(
         description='Final answer for the task; set only in the final step',
         default=None
     )
+    """Final answer for the task; set only in the final step."""
     task_successful: bool = pyd.Field(
         description='Task completed or failed? False when `code` is set.',
         default=False
     )
+    """Task completed or failed? False when `code` is set."""
 
     @pyd.model_validator(mode='after')
-    def validate_mutual_exclusivity(self) -> "CodeActChatMessage":
+    def validate_mutual_exclusivity(self) -> 'CodeActChatMessage':
         """
         Ensure code execution and final answer are mutually exclusive.
 
@@ -283,12 +314,18 @@ class CodeActChatMessage(ChatMessage):
 class AgentResponse(TypedDict):
     """Streaming response sent by an agent in the course of solving a task."""
     type: AGENT_RESPONSE_TYPES
+    """Type of the response: 'step', 'final', or 'log'."""
     channel: Optional[str]
+    """Optional channel name for the response."""
     value: Any
+    """Value of the response, varies by type."""
     metadata: Optional[dict[str, Any]]
+    """Optional metadata associated with the response."""
 
 
 class CodeReview(pyd.BaseModel):
     """Code review decision for CodeActAgent."""
     is_secure: bool = pyd.Field(description='Is the code safe & secure for execution?')
+    """Is the code safe & secure for execution?"""
     reason: str = pyd.Field(description='A brief explanation of the decision')
+    """A brief explanation of the decision."""

@@ -1,4 +1,4 @@
-kodeagent.models.ReActChatMessage
+﻿kodeagent.models.ReActChatMessage
 =================================
 
 .. currentmodule:: kodeagent.models
@@ -54,13 +54,13 @@ kodeagent.models.ReActChatMessage
       ~ReActChatMessage.model_extra
       ~ReActChatMessage.model_fields
       ~ReActChatMessage.model_fields_set
+      ~ReActChatMessage.role
       ~ReActChatMessage.content
       ~ReActChatMessage.thought
       ~ReActChatMessage.action
       ~ReActChatMessage.args
       ~ReActChatMessage.final_answer
       ~ReActChatMessage.task_successful
-      ~ReActChatMessage.role
       ~ReActChatMessage.files
    
    
