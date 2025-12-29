@@ -35,6 +35,8 @@ DEFAULT_TOOLS_IMPORTS = [
     'youtube_transcript_api',
     'urllib.parse',
     'os',
+    'base64',
+    'litellm',
 ]
 """List of default modules (stdlib and third-party) to be available in tools."""
 
@@ -162,7 +164,7 @@ def search_web(query: str, max_results: int = 10) -> str:
     Search the web using DuckDuckGo and return top results with titles and links.
     Use this when you need current information, news, or general web search.
 
-    The results include clickable links that can be visited using the 'read_webpage' tool
+    The results include clickable links that can be visited using the `read_webpage` tool
     to get the full content of any page.
 
     Examples:
@@ -175,10 +177,17 @@ def search_web(query: str, max_results: int = 10) -> str:
         max_results: Number of results to return (default 10, min 1, max 20).
 
     Returns:
-        Markdown formatted search results with titles and URLs, or an error message.
+        Markdown formatted search results with titles, URLs, and snippets, or an error message.
+
+    Next Step:
+        For any question requiring a specific, accurate answer, always use `read_webpage`
+        on a result URL.
     """
     import time
     import random
+    from datetime import datetime
+
+    today = datetime.now().strftime('%Y-%m-%d')
 
     try:
         from ddgs import DDGS
@@ -221,7 +230,7 @@ def search_web(query: str, max_results: int = 10) -> str:
             )
 
         # Format results as clean Markdown
-        output = f'# Search Results for: {query}\n\n'
+        output = f'# Search Discovery (System Date: {today})\n\n'
         output += f'Found {len(results)} result(s)\n\n'
 
         for i, result in enumerate(results, 1):
@@ -235,9 +244,10 @@ def search_web(query: str, max_results: int = 10) -> str:
 
             output += f'## {i}. {title}\n'
             output += f'**URL:** {url}\n'
-            output += f'**Description:** {body}\n\n'
+            output += f'**Snippet:** {body}\n\n'
 
         # output += "\n**Next Step:** Use the 'read_webpage' tool with any URL above to get full page content."
+        output += '> **Note:** These are summaries. Use `read_webpage` with a URL to verify facts.'
 
         return output
 
@@ -981,3 +991,49 @@ def transcribe_audio(file_path: str) -> Any:
         return f'Audio transcription error: {response.status_code}: {response.text}'
     except ImportError:
         return 'Audio transcription error: `requests` library not found. Please install it with `pip install requests`.'
+
+
+@tool
+def generate_image(prompt: str, model_name: str) -> str:
+    """
+    Generate an image based on a text prompt using the specified model.
+    It returns the image URL or the file path of the generated image.
+
+    Args:
+        prompt: Text description of the desired image.
+        model_name: The name of the image generation model to use.
+
+    Returns:
+        The file path or URL of the generated image or error message.
+    """
+    import base64
+    import os
+
+    import litellm
+
+    try:
+        response = litellm.image_generation(prompt=prompt, model=model_name)
+        image_data = response.data[0]
+
+        # 1. If a URL is provided, return it
+        if image_data.url:
+            return image_data.url
+
+        # 2. If URL is None, check for b64_json and save it locally
+        if hasattr(image_data, 'b64_json') and image_data.b64_json:
+            file_path = 'generated_image.png'
+            with open(file_path, 'wb') as f:
+                f.write(base64.b64decode(image_data.b64_json))
+            return os.path.abspath(file_path)
+
+        return 'Error: No image data (URL or Base64) found in response.'
+    except Exception as ex:
+        return f'Error: Image generation failed: {ex}'
+
+
+if __name__ == '__main__':
+    img_url = generate_image(
+        prompt='A futuristic cityscape at sunset, with flying cars and neon lights',
+        model_name='gemini/imagen-4.0-generate-001'
+    )
+    print(f'Generated image URL: {img_url}')

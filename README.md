@@ -1,4 +1,4 @@
-# 🤖 KodeAgent: The Frameworkless, Minimal Agent Engine
+# 🤖 KodeAgent: The Minimal Agent Engine
 
 [![pypi](https://img.shields.io/pypi/v/kodeagent.svg)](https://pypi.org/project/kodeagent/)
 [![codecov](https://codecov.io/gh/barun-saha/kodeagent/branch/main/graph/badge.svg)](https://codecov.io/gh/barun-saha/kodeagent)
@@ -136,15 +136,16 @@ KodeAgent is under active development. Capabilities are limited. Use with cautio
 ## 🛠️ Tools
 
 KodeAgent comes with the following built-in [tools](src/kodeagent/tools.py):
-- `calculator`: A simple calculator tool to perform basic arithmetic operations.
-- `download_file`: A tool to download a file from a given URL.
-- `extract_as_markdown`: A tool to read file contents and return as Markdown using MarkItDown.
-- `read_webpage`: A tool to read a webpage using BeautifulSoup.
-- `search_arxiv`: A tool to search arXiv for research papers and return summaries and links.
-- `search_web`: A web search tool using DuckDuckGo to fetch top search results.
-- `search_wikipedia`: A tool to search Wikipedia and return summaries and links.
-- `transcribe_audio`: A tool to transcribe audio files using OpenAI's Whisper via [Fireworks API](https://fireworks.ai/). Need to set the `FIREWORKS_API_KEY` environment variable.
-- `transcribe_youtube`: A tool to fetch YouTube video transcripts.
+- **`calculator`**: A simple calculator tool to perform basic arithmetic operations. It imports the `ast`, `operator`, and `re` Python libraries.
+- **`download_file`**: A tool to download a file from a given URL. It imports the `requests`, `re`, `tempfile`, `pathlib`, and `urllib.parse` Python libraries.
+- **`extract_as_markdown`**: A tool to read file contents and return as Markdown using MarkItDown. It imports the `re`, `pathlib`, `urllib.parse`, and `markitdown` Python libraries.
+- **`generate_image`**: A tool to generate an image based on a text prompt using the specified model. The (LiteLLM) model name to be used must be mentioned in the task, system prompt, or somehow. It imports the `os`, `base64`, and `litellm` Python libraries.
+- **`read_webpage`**: A tool to read a webpage using BeautifulSoup. It imports the `re`, `requests`, `urllib.parse`, and `bs4` Python libraries.
+- **`search_arxiv`**: A tool to search arXiv for research papers and return summaries and links. It imports the `arxiv` library.
+- **`search_web`**: A web search tool using DuckDuckGo to fetch top search results. It imports the `datetime`, `random`, and `time` Python libraries.
+- **`search_wikipedia`**: A tool to search Wikipedia and return summaries and links. It imports the `wikipedia` library.
+- **`transcribe_audio`**: A tool to transcribe audio files using OpenAI's Whisper via [Fireworks API](https://fireworks.ai/). Need to set the `FIREWORKS_API_KEY` environment variable. It imports the `os` and `requests` Python libraries.
+- **`transcribe_youtube`**: A tool to fetch YouTube video transcripts. It imports the `youtube_transcript_api` library.
 
 Check out the docstrings of these tools in the [tools.py](src/kodeagent/tools.py) module for more details.
 

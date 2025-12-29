@@ -15,7 +15,8 @@ from kodeagent.tools import (
     search_wikipedia,
     search_arxiv,
     transcribe_youtube,
-    transcribe_audio
+    transcribe_audio,
+    generate_image
 )
 
 
@@ -202,7 +203,7 @@ class TestSearchWeb:
 
         result = search_web("test query", max_results=2)
 
-        assert '# Search Results for: test query' in result
+        assert '# Search Discovery' in result
         assert 'Result 1' in result
         assert 'Result 2' in result
         assert 'https://example.com/1' in result
@@ -1339,4 +1340,70 @@ class TestTranscribeAudio:
         import sys
         with patch.dict('sys.modules', {'requests': None}):
             result = transcribe_audio('/path/to/audio.mp3')
-            assert 'Audio transcription error' in result
+
+class TestGenerateImage:
+    """Tests for the generate_image tool."""
+
+    @patch('litellm.image_generation')
+    def test_generate_image_url_success(self, mock_image_gen):
+        """Test successful image generation returning a URL."""
+        mock_response = Mock()
+        mock_data = Mock()
+        mock_data.url = 'https://example.com/image.png'
+        mock_data.b64_json = None
+        mock_response.data = [mock_data]
+        mock_image_gen.return_value = mock_response
+
+        result = generate_image('test prompt', model_name='test-model')
+
+        assert result == 'https://example.com/image.png'
+        mock_image_gen.assert_called_once_with(prompt='test prompt', model='test-model')
+
+    @patch('litellm.image_generation')
+    @patch('builtins.open', new_callable=mock_open)
+    @patch('base64.b64decode')
+    @patch('os.path.abspath')
+    def test_generate_image_b64_success(self, mock_abspath, mock_b64decode, mock_file, mock_image_gen):
+        """Test successful image generation returning base64 data."""
+        mock_response = Mock()
+        mock_data = Mock()
+        mock_data.url = None
+        mock_data.b64_json = 'base64encodeddata'
+        mock_response.data = [mock_data]
+        mock_image_gen.return_value = mock_response
+
+        mock_b64decode.return_value = b'decoded_image_data'
+        mock_abspath.return_value = '/abs/path/to/generated_image.png'
+
+        result = generate_image('test prompt', model_name='test-model')
+
+        assert result == '/abs/path/to/generated_image.png'
+        mock_file.assert_called_once_with('generated_image.png', 'wb')
+        mock_file().write.assert_called_once_with(b'decoded_image_data')
+
+    @patch('litellm.image_generation')
+    def test_generate_image_no_data(self, mock_image_gen):
+        """Test image generation with no URL or b64 data."""
+        mock_response = Mock()
+        mock_data = Mock()
+        mock_data.url = None
+        mock_data.b64_json = None
+        mock_response.data = [mock_data]
+        mock_image_gen.return_value = mock_response
+
+        result = generate_image('test prompt', model_name='test-model')
+
+        assert 'Error' in result
+        assert 'No image data' in result
+
+    @patch('litellm.image_generation')
+    def test_generate_image_exception(self, mock_image_gen):
+        """Test image generation with exception."""
+        mock_image_gen.side_effect = Exception("API Error")
+
+        result = generate_image('test prompt', model_name='test-model')
+
+        assert 'Error' in result
+        assert 'Image generation failed' in result
+        assert 'API Error' in result
+

@@ -1886,9 +1886,8 @@ async def main():
             'Summarize the notes',
             ['https://web.stanford.edu/class/cs102/lectureslides/ClassificationSlides.pdf',]
         ),
-        (
-            'Write an elegant haiku in Basho style. Save it as poem.txt', None
-        )
+        ('Write an elegant haiku in Basho style. Save it as poem.txt', None),
+        # ('generate an image of AI. Use model gemini/imagen-4.0-fast-generate-001', None),
     ]
 
     print(f'{agent.__class__.__name__} demo\n')
