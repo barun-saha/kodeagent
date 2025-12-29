@@ -365,16 +365,26 @@ class CodeReview(pyd.BaseModel):
 class UsageMetrics(pyd.BaseModel):
     """Individual usage metrics for a single LLM call."""
     prompt_tokens: int = 0
+    """Number of prompt tokens used."""
     completion_tokens: int = 0
+    """Number of completion tokens used."""
     total_tokens: int = 0
+    """Total tokens used (prompt + completion)."""
     cost: float = 0.0
+    """Cost in USD for the LLM call."""
 
 
 class ComponentUsage(pyd.BaseModel):
     """Aggregated usage for a specific component."""
     component_name: str
+    """Name of the component (e.g., Planner, Observer, Agent)."""
     call_count: int = 0
+    """Number of LLM calls made by the component."""
     total_prompt_tokens: int = 0
+    """Total prompt tokens used by the component."""
     total_completion_tokens: int = 0
+    """Total completion tokens used by the component."""
     total_tokens: int = 0
+    """Total tokens used by the component."""
     total_cost: float = 0.0
+    """Total cost in USD for the component."""
