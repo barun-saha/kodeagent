@@ -162,7 +162,7 @@ def search_web(query: str, max_results: int = 10) -> str:
     Search the web using DuckDuckGo and return top results with titles and links.
     Use this when you need current information, news, or general web search.
 
-    The results include clickable links that can be visited using the 'read_webpage' tool
+    The results include clickable links that can be visited using the `read_webpage` tool
     to get the full content of any page.
 
     Examples:
@@ -175,10 +175,17 @@ def search_web(query: str, max_results: int = 10) -> str:
         max_results: Number of results to return (default 10, min 1, max 20).
 
     Returns:
-        Markdown formatted search results with titles and URLs, or an error message.
+        Markdown formatted search results with titles, URLs, and snippets, or an error message.
+
+    Next Step:
+        For any question requiring a specific, accurate answer, always use `read_webpage`
+        on a result URL.
     """
     import time
     import random
+    from datetime import datetime
+
+    today = datetime.now().strftime('%Y-%m-%d')
 
     try:
         from ddgs import DDGS
@@ -221,7 +228,7 @@ def search_web(query: str, max_results: int = 10) -> str:
             )
 
         # Format results as clean Markdown
-        output = f'# Search Results for: {query}\n\n'
+        output = f'# Search Discovery (System Date: {today})\n\n'
         output += f'Found {len(results)} result(s)\n\n'
 
         for i, result in enumerate(results, 1):
@@ -235,9 +242,10 @@ def search_web(query: str, max_results: int = 10) -> str:
 
             output += f'## {i}. {title}\n'
             output += f'**URL:** {url}\n'
-            output += f'**Description:** {body}\n\n'
+            output += f'**Snippet:** {body}\n\n'
 
         # output += "\n**Next Step:** Use the 'read_webpage' tool with any URL above to get full page content."
+        output += '> **Note:** These are summaries. Use `read_webpage` with a URL to verify facts.'
 
         return output
 
