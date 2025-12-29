@@ -353,7 +353,8 @@ class CodeRunner:
             timeout: int = 30,
             env_vars_to_set: Optional[dict[str, str]] = None,
             litellm_params: Optional[dict] = None,
-            work_dir: Optional[str] = None
+            work_dir: Optional[str] = None,
+            usage_tracker: Optional[object] = None
     ):
         """
         Create an environment to run Python code.
@@ -368,6 +369,7 @@ class CodeRunner:
              environment (E2B only).
             litellm_params: Optional parameters for LiteLLM.
             work_dir: Optional local workspace directory.
+            usage_tracker: Optional UsageTracker instance.
         """
         self.allowed_imports: set[str] = set(allowed_imports).union(DEFAULT_ALLOWED_IMPORTS)
         self.env_name: CODE_ENV_NAMES = env
@@ -383,7 +385,8 @@ class CodeRunner:
         
         self.code_reviewer = CodeSecurityReviewer(
             model_name=model_name,
-            litellm_params=litellm_params
+            litellm_params=litellm_params,
+            usage_tracker=usage_tracker
         )
 
         # Initialize the implementation

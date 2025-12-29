@@ -24,6 +24,8 @@
    
    CodeReview
    
+   ComponentUsage
+   
    ObserverResponse
    
    PlanStep
@@ -31,6 +33,8 @@
    ReActChatMessage
    
    Task
+   
+   UsageMetrics
    
 
 .. automodule:: kodeagent.models

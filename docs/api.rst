@@ -14,3 +14,4 @@ API Reference
    kodeagent.models
    kodeagent.pattern_detector
    kodeagent.tools
+   kodeagent.usage_tracker

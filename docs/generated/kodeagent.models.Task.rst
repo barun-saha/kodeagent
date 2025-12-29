@@ -58,5 +58,11 @@ kodeagent.models.Task
       ~Task.is_finished
       ~Task.is_error
       ~Task.output_files
+      ~Task.total_llm_calls
+      ~Task.total_prompt_tokens
+      ~Task.total_completion_tokens
+      ~Task.total_tokens
+      ~Task.total_cost
+      ~Task.usage_by_component
    
    

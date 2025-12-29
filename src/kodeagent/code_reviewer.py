@@ -15,16 +15,18 @@ class CodeSecurityReviewer:
     """
     Review code for security vulnerabilities.
     """
-    def __init__(self, model_name: str, litellm_params: Optional[dict] = None):
+    def __init__(self, model_name: str, litellm_params: Optional[dict] = None, usage_tracker: Optional[object] = None):
         """
         Initialize the CodeSecurityReviewer.
 
         Args:
             model_name: The name of the LLM model to use.
             litellm_params: Optional parameters for the LLM.
+            usage_tracker: Optional UsageTracker instance.
         """
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
+        self.usage_tracker = usage_tracker
 
     async def review(self, code: str) -> CodeReview:
         """
@@ -51,6 +53,8 @@ class CodeSecurityReviewer:
             litellm_params=self.litellm_params,
             messages=messages,
             response_format=CodeReview,
-            trace_id=uuid.uuid4().hex
+            trace_id=uuid.uuid4().hex,
+            usage_tracker=self.usage_tracker,
+            component_name='CodeSecurityReviewer'
         )
         return CodeReview.model_validate_json(review_response)
