@@ -2,7 +2,7 @@
 ========================
 ===================================
 
-.. currentmodule:: kodeagent.usage_tracker
+.. currentmodule:: kodeagent
 
 .. automodule:: kodeagent.usage_tracker
    :noindex:
