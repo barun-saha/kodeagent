@@ -462,7 +462,7 @@ def test_code_runner_init_with_usage_tracker():
         mock_reviewer_class.return_value = mock_instance
         
         usage_tracker = MagicMock()
-        runner = CodeRunner(
+        _runner = CodeRunner(
             env='host',
             allowed_imports=['os'],
             model_name='test-model',

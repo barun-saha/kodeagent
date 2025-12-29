@@ -6,16 +6,20 @@ from typing import Optional
 
 from . import kutils as ku
 from .models import CodeReview
+from .usage_tracker import UsageTracker
 
 
 CODE_SECURITY_SYSTEM_PROMPT = ku.read_prompt('code_guardrail.txt')
 
 
 class CodeSecurityReviewer:
-    """
-    Review code for security vulnerabilities.
-    """
-    def __init__(self, model_name: str, litellm_params: Optional[dict] = None, usage_tracker: Optional[object] = None):
+    """Review code for security vulnerabilities."""
+    def __init__(
+            self,
+            model_name: str,
+            litellm_params: Optional[dict] = None,
+            usage_tracker: Optional[UsageTracker] = None
+    ):
         """
         Initialize the CodeSecurityReviewer.
 

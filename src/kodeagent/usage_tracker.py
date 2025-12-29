@@ -21,7 +21,7 @@ class UsageTracker:
 
     async def record_usage(self, component: str, metrics: UsageMetrics) -> None:
         """
-        Record usage from a single LLM call. Uses lock to ensure thread safety.
+        Record usage from a single LLM call. Uses lock to ensure coroutine safety.
 
         Args:
             component: Name of the component making the call.

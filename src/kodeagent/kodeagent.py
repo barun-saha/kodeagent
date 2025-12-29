@@ -92,11 +92,12 @@ MAX_TASK_FILES = 10
 
 class Planner:
     """Given a task, generate and maintain a step-by-step plan to solve it."""
+
     def __init__(self,
             model_name: str,
             litellm_params: Optional[dict] = None,
             max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
-            usage_tracker: Optional[Any] = None
+            usage_tracker: Optional[UsageTracker] = None
     ):
         """
         Create a planner using the given model.
@@ -218,9 +219,8 @@ class Planner:
 
 
 class Observer:
-    """
-    Monitors an agent's behavior to detect issues like loops or stalled plans.
-    """
+    """Monitors an agent's behavior to detect issues like loops or stalled plans."""
+
     def __init__(
             self,
             model_name: str,
@@ -228,7 +228,7 @@ class Observer:
             litellm_params: Optional[dict] = None,
             threshold: Optional[int] = 3,
             max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
-            usage_tracker: Optional[Any] = None
+            usage_tracker: Optional[UsageTracker] = None
     ):
         """
         Create an Observer for an agent.
@@ -392,7 +392,6 @@ class Agent(ABC):
         self.final_answer_found = False
         
         self.usage_tracker = UsageTracker()
-        
         self.planner: Optional[Planner] = Planner(
             model_name=model_name,
             litellm_params=litellm_params,
