@@ -1,4 +1,4 @@
-kodeagent.kodeagent.CodeActAgent
+﻿kodeagent.kodeagent.CodeActAgent
 ================================
 
 .. currentmodule:: kodeagent.kodeagent
@@ -21,6 +21,8 @@ kodeagent.kodeagent.CodeActAgent
       ~CodeActAgent.get_history
       ~CodeActAgent.get_relevant_tools
       ~CodeActAgent.get_tools_description
+      ~CodeActAgent.get_usage_metrics
+      ~CodeActAgent.get_usage_report
       ~CodeActAgent.init_history
       ~CodeActAgent.parse_text_response
       ~CodeActAgent.response

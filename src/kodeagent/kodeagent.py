@@ -47,6 +47,7 @@ from .models import (
     Task,
     AGENT_RESPONSE_TYPES
 )
+from .usage_tracker import UsageTracker
 
 # Install the global interceptor patch
 install_interceptor()
@@ -91,10 +92,12 @@ MAX_TASK_FILES = 10
 
 class Planner:
     """Given a task, generate and maintain a step-by-step plan to solve it."""
+
     def __init__(self,
             model_name: str,
             litellm_params: Optional[dict] = None,
-            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
+            usage_tracker: Optional[UsageTracker] = None
     ):
         """
         Create a planner using the given model.
@@ -103,10 +106,12 @@ class Planner:
             model_name: The name of the LLM to use.
             litellm_params: LiteLLM parameters.
             max_retries: Maximum number of retries for LLM calls.
+            usage_tracker: Optional UsageTracker instance to record usage.
         """
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
         self.max_retries = max_retries
+        self.usage_tracker = usage_tracker
         self.plan: Optional[AgentPlan] = None
 
     async def create_plan(self, task: Task, agent_type: str) -> AgentPlan:
@@ -138,7 +143,9 @@ class Planner:
             messages=messages,
             response_format=AgentPlan,
             trace_id=task.id,
-            max_retries=self.max_retries
+            max_retries=self.max_retries,
+            usage_tracker=self.usage_tracker,
+            component_name='Planner.create'
         )
         self.plan = AgentPlan.model_validate_json(plan_response)
         return self.plan
@@ -170,7 +177,9 @@ class Planner:
             messages=messages,
             response_format=AgentPlan,
             trace_id=task_id,
-            max_retries=self.max_retries
+            max_retries=self.max_retries,
+            usage_tracker=self.usage_tracker,
+            component_name='Planner.update'
         )
         self.plan = AgentPlan.model_validate_json(plan_response)
 
@@ -210,16 +219,16 @@ class Planner:
 
 
 class Observer:
-    """
-    Monitors an agent's behavior to detect issues like loops or stalled plans.
-    """
+    """Monitors an agent's behavior to detect issues like loops or stalled plans."""
+
     def __init__(
             self,
             model_name: str,
             tool_names: set[str],
             litellm_params: Optional[dict] = None,
             threshold: Optional[int] = 3,
-            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
+            max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
+            usage_tracker: Optional[UsageTracker] = None
     ):
         """
         Create an Observer for an agent.
@@ -230,12 +239,14 @@ class Observer:
             litellm_params: LiteLLM parameters.
             threshold: Observation threshold, i.e., how frequently the observer will analyze
              the chat history.
+            usage_tracker: Optional UsageTracker instance to record usage.
         """
         self.threshold = threshold
         self.model_name = model_name
         self.tool_names = tool_names
         self.litellm_params = litellm_params or {}
         self.max_retries = max_retries
+        self.usage_tracker = usage_tracker
         self.last_correction_iteration: int = 0
 
     async def observe(
@@ -282,6 +293,8 @@ class Observer:
                 ],
                 max_retries=self.max_retries,
                 response_format=ObserverResponse,
+                usage_tracker=self.usage_tracker,
+                component_name='Observer'
             )
             observation = ObserverResponse.model_validate_json(observation_response)
 
@@ -370,22 +383,27 @@ class Agent(ABC):
         self._last_tool_call_id: Optional[str] = None
         self._pending_tool_call: bool = False
         
+        
         # Cache for observer history (accumulated string)
         self._observer_history_str: str = ''
         self._observer_history_idx: int = -1
         
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
+        
+        self.usage_tracker = UsageTracker()
         self.planner: Optional[Planner] = Planner(
             model_name=model_name,
             litellm_params=litellm_params,
-            max_retries=self.max_retries
+            max_retries=self.max_retries,
+            usage_tracker=self.usage_tracker
         )
         self.observer = Observer(
             model_name=model_name,
             litellm_params=litellm_params,
             tool_names=self.tool_names,
-            max_retries=self.max_retries
+            max_retries=self.max_retries,
+            usage_tracker=self.usage_tracker
         )
 
         self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
@@ -426,7 +444,9 @@ class Agent(ABC):
                 model_name=self.model_name,
                 litellm_params=self.litellm_params,
                 messages=ku.make_user_message(prompt),
-                trace_id=self.task.id if self.task else None
+                trace_id=self.task.id if self.task else None,
+                usage_tracker=self.usage_tracker,
+                component_name='Agent.tool_filter'
             )
             relevant_tool_names = tools_response.split(',') if tools_response.strip() else []
             relevant_tool_names = {t.strip() for t in relevant_tool_names if t.strip()}
@@ -463,6 +483,9 @@ class Agent(ABC):
 
         if self.observer:
             self.observer.reset()
+
+        # Reset usage tracker for new task
+        self.usage_tracker.reset()
 
         self._observer_history_str = ''
         self._observer_history_idx = -1
@@ -501,7 +524,9 @@ class Agent(ABC):
             litellm_params=self.litellm_params,
             messages=ku.make_user_message(prompt),
             trace_id=self.task.id,
-            max_retries=self.max_retries
+            max_retries=self.max_retries,
+            usage_tracker=self.usage_tracker,
+            component_name='Agent.salvage'
         )
         return salvaged_response
 
@@ -564,7 +589,9 @@ class Agent(ABC):
                     messages=formatted_messages,
                     response_format=response_format,
                     trace_id=self.task.id if self.task else None,
-                    max_retries=self.max_retries
+                    max_retries=self.max_retries,
+                    usage_tracker=self.usage_tracker,
+                    component_name='Agent'
                 )
                 return chat_response or ''
 
@@ -710,6 +737,33 @@ class Agent(ABC):
         """Initialize the agent's message history, e.g., with a system prompt."""
         self.clear_history()
 
+    def get_usage_report(self, include_breakdown: bool = True) -> str:
+        """
+        Get a formatted report of LLM usage for the current/last task.
+
+        Args:
+            include_breakdown: Whether to include per-component breakdown.
+
+        Returns:
+            Formatted string with usage statistics.
+        """
+        return self.usage_tracker.format_report(include_breakdown=include_breakdown)
+
+    def get_usage_metrics(self) -> dict:
+        """
+        Get raw usage metrics as a dictionary.
+
+        Returns:
+            Dictionary with total and per-component usage data.
+        """
+        total = self.usage_tracker.get_total_usage()
+        by_component = self.usage_tracker.get_usage_by_component()
+
+        return {
+            'total': total.model_dump(),
+            'by_component': {k: v.model_dump() for k, v in by_component.items()}
+        }
+
 
 class ReActAgent(Agent):
     """Reasoning and Acting agent with thought-action-observation loop."""
@@ -741,7 +795,12 @@ class ReActAgent(Agent):
             work_dir=work_dir
         )
 
-        self.planner = Planner(model_name, litellm_params, max_retries=max_retries)
+        self.planner = Planner(
+            model_name,
+            litellm_params,
+            max_retries=max_retries,
+            usage_tracker=self.usage_tracker
+        )
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
 
@@ -992,6 +1051,23 @@ class ReActAgent(Agent):
 
         except asyncio.CancelledError:
             logger.warning('Iteration cancelled')
+        finally:
+            # Update task with usage data before cleanup
+            if self.task:
+                usage_data = self.get_usage_metrics()
+                self.task.total_llm_calls = usage_data['total']['call_count']
+                self.task.total_prompt_tokens = usage_data['total']['total_prompt_tokens']
+                self.task.total_completion_tokens = usage_data['total']['total_completion_tokens']
+                self.task.total_tokens = usage_data['total']['total_tokens']
+                self.task.total_cost = usage_data['total']['total_cost']
+                self.task.usage_by_component = usage_data['by_component']
+
+                # Log usage summary
+                logger.info(
+                    'Task %s usage: %s',
+                    self.task.id,
+                    self.get_usage_report(include_breakdown=False)
+                )
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think about the next step using the new structured response format."""
@@ -1527,7 +1603,8 @@ class CodeActAgent(ReActAgent):
             timeout=timeout,
             env_vars_to_set=env_vars_to_set,
             litellm_params=litellm_params,
-            work_dir=self.work_dir
+            work_dir=self.work_dir,
+            usage_tracker=self.usage_tracker
         )
 
     def formatted_history_for_llm(self) -> list[dict]:

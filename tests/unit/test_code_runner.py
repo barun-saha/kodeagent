@@ -449,7 +449,28 @@ def test_code_runner_init_with_model_params():
         # Verify CodeSecurityReviewer was initialized with correct params
         mock_reviewer_class.assert_called_once_with(
             model_name=model_name,
-            litellm_params=litellm_params
+            litellm_params=litellm_params,
+            usage_tracker=None
         )
         assert runner.code_reviewer == mock_instance
 
+
+def test_code_runner_init_with_usage_tracker():
+    """Test that usage_tracker is properly passed to CodeSecurityReviewer."""
+    with patch('kodeagent.code_runner.CodeSecurityReviewer') as mock_reviewer_class:
+        mock_instance = MagicMock()
+        mock_reviewer_class.return_value = mock_instance
+        
+        usage_tracker = MagicMock()
+        _runner = CodeRunner(
+            env='host',
+            allowed_imports=['os'],
+            model_name='test-model',
+            usage_tracker=usage_tracker
+        )
+        
+        mock_reviewer_class.assert_called_once_with(
+            model_name='test-model',
+            litellm_params=None,
+            usage_tracker=usage_tracker
+        )

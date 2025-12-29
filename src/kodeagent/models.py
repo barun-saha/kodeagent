@@ -16,6 +16,7 @@ from . import kutils as ku
 
 MESSAGE_ROLES = Literal['user', 'assistant', 'system', 'tool']
 """Defined roles for chat messages."""
+
 AGENT_RESPONSE_TYPES = Literal['step', 'final', 'log']
 """Defined types for agent responses."""
 
@@ -46,6 +47,36 @@ class Task(pyd.BaseModel):
         description='List of file paths generated during task execution', default_factory=list
     )
     """List of file paths generated during task execution."""
+    total_llm_calls: int = pyd.Field(
+        description='Total number of LLM calls made during task execution',
+        default=0
+    )
+    """Total number of LLM calls made during task execution."""
+    total_prompt_tokens: int = pyd.Field(
+        description='Total prompt tokens used',
+        default=0
+    )
+    """Total prompt tokens used."""
+    total_completion_tokens: int = pyd.Field(
+        description='Total completion tokens used',
+        default=0
+    )
+    """Total completion tokens used."""
+    total_tokens: int = pyd.Field(
+        description='Total tokens used (prompt + completion)',
+        default=0
+    )
+    """Total tokens used (prompt + completion)."""
+    total_cost: float = pyd.Field(
+        description='Total cost in USD for all LLM calls',
+        default=0.0
+    )
+    """Total cost in USD for all LLM calls."""
+    usage_by_component: Optional[dict[str, dict]] = pyd.Field(
+        description='Breakdown of usage by component (Planner, Observer, Agent)',
+        default=None
+    )
+    """Breakdown of usage by component (Planner, Observer, Agent)."""
 
 
 class PlanStep(pyd.BaseModel):
@@ -329,3 +360,31 @@ class CodeReview(pyd.BaseModel):
     """Is the code safe & secure for execution?"""
     reason: str = pyd.Field(description='A brief explanation of the decision')
     """A brief explanation of the decision."""
+
+
+class UsageMetrics(pyd.BaseModel):
+    """Individual usage metrics for a single LLM call."""
+    prompt_tokens: int = 0
+    """Number of prompt tokens used."""
+    completion_tokens: int = 0
+    """Number of completion tokens used."""
+    total_tokens: int = 0
+    """Total tokens used (prompt + completion)."""
+    cost: float = 0.0
+    """Cost in USD for the LLM call."""
+
+
+class ComponentUsage(pyd.BaseModel):
+    """Aggregated usage for a specific component."""
+    component_name: str
+    """Name of the component (e.g., Planner, Observer, Agent)."""
+    call_count: int = 0
+    """Number of LLM calls made by the component."""
+    total_prompt_tokens: int = 0
+    """Total prompt tokens used by the component."""
+    total_completion_tokens: int = 0
+    """Total completion tokens used by the component."""
+    total_tokens: int = 0
+    """Total tokens used by the component."""
+    total_cost: float = 0.0
+    """Total cost in USD for the component."""

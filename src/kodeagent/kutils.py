@@ -21,6 +21,8 @@ from tenacity import (
     before_sleep_log
 )
 
+from .usage_tracker import UsageMetrics
+
 
 DEFAULT_MAX_LLM_RETRIES = 3
 LOGGERS_TO_SUPPRESS = [
@@ -169,6 +171,8 @@ async def call_llm(
         response_format: Optional[Type[pyd.BaseModel]] = None,
         trace_id: Optional[str] = None,
         max_retries: int = DEFAULT_MAX_LLM_RETRIES,
+        usage_tracker: Optional[Any] = None,
+        component_name: str = 'unknown'
 ) -> str | None:
     """
     Call the LLM with the given parameters and response format.
@@ -180,6 +184,8 @@ async def call_llm(
         response_format: Optional pydantic model for structured output.
         trace_id: Optional trace ID for observability.
         max_retries: Maximum number of retries for the LLM call.
+        usage_tracker: Optional UsageTracker instance to record usage.
+        component_name: Name of the component making the call (for tracking).
 
     Returns:
         The LLM response as string.
@@ -231,12 +237,26 @@ async def call_llm(
                     raise ValueError('LLM returned an empty or invalid response body.')
 
                 token_usage = {
-                    'cost': response._hidden_params.get('response_cost'),
-                    'prompt_tokens': response.usage.get('prompt_tokens'),
-                    'completion_tokens': response.usage.get('completion_tokens'),
-                    'total_tokens': response.usage.get('total_tokens'),
+                    'cost': response._hidden_params.get('response_cost', 0.0),
+                    'prompt_tokens': response.usage.get('prompt_tokens', 0),
+                    'completion_tokens': response.usage.get('completion_tokens', 0),
+                    'total_tokens': response.usage.get('total_tokens', 0),
                 }
                 logger.info(token_usage)
+
+                # Record usage if tracker provided
+                if usage_tracker:
+                    try:
+                        metrics = UsageMetrics(
+                            prompt_tokens=token_usage['prompt_tokens'],
+                            completion_tokens=token_usage['completion_tokens'],
+                            total_tokens=token_usage['total_tokens'],
+                            cost=token_usage['cost'] or 0.0
+                        )
+                        await usage_tracker.record_usage(component_name, metrics)
+                    except Exception as e:
+                        logger.warning('Failed to record usage: %s', str(e))
+
                 return response_content
 
     except RetryError:
