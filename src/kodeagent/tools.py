@@ -35,6 +35,8 @@ DEFAULT_TOOLS_IMPORTS = [
     'youtube_transcript_api',
     'urllib.parse',
     'os',
+    'base64',
+    'litellm',
 ]
 """List of default modules (stdlib and third-party) to be available in tools."""
 
@@ -989,3 +991,49 @@ def transcribe_audio(file_path: str) -> Any:
         return f'Audio transcription error: {response.status_code}: {response.text}'
     except ImportError:
         return 'Audio transcription error: `requests` library not found. Please install it with `pip install requests`.'
+
+
+@tool
+def generate_image(prompt: str, model_name: str) -> str:
+    """
+    Generate an image based on a text prompt using the specified model.
+    It returns the image URL or the file path of the generated image.
+
+    Args:
+        prompt: Text description of the desired image.
+        model_name: The name of the image generation model to use.
+
+    Returns:
+        The file path or URL of the generated image or error message.
+    """
+    import base64
+    import os
+
+    import litellm
+
+    try:
+        response = litellm.image_generation(prompt=prompt, model=model_name)
+        image_data = response.data[0]
+
+        # 1. If a URL is provided, return it
+        if image_data.url:
+            return image_data.url
+
+        # 2. If URL is None, check for b64_json and save it locally
+        if hasattr(image_data, 'b64_json') and image_data.b64_json:
+            file_path = 'generated_image.png'
+            with open(file_path, 'wb') as f:
+                f.write(base64.b64decode(image_data.b64_json))
+            return os.path.abspath(file_path)
+
+        return 'Error: No image data (URL or Base64) found in response.'
+    except Exception as ex:
+        return f'Error: Image generation failed: {ex}'
+
+
+if __name__ == '__main__':
+    img_url = generate_image(
+        prompt='A futuristic cityscape at sunset, with flying cars and neon lights',
+        model_name='gemini/imagen-4.0-generate-001'
+    )
+    print(f'Generated image URL: {img_url}')

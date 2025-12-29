@@ -18,6 +18,8 @@
    
    extract_as_markdown
    
+   generate_image
+   
    read_webpage
    
    search_arxiv

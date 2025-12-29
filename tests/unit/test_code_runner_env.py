@@ -68,13 +68,15 @@ class TestCodeRunnerEnv(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generated_files, ['/home/user/new.txt'])
         
         # Test download
-        mock_sbx.files.read.return_value = 'file content'
+        # Mock E2B files.read() to return bytes (as it does with format='bytes')
+        mock_sbx.files.read.return_value = b'file content'
         local_files = await env.download_files_from_remote(['/home/user/new.txt'])
         
         self.assertEqual(len(local_files), 1)
         self.assertEqual(os.path.basename(local_files[0]), 'new.txt')
-        with open(local_files[0], 'r', encoding='utf-8') as f:
-            self.assertEqual(f.read(), 'file content')
+        # File is written in binary mode, so read it in binary mode
+        with open(local_files[0], 'rb') as f:
+            self.assertEqual(f.read(), b'file content')
 
     @patch('e2b_code_interpreter.Sandbox')
     async def test_e2b_env_get_sandbox_reuse(self, mock_cls):

@@ -311,16 +311,17 @@ class E2BCodeRunnerEnv(CodeRunnerEnv):
 
         for remote_path in remote_paths:
             try:
-                content = self._sbx.files.read(remote_path)
+                # CRITICAL: Always read as bytes from E2B to prevent corruption of binary files
+                # E2B's files.read() returns a string by default, which corrupts binary data
+                # like images during UTF-8 decode/encode. Using format='bytes' ensures we get
+                # the raw binary content.
+                content = self._sbx.files.read(remote_path, format='bytes')
                 filename = os.path.basename(remote_path)
                 local_path = os.path.join(local_dir, filename)
                 
-                # E2B read returns bytes (usually) or str?
-                # Documentation says it returns content. Let's assume bytes for safety or check.
-                mode = 'wb' if isinstance(content, bytes) else 'w'
-                encoding = None if isinstance(content, bytes) else 'utf-8'
-                
-                with open(local_path, mode, encoding=encoding) as f:
+                # Since we always read as bytes, always write in binary mode
+                # This works for both binary files (images, PDFs) and text files
+                with open(local_path, 'wb') as f:
                     f.write(content)
                 local_files.append(local_path)
                 logger.info('Downloaded file from E2B: %s -> %s', remote_path, local_path)
