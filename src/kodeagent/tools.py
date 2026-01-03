@@ -283,16 +283,16 @@ def download_file(
 
     Args:
         url: The complete URL of the file to download (must start with http:// or https://).
-        save_name: Optional custom filename. If not provided, uses the filename from URL.
+        save_name: Optional filename to save with. If not provided, uses the filename from URL.
         save_dir: Optional directory (path) to save the file. If not provided, saves to a temporary
-                 directory.
+         file in a temporary directory. Recommended to specify absolute path.
 
     Returns:
-        Success message with file path, or error message if download fails.
+        Success message with the final path to the downloaded file, or error message
+         if download fails.
     """
     import re
     import tempfile
-    import os
     from pathlib import Path
     from urllib.parse import urlparse, unquote
 
@@ -436,12 +436,12 @@ def download_file(
         )
 
         return (
-            f'SUCCESS: File downloaded successfully!\n'
+            'SUCCESS: File downloaded successfully!\n'
             f'- Saved to: {final_path_str}\n'
             f'- Original filename: {save_name}\n'
             f'- Size: {size_str}\n'
             f'- Content type: {response.headers.get("Content-Type", "unknown")}\n\n'
-            f'You can now use this file path with other tools.'
+            'You can now use this file path with other tools.'
         )
 
     except requests.exceptions.Timeout:
