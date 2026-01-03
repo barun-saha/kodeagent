@@ -264,7 +264,11 @@ def search_web(query: str, max_results: int = 10) -> str:
 
 
 @tool
-def download_file(url: str, save_filename: str = None, save_path: str = None) -> str:
+def download_file(
+    url: str,
+    save_filename: Optional[str] = None, 
+    save_path: Optional[str] = None
+) -> str:
     """
     Download a file from the internet and save it locally.
     Use this for downloading images, PDFs, data files, or any binary content.
