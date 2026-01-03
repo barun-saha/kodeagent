@@ -264,7 +264,11 @@ def search_web(query: str, max_results: int = 10) -> str:
 
 
 @tool
-def download_file(url: str, save_filename: str = None) -> str:
+def download_file(
+    url: str,
+    save_name: Optional[str] = None,
+    save_dir: Optional[str] = None
+) -> str:
     """
     Download a file from the internet and save it locally.
     Use this for downloading images, PDFs, data files, or any binary content.
@@ -274,15 +278,18 @@ def download_file(url: str, save_filename: str = None) -> str:
 
     Examples:
         - Download an image: url="https://example.com/photo.jpg"
-        - Download a dataset: url="https://example.com/data.csv"
-        - Download a PDF: url="https://example.com/paper.pdf"
+        - Download a dataset: url="https://example.com/data.csv", save_dir="./data"
+        - Download a PDF: url="https://example.com/paper.pdf", save_name="research.pdf"
 
     Args:
         url: The complete URL of the file to download (must start with http:// or https://).
-        save_filename: Optional custom filename. If not provided, uses the filename from URL.
+        save_name: Optional filename to save with. If not provided, uses the filename from URL.
+        save_dir: Optional directory (path) to save the file. If not provided, saves to a temporary
+         file in a temporary directory. Recommended to specify absolute path.
 
     Returns:
-        Success message with file path, or error message if download fails.
+        Success message with the final path to the downloaded file, or error message
+         if download fails.
     """
     import re
     import tempfile
@@ -312,15 +319,15 @@ def download_file(url: str, save_filename: str = None) -> str:
         return f'ERROR: Invalid URL format - {str(e)}'
 
     # Determine filename
-    if save_filename:
+    if save_name:
         # Sanitize custom filename
-        save_filename = re.sub(r'[<>:"/\\|?*]', '_', save_filename)
+        save_name = re.sub(r'[<>:"/\\|?*]', '_', save_name)
     else:
         # Extract from URL
         path = unquote(parsed.path)
-        save_filename = Path(path).name
-        if not save_filename or save_filename == '/':
-            save_filename = 'downloaded_file'
+        save_name = Path(path).name
+        if not save_name or save_name == '/':
+            save_name = 'downloaded_file'
 
     # Browser-like headers to avoid 403 errors
     headers = {
@@ -377,35 +384,51 @@ def download_file(url: str, save_filename: str = None) -> str:
                     f'ERROR: File too large ({size_mb:.1f} MB). Maximum supported size is 100 MB.'
                 )
 
-        # Create temp file with proper extension
-        file_ext = Path(save_filename).suffix
-        with tempfile.NamedTemporaryFile(
+        final_path = None
+        f = None
+        if save_dir:
+            try:
+                p = Path(save_dir)
+                p.mkdir(parents=True, exist_ok=True)
+                final_path = p / save_name
+                f = open(final_path, 'wb')
+            except Exception: # pylint: disable=broad-exception-caught
+                final_path = None
+
+        if not final_path:
+            # Create temp file with proper extension
+            file_ext = Path(save_name).suffix
+            # pylint: disable=consider-using-with
+            f = tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=file_ext,
                 prefix='kodeagent_'
-        ) as tmp_file:
-            # Download in chunks
+            )
+            final_path = Path(f.name)
+
+        try:
             downloaded_size = 0
             chunk_size = 8192
 
             for chunk in response.iter_content(chunk_size=chunk_size):
                 if chunk:
-                    tmp_file.write(chunk)
+                    f.write(chunk)
                     downloaded_size += len(chunk)
 
                     # Safety check during download
                     if downloaded_size > 100 * 1024 * 1024:  # 100 MB
-                        tmp_file.close()
-                        Path(tmp_file.name).unlink()
+                        f.close()
+                        if final_path.exists():
+                            final_path.unlink()
                         return 'ERROR: File exceeded 100 MB during download. Aborted.'
-
-            tmp_file_path = tmp_file.name
+        finally:
+            f.close()
 
         # Normalize path for cross-platform compatibility
-        tmp_file_path = str(Path(tmp_file_path).as_posix())
+        final_path_str = str(final_path.as_posix())
 
         # Get actual file size
-        actual_size = Path(tmp_file_path).stat().st_size
+        actual_size = final_path.stat().st_size
         size_str = (
             f'{actual_size / 1024:.1f} KB'
             if actual_size < 1024 * 1024
@@ -413,12 +436,12 @@ def download_file(url: str, save_filename: str = None) -> str:
         )
 
         return (
-            f'SUCCESS: File downloaded successfully!\n'
-            f'- Saved to: {tmp_file_path}\n'
-            f'- Original filename: {save_filename}\n'
+            'SUCCESS: File downloaded successfully!\n'
+            f'- Saved to: {final_path_str}\n'
+            f'- Original filename: {save_name}\n'
             f'- Size: {size_str}\n'
             f'- Content type: {response.headers.get("Content-Type", "unknown")}\n\n'
-            f'You can now use this file path with other tools.'
+            'You can now use this file path with other tools.'
         )
 
     except requests.exceptions.Timeout:

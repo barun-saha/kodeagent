@@ -379,7 +379,7 @@ class TestDownloadFile:
         mock_response.iter_content.return_value = [b'data']
         mock_get.return_value = mock_response
 
-        result = download_file("https://example.com/file.pdf", save_filename="custom.pdf")
+        result = download_file("https://example.com/file.pdf", save_name="custom.pdf")
 
         assert 'SUCCESS' in result
         assert 'custom.pdf' in result
@@ -400,7 +400,7 @@ class TestDownloadFile:
         mock_response.iter_content.return_value = [b'data']
         mock_get.return_value = mock_response
 
-        result = download_file("https://example.com/file.pdf", save_filename="bad<>name.pdf")
+        result = download_file("https://example.com/file.pdf", save_name="bad<>name.pdf")
 
         assert 'SUCCESS' in result
         # Should have sanitized the filename
@@ -567,7 +567,7 @@ class TestDownloadFile:
         mock_response.iter_content.return_value = [b'data']
         mock_get.return_value = mock_response
 
-        download_file("https://example.com/file.pdf")
+        result = download_file("https://example.com/file.pdf")
 
         mock_get.assert_called_once()
         call_kwargs = mock_get.call_args[1]
@@ -577,10 +577,95 @@ class TestDownloadFile:
         assert 'Chrome' in call_kwargs['headers']['User-Agent']
 
         # Cleanup
-        from pathlib import Path
-        path = Path('/tmp/kodeagent_file.pdf')
-        if path.exists():
-            path.unlink()
+        if 'Saved to:' in result:
+            from pathlib import Path
+            path = Path(result.split('Saved to:')[1].split('\n')[0].strip())
+            if path.exists():
+                path.unlink()
+
+    @patch('requests.get')
+    def test_download_file_with_save_dir(self, mock_get, tmp_path):
+        """Test download with save_dir."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'text/plain'}
+        mock_response.iter_content.return_value = [b'hello']
+        mock_get.return_value = mock_response
+
+        # Use a temporary directory
+        save_dir = tmp_path / "downloads"
+        save_dir.mkdir()
+
+        result = download_file("https://example.com/test.txt", save_dir=str(save_dir))
+
+        assert 'SUCCESS' in result
+        expected_path = save_dir / "test.txt"
+        assert str(expected_path.as_posix()) in result.replace('\\', '/')
+        assert expected_path.exists()
+        assert expected_path.read_text() == 'hello'
+
+    @patch('requests.get')
+    def test_download_file_with_save_dir_and_name(self, mock_get, tmp_path):
+        """Test download with save_dir and custom save_name."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'text/plain'}
+        mock_response.iter_content.return_value = [b'world']
+        mock_get.return_value = mock_response
+
+        # Use a temporary directory
+        save_dir = tmp_path / "output"
+        save_dir.mkdir()
+
+        result = download_file(
+            "https://example.com/test.txt",
+            save_dir=str(save_dir),
+            save_name="my_file.txt"
+        )
+
+        assert 'SUCCESS' in result
+        expected_path = save_dir / "my_file.txt"
+        assert str(expected_path.as_posix()) in result.replace('\\', '/')
+        assert expected_path.exists()
+        assert expected_path.read_text() == 'world'
+
+    @patch('requests.get')
+    def test_download_file_with_nonexistent_dir(self, mock_get, tmp_path):
+        """Test download with a non-existent directory."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'text/plain'}
+        mock_response.iter_content.return_value = [b'data']
+        mock_get.return_value = mock_response
+
+        # Path that does not exist
+        save_dir = tmp_path / "new_folder"
+
+        result = download_file("https://example.com/test.txt", save_dir=str(save_dir))
+
+        assert 'SUCCESS' in result
+        assert save_dir.is_dir()
+        expected_file = save_dir / "test.txt"
+        assert expected_file.exists()
+        assert expected_file.read_text() == 'data'
+
+    @patch('requests.get')
+    def test_download_file_fallback_on_error(self, mock_get):
+        """Test fallback to temp file if save_dir is invalid/protected."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'text/plain'}
+        mock_response.iter_content.return_value = [b'fallback data']
+        mock_get.return_value = mock_response
+
+        # Use an invalid path that causes OSError
+        with patch('builtins.open', side_effect=OSError("Permission denied")):
+            result = download_file("https://example.com/test.txt", save_dir="/protected/path")
+
+        assert 'SUCCESS' in result
+        # Should have saved to a temp file
+        assert 'kodeagent_' in result
+        assert '/protected/path' not in result
 
 
 class TestReadWebpage:
