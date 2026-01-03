@@ -567,7 +567,7 @@ class TestDownloadFile:
         mock_response.iter_content.return_value = [b'data']
         mock_get.return_value = mock_response
 
-        download_file("https://example.com/file.pdf")
+        result = download_file("https://example.com/file.pdf")
 
         mock_get.assert_called_once()
         call_kwargs = mock_get.call_args[1]
@@ -577,10 +577,51 @@ class TestDownloadFile:
         assert 'Chrome' in call_kwargs['headers']['User-Agent']
 
         # Cleanup
-        from pathlib import Path
-        path = Path('/tmp/kodeagent_file.pdf')
-        if path.exists():
-            path.unlink()
+        if 'Saved to:' in result:
+            from pathlib import Path
+            path = Path(result.split('Saved to:')[1].split('\n')[0].strip())
+            if path.exists():
+                path.unlink()
+
+    @patch('requests.get')
+    def test_download_file_with_save_path_dir(self, mock_get, tmp_path):
+        """Test download with save_path as a directory."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'text/plain'}
+        mock_response.iter_content.return_value = [b'hello']
+        mock_get.return_value = mock_response
+
+        # Use a temporary directory
+        save_dir = tmp_path / "downloads"
+        save_dir.mkdir()
+
+        result = download_file("https://example.com/test.txt", save_path=str(save_dir))
+
+        assert 'SUCCESS' in result
+        expected_path = save_dir / "test.txt"
+        assert str(expected_path.as_posix()) in result.replace('\\', '/')
+        assert expected_path.exists()
+        assert expected_path.read_text() == 'hello'
+
+    @patch('requests.get')
+    def test_download_file_with_save_path_file(self, mock_get, tmp_path):
+        """Test download with save_path as a full file path."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'Content-Type': 'text/plain'}
+        mock_response.iter_content.return_value = [b'world']
+        mock_get.return_value = mock_response
+
+        # Use a temporary file path
+        save_file = tmp_path / "output" / "my_file.txt"
+
+        result = download_file("https://example.com/test.txt", save_path=str(save_file))
+
+        assert 'SUCCESS' in result
+        assert str(save_file.as_posix()) in result.replace('\\', '/')
+        assert save_file.exists()
+        assert save_file.read_text() == 'world'
 
 
 class TestReadWebpage:
