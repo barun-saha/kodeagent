@@ -548,6 +548,7 @@ class Agent(ABC):
     ) -> AgentResponse:
         """
         Prepare a response to be sent by the agent.
+        Also, store the response in the task result if it is a final response.
 
         Args:
             rtype: Response type emitted by the agent.
@@ -558,6 +559,9 @@ class Agent(ABC):
         Returns:
             A response from the agent.
         """
+        if rtype == 'final' and self.task:
+            self.task.result = value
+
         return {'type': rtype, 'channel': channel, 'value': value, 'metadata': metadata}
 
     @abstractmethod
