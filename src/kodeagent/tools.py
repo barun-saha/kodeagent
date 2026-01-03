@@ -284,7 +284,7 @@ def download_file(
     Args:
         url: The complete URL of the file to download (must start with http:// or https://).
         save_name: Optional custom filename. If not provided, uses the filename from URL.
-        save_dir: Optional directory to save the file. If not provided, saves to a temporary
+        save_dir: Optional directory (path) to save the file. If not provided, saves to a temporary
                  directory.
 
     Returns:
