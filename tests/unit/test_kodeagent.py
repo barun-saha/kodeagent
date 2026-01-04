@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 import pydantic_core
 import pytest
+from tenacity import RetryError
 
 from kodeagent import (
     ReActAgent,
@@ -3388,3 +3389,260 @@ async def test_record_thought_adds_missing_role(react_agent):
         # Check that role was automatically added
         assert msg.role == 'assistant'
         assert msg.thought == 'I will calculate 2+2'
+
+@pytest.fixture
+def mock_agent():
+    agent = ReActAgent(
+        name="CoverageAgent",
+        model_name="test-model",
+        tools=[],
+        max_iterations=1
+    )
+    # Mock usage tracker to avoid side effects
+    agent.usage_tracker = MagicMock()
+    return agent
+
+@pytest.mark.asyncio
+async def test_salvage_response(mock_agent):
+    """Test the salvage_response method (Lines 548-568)."""
+    mock_agent.task = Task(description="Test Task")
+    mock_agent.msg_idx_of_new_task = 0
+    
+    with patch("kodeagent.kutils.call_llm", new_callable=AsyncMock) as mock_call:
+        mock_call.return_value = "Salvaged content"
+        
+        result = await mock_agent.salvage_response()
+        
+        assert result == "Salvaged content"
+        mock_call.assert_called_once()
+        assert "Test Task" in str(mock_call.call_args)
+
+@pytest.mark.asyncio
+async def test_create_initial_plan_retry_error(mock_agent):
+    """Test _create_initial_plan failure handling (Line 889)."""
+    mock_agent.planner = MagicMock()
+    # Mock create_plan to raise RetryError properly
+    # RetryError requires a last_attempt argument, usually a Future
+    retry_err = RetryError(last_attempt=MagicMock())
+    mock_agent.planner.create_plan = AsyncMock(side_effect=retry_err)
+    
+    mock_agent.task = Task(description="Test Task")
+    
+    with pytest.raises(RuntimeError) as excinfo:
+        await mock_agent._create_initial_plan()
+    
+    assert "Rate limit exceeded" in str(excinfo.value)
+    # Verify error history added
+    assert len(mock_agent.messages) > 0
+    assert "Unable to start solving" in mock_agent.messages[-1].content
+
+@pytest.mark.asyncio
+async def test_run_validations(mock_agent):
+    """Test run method input validations (Lines 896-897 check)."""
+    
+    # Empty task
+    with pytest.raises(ValueError, match="Task description cannot be empty"):
+        async for _ in mock_agent.run(""):
+            pass
+            
+    # Invalid files type
+    with pytest.raises(ValueError, match="Task files must be a list"):
+        async for _ in mock_agent.run("Task", files="invalid"):
+            pass
+            
+    # Too many files
+    many_files = [f"f{i}" for i in range(11)]
+    with pytest.raises(ValueError, match="Too many files provided"):
+        async for _ in mock_agent.run("Task", files=many_files):
+            pass
+
+@pytest.mark.asyncio
+async def test_pre_run_error_propagation(mock_agent):
+    """Test that runtime error in pre_run (from initial plan) is handled."""
+    # We mock _create_initial_plan to raise RuntimeError
+    mock_agent._create_initial_plan = AsyncMock(side_effect=RuntimeError("Plan failed"))
+    mock_agent._run_init = MagicMock() # Mock init to avoid side effects
+    mock_agent.task = Task(description="Test") # Ensure task exists
+
+    responses = []
+    async for resp in mock_agent.pre_run():
+        responses.append(resp)
+        
+    # Should yield log, then error final response
+    assert len(responses) >= 2
+    error_resp = responses[-1]
+    assert error_resp['type'] == 'final'
+    assert error_resp['value'] == 'Plan failed'
+    assert error_resp['metadata']['is_error'] is True
+
+@pytest.mark.asyncio
+async def test_agent_abstract_properties():
+    """Test Agent abstract base class properties."""
+    # concrete implementation needed for testing abstract class properties
+    agent = ReActAgent("Test", "model", [])
+    
+    # Test current_plan property when planner is empty
+    agent.planner = None
+    assert agent.current_plan is None
+    
+    # Test artifacts property
+    agent.task_output_files = ["file1"]
+    assert agent.artifacts == ["file1"]
+
+@pytest.mark.asyncio
+async def test_run_loop_retry_error(mock_agent):
+    """Test RetryError handling in the main run loop (Lines 967-976)."""
+    mock_agent.task = Task(description="Task")
+    mock_agent.planner = MagicMock()
+    mock_agent.planner.plan = None # No plan yet
+    
+    # Mock pre_run to initialize properly
+    mock_agent._run_init = MagicMock()
+    mock_agent.init_history = MagicMock()
+    
+    # Fix: pre_run must be an async generator
+    async def mock_pre_run():
+        if False: yield
+    mock_agent.pre_run = MagicMock(return_value=mock_pre_run())
+    
+    # Mock _think to raise RetryError
+    retry_err = RetryError(last_attempt=MagicMock())
+    
+    # We need to simulate _think raising RetryError when iterated
+    async def failing_think():
+        raise retry_err
+        yield # Make it a generator
+        
+    mock_agent._think = MagicMock(return_value=failing_think())
+    
+    responses = []
+    try:
+        async for resp in mock_agent.run("Task"):
+            responses.append(resp)
+    except StopAsyncIteration:
+        pass
+        
+    # Should find the error response
+    error_resps = [r for r in responses if r['type'] == 'final' and r['metadata'].get('is_error')]
+    assert len(error_resps) == 1
+    assert "Rate limit exceeded" in error_resps[0]['value']
+
+@pytest.mark.asyncio
+async def test_run_loop_update_plan_retry_error(mock_agent):
+    """Test RetryError during plan update (Lines 979-990)."""
+    mock_agent.task = Task(description="Task")
+    mock_agent.planner = MagicMock()
+    mock_agent.planner.plan = True # Force plan update path
+    # Fix: mock getter instead of setting property
+    mock_agent.planner.get_formatted_plan = MagicMock(return_value="Plan")
+    
+    # Fix: pre_run mock
+    async def mock_pre_run():
+        if False: yield
+    mock_agent.pre_run = MagicMock(return_value=mock_pre_run())
+    
+    # Mock think/act to succeed once then stop? 
+    # mock_agent.run loops max_iterations.
+    async def success_gen():
+        yield {'type': 'step', 'value': 'thought'}
+        
+    mock_agent._think = MagicMock(return_value=success_gen())
+    mock_agent._act = MagicMock(return_value=success_gen())
+    
+    # Mock _update_plan to raise error
+    retry_err = RetryError(last_attempt=MagicMock())
+    mock_agent._update_plan = AsyncMock(side_effect=retry_err)
+    
+    responses = []
+    async for resp in mock_agent.run("Task"):
+        responses.append(resp)
+        if resp['type'] == 'final' and resp['metadata'].get('is_error'):
+            break
+            
+    assert any("Rate limit exceeded during plan update" in r['value'] for r in responses)
+
+@pytest.mark.asyncio
+async def test_observer_retry_error(mock_agent):
+    """Test Observer rate limit handling (Lines 1010-1012)."""
+    mock_agent.task = Task(description="Task")
+    mock_agent.planner = MagicMock()
+    mock_agent.planner.plan = None
+    
+    # Fix: pre_run mock
+    async def mock_pre_run():
+        if False: yield
+    mock_agent.pre_run = MagicMock(return_value=mock_pre_run())
+    
+    async def success_gen():
+        yield {'type': 'step', 'value': 'stuff'}
+        
+    mock_agent._think = MagicMock(return_value=success_gen())
+    mock_agent._act = MagicMock(return_value=success_gen())
+    
+    # Observer raises RetryError
+    retry_err = RetryError(last_attempt=MagicMock())
+    mock_agent.observer = MagicMock()
+    mock_agent.observer.observe = AsyncMock(side_effect=retry_err)
+    
+    # Should NOT crash, just log warning and continue
+    # We restrict max_iterations to 1 to finish test
+    mock_agent.max_iterations = 1
+    
+    responses = []
+    async for resp in mock_agent.run("Task"):
+        responses.append(resp)
+        
+    # If we got here without exception, it passed the try/except block
+    assert True
+
+@pytest.mark.asyncio
+async def test_salvage_response_retry_error(mock_agent):
+    """Test failure to salvage response (Lines 1032-1036)."""
+    mock_agent.task = Task(description="Task")
+    mock_agent.planner = MagicMock()
+    
+    # Fix: pre_run mock
+    async def mock_pre_run():
+        if False: yield
+    mock_agent.pre_run = MagicMock(return_value=mock_pre_run())
+    
+    mock_agent.max_iterations = 1
+    mock_agent.final_answer_found = False
+    
+    # Stub think/act
+    async def empty_gen():
+        if False: yield
+    mock_agent._think = MagicMock(return_value=empty_gen())
+    mock_agent._act = MagicMock(return_value=empty_gen())
+    mock_agent.observer.observe = AsyncMock(return_value=None)
+    
+    # Mock salvage failure
+    retry_err = RetryError(last_attempt=MagicMock())
+    mock_agent.salvage_response = AsyncMock(side_effect=retry_err)
+    
+    responses = []
+    async for resp in mock_agent.run("Task", summarize_progress_on_failure=True):
+        responses.append(resp)
+        
+    # Should get final failure message WITHOUT summary
+    final_resp = [r for r in responses if r['type'] == 'final'][0]
+    assert "summary of progress" not in final_resp['value']
+
+@pytest.mark.asyncio
+async def test_record_thought_parsing_failures(mock_agent):
+    """Test _record_thought parsing failure loops (Lines 1172-1203)."""
+    # We need to mock _chat to return invalid JSON
+    mock_agent._chat = AsyncMock(return_value="NOT JSON")
+    
+    # We need to verify that it retries 3 times then fails
+    # And adds feedback messages to history
+    
+    res = await mock_agent._record_thought(ChatMessage) # Using base for simplicity
+    
+    assert res is None
+    assert mock_agent._chat.call_count == 3
+    # Check history for feedback messages
+    feedback_msgs = [m for m in mock_agent.messages if "Parsing Error" in m.content]
+    assert len(feedback_msgs) >= 2
+
+

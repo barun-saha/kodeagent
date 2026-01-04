@@ -530,6 +530,41 @@ class Agent(ABC):
         )
         return salvaged_response
 
+    async def pre_run(self) -> AsyncIterator[AgentResponse]:
+        """
+        Hook intended to run before the main agent loop.
+        This method acts as an asynchronous generator. Subclasses should override this to:
+        - Initialize task-specific state or resources.
+        - Validate inputs or preconditions.
+        - Emit initial log messages or status updates (by yielding AgentResponse objects).
+
+        If no setup is needed, the default implementation yields nothing.
+
+        Returns:
+            AsyncIterator[AgentResponse]: An iterator yielding agent responses (logs, steps, etc.).
+        """
+        # This makes the method an async generator that yields nothing.
+        # Required because the caller iterates over it with `async for`.
+        if False:  # pylint: disable=using-constant-test
+            yield
+
+    async def post_run(self) -> AsyncIterator[AgentResponse]:
+        """
+        Hook intended to run after the main agent loop.
+        This method acts as an asynchronous generator and is guaranteed to run (in a finally block).
+        Subclasses should override this to:
+        - Clean up resources (e.g. temporary files, connections).
+        - Log final execution metrics or summaries.
+        - Persist agent state.
+
+        Returns:
+            AsyncIterator[AgentResponse]: An iterator yielding agent responses.
+        """
+        # This makes the method an async generator that yields nothing.
+        # Required because the caller iterates over it with `async for`.
+        if False:  # pylint: disable=using-constant-test
+            yield
+
     @abstractmethod
     async def run(
             self,
@@ -863,6 +898,97 @@ class ReActAgent(Agent):
         self._last_tool_call_id = None
         self._pending_tool_call = False
 
+    async def _create_initial_plan(self):
+        """
+        Helper method to create the initial plan.
+
+        Raises:
+            RuntimeError: If plan creation fails.
+        """
+        try:
+            await self.planner.create_plan(self.task, self.__class__.__name__)
+        except RetryError as err:
+            logger.warning('Max retries reached during plan creation.')
+            error_msg = (
+                'Unable to start solving the task: Rate limit exceeded while '
+                'creating the initial plan. Please try again later.'
+            )
+            self.add_to_history(ChatMessage(role='assistant', content=error_msg))
+            raise RuntimeError(error_msg) from err
+
+    async def pre_run(self) -> AsyncIterator[AgentResponse]:
+        """
+        Perform setup before the main run loop.
+        - Initialize task and history.
+        - Create initial plan.
+
+        Returns:
+            AsyncIterator[AgentResponse]: Iterator of agent responses.
+        """
+        self.init_history()
+
+        yield self.response(
+            rtype='log',
+            value=f'Solving task: `{self.task.description}`',
+            channel='run'
+        )
+
+        try:
+            await self._create_initial_plan()
+        except RuntimeError as e:
+            yield self.response(
+                rtype='final',
+                value=str(e),
+                channel='run',
+                metadata={
+                    'final_answer_found': False,
+                    'is_error': True
+                }
+            )
+            return
+
+        yield self.response(
+            rtype='log',
+            value=f'Plan:\n{self.planner.get_formatted_plan()}',
+            channel='run'
+        )
+
+        self.add_to_history(
+            ChatMessage(
+                role='user',
+                content=f'New Task:\n{self.task.description}',
+                files=self.task.files
+            )
+        )
+        self.add_to_history(
+            ChatMessage(role='user', content=f'Plan:\n{self.planner.get_formatted_plan()}')
+        )
+
+    async def post_run(self) -> AsyncIterator[AgentResponse]:
+        """
+        Perform cleanup after the main run loop.
+        - Calculate and log usage metrics.
+
+        Returns:
+            AsyncIterator[AgentResponse]: Iterator of agent responses.
+        """
+        if self.task:
+            usage_data = self.get_usage_metrics()
+            self.task.total_llm_calls = usage_data['total']['call_count']
+            self.task.total_prompt_tokens = usage_data['total']['total_prompt_tokens']
+            self.task.total_completion_tokens = usage_data['total']['total_completion_tokens']
+            self.task.total_tokens = usage_data['total']['total_tokens']
+            self.task.total_cost = usage_data['total']['total_cost']
+            self.task.usage_by_component = usage_data['by_component']
+
+            # Log usage summary
+            logger.info(
+                'Task %s usage: %s',
+                self.task.id,
+                self.get_usage_report(include_breakdown=False)
+            )
+        yield self.response(rtype='log', value='Task execution finished', channel='run')
+
     async def run(
             self,
             task: str,
@@ -894,53 +1020,19 @@ class ReActAgent(Agent):
         if files and len(files) > MAX_TASK_FILES:
             raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
 
+        # 1. run() calls _run_init()
+        # 2. pre_run() calls init_history() and does the logging/planning        
         self._run_init(task, files, task_id)
-        self.init_history()
 
-        try:
-            yield self.response(
-                rtype='log',
-                value=f'Solving task: `{self.task.description}`',
-                channel='run'
-            )
-
-            try:
-                await self.planner.create_plan(self.task, self.__class__.__name__)
-            except RetryError:
-                logger.warning('Max retries reached during plan creation.')
-                error_msg = (
-                    'Unable to start solving the task: Rate limit exceeded while '
-                    'creating the initial plan. Please try again later.'
-                )
-                self.add_to_history(ChatMessage(role='assistant', content=error_msg))
-                yield self.response(
-                    rtype='final',
-                    value=error_msg,
-                    channel='run',
-                    metadata={
-                        'final_answer_found': False,
-                        'is_error': True
-                    }
-                )
+        # Execute pre-run hook
+        async for response in self.pre_run():
+            yield response
+            # Check if pre_run encountered specific error signal
+            if response['type'] == 'final' and response['metadata'].get('is_error'):
                 return
 
-            yield self.response(
-                rtype='log',
-                value=f'Plan:\n{self.planner.get_formatted_plan()}',
-                channel='run'
-            )
-
-            self.add_to_history(
-                ChatMessage(
-                    role='user',
-                    content=f'New Task:\n{self.task.description}',
-                    files=self.task.files
-                )
-            )
-            self.add_to_history(
-                ChatMessage(role='user', content=f'Plan:\n{self.planner.get_formatted_plan()}')
-            )
-
+        try:
+            # Main Loop
             idx = 0
             for idx in range(self.max_iterations):
                 logger.debug('ITERATION %d/%d', idx + 1, self.max_iterations)
@@ -1056,25 +1148,17 @@ class ReActAgent(Agent):
         except asyncio.CancelledError:
             logger.warning('Iteration cancelled')
         finally:
-            # Update task with usage data before cleanup
-            if self.task:
-                usage_data = self.get_usage_metrics()
-                self.task.total_llm_calls = usage_data['total']['call_count']
-                self.task.total_prompt_tokens = usage_data['total']['total_prompt_tokens']
-                self.task.total_completion_tokens = usage_data['total']['total_completion_tokens']
-                self.task.total_tokens = usage_data['total']['total_tokens']
-                self.task.total_cost = usage_data['total']['total_cost']
-                self.task.usage_by_component = usage_data['by_component']
-
-                # Log usage summary
-                logger.info(
-                    'Task %s usage: %s',
-                    self.task.id,
-                    self.get_usage_report(include_breakdown=False)
-                )
+            # Execute post-run hook
+            async for response in self.post_run():
+                yield response
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
-        """Think about the next step using the new structured response format."""
+        """
+        Think about the next step using the new structured response format.
+
+        Returns:
+            AsyncIterator[AgentResponse]: An async iterator of AgentResponse objects.
+        """
         thought = await self._record_thought(ReActChatMessage)
         yield self.response(rtype='step', value=thought, channel='_think')
 
@@ -1085,6 +1169,9 @@ class ReActAgent(Agent):
         """
         Record the agent's thought with improved error handling and fallback parsing.
         Now returns ChatMessage directly instead of separate Response class.
+
+        Returns:
+            Optional[Union[ReActChatMessage, CodeActChatMessage]]: The agent's thought.
         """
         for attempt in range(3):
             try:
@@ -1930,23 +2017,23 @@ async def main():
         litellm_params=litellm_params,
         filter_tools_for_task=False
     )
-    # agent = CodeActAgent(
-    #     name='Simple agent',
-    #     model_name=model_name,
-    #     tools=[
-    #         dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
-    #     ],
-    #     max_iterations=7,
-    #     litellm_params=litellm_params,
-    #     run_env='host',
-    #     allowed_imports=[
-    #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
-    #         'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
-    #     ],
-    #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
-    #     filter_tools_for_task=False,
-    #     work_dir='./agent_workspace'
-    # )
+    agent = CodeActAgent(
+        name='Simple agent',
+        model_name=model_name,
+        tools=[
+            dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
+        ],
+        max_iterations=7,
+        litellm_params=litellm_params,
+        run_env='host',
+        allowed_imports=[
+            'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
+            'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
+        ],
+        pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
+        filter_tools_for_task=False,
+        work_dir='./agent_workspace'
+    )
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
