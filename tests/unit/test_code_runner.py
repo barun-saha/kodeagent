@@ -450,7 +450,8 @@ def test_code_runner_init_with_model_params():
         mock_reviewer_class.assert_called_once_with(
             model_name=model_name,
             litellm_params=litellm_params,
-            usage_tracker=None
+            usage_tracker=None,
+            tool_names=None
         )
         assert runner.code_reviewer == mock_instance
 
@@ -472,5 +473,31 @@ def test_code_runner_init_with_usage_tracker():
         mock_reviewer_class.assert_called_once_with(
             model_name='test-model',
             litellm_params=None,
-            usage_tracker=usage_tracker
+            usage_tracker=usage_tracker,
+            tool_names=None
         )
+
+
+def test_code_runner_init_with_tool_names():
+    """Test that tool_names are properly passed to CodeSecurityReviewer."""
+    with patch('kodeagent.code_runner.CodeSecurityReviewer') as mock_reviewer_class:
+        mock_instance = MagicMock()
+        mock_reviewer_class.return_value = mock_instance
+        
+        tool_names = {'calculator', 'search_web'}
+        
+        runner = CodeRunner(
+            env='host',
+            allowed_imports=['os'],
+            model_name='test-model',
+            tool_names=tool_names
+        )
+        
+        mock_reviewer_class.assert_called_once_with(
+            model_name='test-model',
+            litellm_params=None,
+            usage_tracker=None,
+            tool_names=tool_names
+        )
+        assert runner.code_reviewer == mock_instance
+

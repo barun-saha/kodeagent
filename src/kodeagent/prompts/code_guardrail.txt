@@ -37,6 +37,13 @@ The rules given below are non-negotiable and MUST never be violated. Flag any co
 - ✅ Temporary file creation in system temp directories
 - ✅ Automatic cleanup of temporary files
 
+### Whitelisted User-Provided Tools
+The following tools (Python functions) have been explicitly provided by the user and their usage is ALLOWED:
+{whitelisted_tools}
+
+**IMPORTANT**: If the code being reviewed uses any of the whitelisted tools listed above, this is SAFE and EXPECTED behavior. Do NOT flag the usage of these tools as a security concern. These tools are part of the agent's capabilities and have been vetted by the user.
+
+
 ### Path Validation Rules in Code
 1. All file paths must be absolute and validated against workspace root
 2. Reject any path containing deep traversal: ../../../, ..\\..\\..\\
