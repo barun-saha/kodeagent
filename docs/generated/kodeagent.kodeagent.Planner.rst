@@ -1,4 +1,4 @@
-﻿kodeagent.kodeagent.Planner
+kodeagent.kodeagent.Planner
 ===========================
 
 .. currentmodule:: kodeagent.kodeagent

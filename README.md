@@ -8,7 +8,7 @@
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/kodeagent)
 
 
-KodeAgent is a frameworkless, minimalistic approach to building AI agents. KodeAgent is a small (~2,000 lines of pure Python) engine designed to be the robust reasoning core inside your larger system, not the entire platform.
+KodeAgent is a frameworkless, minimalistic approach to building AI agents. Written in ~2,000 lines of pure Python, KodeAgent is designed to be the robust reasoning core inside your larger system, not the entire platform.
 
 ![KodeAgent Demo](assets/demo.gif)
 
@@ -18,11 +18,11 @@ KodeAgent is a frameworkless, minimalistic approach to building AI agents. KodeA
 KodeAgent adheres to the **Unix Philosophy**: do one thing well and integrate seamlessly.
 
 Use KodeAgent because it offers:
-- **Memoryless and Scalable:** Designed to be memoryless with zero overhead, making it perfect for serverless and high-throughput microservices (ephemeral-task agents).
+- **Scalable:** Designed to be memoryless with zero overhead, KodeAgent perfectly integrates into serverless and high-throughput microservices (ephemeral tasks).
 - **ReAct & CodeAct:** KodeAgent supports both ReAct and CodeAct agent paradigms out-of-the-box, enabling agents to reason and act using tools or by generating and executing code.
-- **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models, such as Gemini and OpenAI, without requiring any changes to the core agent logic.
-- **Lightweight Foundation:** At only ~2,000 lines of pure Python and just a few dependencies, KodeAgent provides the agent primitives without any of the architectural bloat found in some frameworks.
-- **The Glass Box:** The architecture is frameworkless and minimal, allowing you to read the entire Pure Python source and debug without fighting opaque abstraction layers.
+- **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models (e.g., Gemini, OpenAI, and Claude) without changing your core logic.
+- **Auto-Correction:** Includes an internal "Observer" that monitors agent progress, detects loops or stalled plans, and provides corrective feedback to stay on track.
+- **Lightweight Glass Box:** Read the entire source and debug without fighting opaque abstraction layers. Follow the key abstractions and build something on your own!
 
 
 ## ✋ Why Not?
@@ -57,7 +57,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Now, in your application code, create a ReAct agent and run a task like this (see `examples/kodeagent_quick_start.py`):
+Now, in your application code, create a ReAct agent and run a task like this (see `examples/_quick_start/kodeagent_quick_start.py`):
 
 ```python
 from kodeagent import ReActAgent, print_response
@@ -101,9 +101,19 @@ agent = CodeActAgent(
 
 That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [kodeagent.py](src/kodeagent/kodeagent.py) module and [API documentation](https://kodeagent.readthedocs.io/en/latest/usage.html).
 
-KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm), enabling it to work with any capable LLM. Currently, KodeAgent has been tested with Gemini 2.5 Flash Lite. For advanced tasks, you can try Gemini 2.5 Pro.
+### API Configuration
 
-LLM model names, parameters, and keys should be set as per [LiteLLM API Keys documentation](https://docs.litellm.ai/docs/set_keys). For example, set the `GEMINI_API_KEY` environment variable (add in the `.env` file you are running from source code) to use [Gemini API](https://aistudio.google.com/api-keys). Additionally, you can set `OPENAI_API_KEY` for OpenAI models; set `ANTHROPIC_API_KEY` for Claude models; and so on. For [Azure OpenAI](https://docs.litellm.ai/docs/providers/azure/) models, set `AZURE_API_KEY`, `AZURE_API_BASE`, and `AZURE_API_VERSION` environment variables.
+KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm) for model access and [Langfuse](https://langfuse.com/) for observability. Set your API keys as environment variables or in a `.env` file:
+
+| Service | Environment Variable |
+| :--- | :--- |
+| **Gemini** | `GOOGLE_API_KEY` |
+| **OpenAI** | `OPENAI_API_KEY` |
+| **Anthropic** | `ANTHROPIC_API_KEY` |
+| **E2B Sandbox** | `E2B_API_KEY` |
+| **Langfuse** | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` |
+
+Detailed configuration for various providers can be found in the [LiteLLM documentation](https://docs.litellm.ai/docs/set_keys).
 
 
 ### Code Execution
@@ -167,7 +177,8 @@ def my_tool(param1: str) -> str:
 ```
 
 Module imports and all variables should be inside the tool function. If you're using `CodeActAgent`, KodeAgent will execute the tool function in isolation.
-For further details, refer to the [API documentation](https://kodeagent.readthedocs.io/en/latest/).
+For further details, refer to the [API documentation](https://kodeagent.readthedocs.io/en/latest/). Note: `async` tools are not supported.
+
 
 ## 🔭 Observability
 
