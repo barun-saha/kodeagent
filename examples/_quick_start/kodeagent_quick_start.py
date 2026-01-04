@@ -23,6 +23,8 @@ async def main():
         async for response in agent.run(task):
             print_response(response, only_final=True)
 
+        print(agent.current_plan)
+
 
 if __name__ == '__main__':
     import asyncio

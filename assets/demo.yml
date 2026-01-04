@@ -1,0 +1,171 @@
+# The configurations that used for the recording, feel free to edit them
+config:
+
+  # Specify a command to be executed
+  # like `/bin/bash -l`, `ls`, or any other commands
+  # the default is bash for Linux
+  # or powershell.exe for Windows
+  command: bash -l
+  
+  # Specify the current working directory path
+  # the default is the current working directory path
+#  cwd: /home/barun/kodeagent
+  
+  # Export additional ENV variables
+  env:
+    recording: true
+  
+  # Explicitly set the number of columns
+  # or use `auto` to take the current
+  # number of columns of your shell
+  cols: 120
+  
+  # Explicitly set the number of rows
+  # or use `auto` to take the current
+  # number of rows of your shell
+  rows: 30
+  
+  # Amount of times to repeat GIF
+  # If value is -1, play once
+  # If value is 0, loop indefinitely
+  # If value is a positive number, loop n times
+  repeat: 0
+  
+  # Quality
+  # 1 - 100
+  quality: 100
+  
+  # Delay between frames in ms
+  # If the value is `auto` use the actual recording delays
+  frameDelay: auto
+  
+  # Maximum delay between frames in ms
+  # Ignored if the `frameDelay` isn't set to `auto`
+  # Set to `auto` to prevent limiting the max idle time
+  maxIdleTime: 2000
+  
+  # The surrounding frame box
+  # The `type` can be null, window, floating, or solid`
+  # To hide the title use the value null
+  # Don't forget to add a backgroundColor style with a null as type
+  frameBox:
+    type: floating
+    title: KodeAgent Demo
+    style:
+      border: 0px black solid
+      # boxShadow: none
+      # margin: 0px
+  
+  # Add a watermark image to the rendered gif
+  # You need to specify an absolute path for
+  # the image on your machine or a URL, and you can also
+  # add your own CSS styles
+  watermark:
+    imagePath: null
+    style:
+      position: absolute
+      right: 15px
+      bottom: 15px
+      width: 100px
+      opacity: 0.9
+  
+  # Cursor style can be one of
+  # `block`, `underline`, or `bar`
+  cursorStyle: block
+  
+  # Font family
+  # You can use any font that is installed on your machine
+  # in CSS-like syntax
+  fontFamily: "Monaco, Lucida Console, Ubuntu Mono, Monospace"
+  
+  # The size of the font
+  fontSize: 12
+  
+  # The height of lines
+  lineHeight: 1
+  
+  # The spacing between letters
+  letterSpacing: 0
+  
+  # Theme
+  theme:
+    background: "transparent"
+    foreground: "#afafaf"
+    cursor: "#c7c7c7"
+    black: "#232628"
+    red: "#fc4384"
+    green: "#b3e33b"
+    yellow: "#ffa727"
+    blue: "#75dff2"
+    magenta: "#ae89fe"
+    cyan: "#708387"
+    white: "#d5d5d0"
+    brightBlack: "#626566"
+    brightRed: "#ff7fac"
+    brightGreen: "#c8ed71"
+    brightYellow: "#ebdf86"
+    brightBlue: "#75dff2"
+    brightMagenta: "#ae89fe"
+    brightCyan: "#b1c6ca"
+    brightWhite: "#f9f9f4"
+  
+# Records, feel free to edit them
+records:
+  - delay: 354
+    content: "\e[?2004h\e]0;\a\e[01;32m\e[00m"
+  - delay: 1711
+    content: p
+  - delay: 345
+    content: 'y'
+  - delay: 569
+    content: t
+  - delay: 181
+    content: h
+  - delay: 185
+    content: o
+  - delay: 280
+    content: 'n'
+  - delay: 209
+    content: ' '
+  - delay: 460
+    content: k
+  - delay: 81
+    content: o
+  - delay: 133
+    content: d
+  - delay: 234
+    content: e
+  - delay: 442
+    content: a
+  - delay: 230
+    content: g
+  - delay: 190
+    content: e
+  - delay: 176
+    content: 'n'
+  - delay: 248
+    content: t
+  - delay: 230
+    content: '_quick_start.py '
+  - delay: 678
+    content: "\r\n\e[?2004l\r"
+  - delay: 1678
+    content: "- Vision supported by gemini/gemini-2.5-flash-lite: True\r\n2026-01-04 06:03:47,225 - KodeAgent - INFO - Created agent: Web agent; tools: ['search_web', 'read_webpage']\r\nUser: What are the festivals in Paris? How they differ from Kolkata?\r\n"
+  - delay: 1863
+    content: "2026-01-04 06:03:49,087 - KodeAgent - INFO - {'cost': 7.719999999999999e-05, 'prompt_tokens': 224, 'completion_tokens': 137, 'total_tokens': 361}\r\n2026-01-04 06:03:49,088 - KodeAgent - DEBUG - ITERATION 1/5\r\n"
+  - delay: 1084
+    content: "2026-01-04 06:03:50,171 - KodeAgent - INFO - {'cost': 0.000336, 'prompt_tokens': 2976, 'completion_tokens': 96, 'total_tokens': 3072}\r\n2026-01-04 06:03:50,172 - KodeAgent - DEBUG - Successfully parsed structured JSON response\r\n2026-01-04 06:03:50,172 - KodeAgent - DEBUG - \U0001F6E0 Running tool: search_web with args: {'query': 'festivals in Paris'}\r\n"
+  - delay: 2902
+    content: "2026-01-04 06:03:53,073 - KodeAgent - INFO - {'cost': 0.000222, 'prompt_tokens': 1672, 'completion_tokens': 137, 'total_tokens': 1809}\r\n2026-01-04 06:03:53,074 - KodeAgent - DEBUG - ITERATION 2/5\r\n"
+  - delay: 1462
+    content: "2026-01-04 06:03:54,535 - KodeAgent - INFO - {'cost': 0.0004589, 'prompt_tokens': 4293, 'completion_tokens': 74, 'total_tokens': 4367}\r\n2026-01-04 06:03:54,536 - KodeAgent - DEBUG - Successfully parsed structured JSON response\r\n2026-01-04 06:03:54,536 - KodeAgent - DEBUG - \U0001F6E0 Running tool: search_web with args: {'query': 'festivals in Kolkata'}\r\n"
+  - delay: 3450
+    content: "2026-01-04 06:03:57,986 - KodeAgent - INFO - {'cost': 0.0002007, 'prompt_tokens': 1459, 'completion_tokens': 137, 'total_tokens': 1596}\r\n2026-01-04 06:03:57,987 - KodeAgent - DEBUG - ITERATION 3/5\r\n"
+  - delay: 4446
+    content: "2026-01-04 06:04:02,432 - KodeAgent - INFO - {'cost': 0.0008025, 'prompt_tokens': 5381, 'completion_tokens': 661, 'total_tokens': 6042}\r\n2026-01-04 06:04:02,433 - KodeAgent - DEBUG - Successfully parsed structured JSON response\r\n"
+  - delay: 13
+    content: "\e[1;32mAgent\e[0m\e[32m: I have found lists of festivals for both Paris and Kolkata. To compare them and identify differences, I need to \e[0m\r\n\e[32manalyze the information I have gathered. \e[0m\r\n\r\n\e[32m**Festivals in Paris:** The search results indicate that Paris has a variety of festivals throughout the year, including\e[0m\r\n\e[32mmusic festivals \e[0m\e[1;32m(\e[0m\e[32mlike Fête de la Musique, Banlieues Bleues\e[0m\e[1;32m)\e[0m\e[32m, cultural events, and general celebrations. The Wikipedia \e[0m\r\n\e[32mentry for \e[0m\e[32m\"Festivals in Paris\"\e[0m\e[32m suggests a broad range of cultural attractions and entertainment contributing to its \e[0m\r\n\e[32mstatus as a global city. Specific examples mentioned include Paris Fashion Week, and general references to art shows, \e[0m\r\n\e[32mmusic festivals, and food fairs. The focus seems to be on a diverse cultural calendar catering to a global audience.\e[0m\r\n\r\n\e[32m**Festivals in Kolkata:** Kolkata's festivals are heavily influenced by its rich cultural and religious heritage. The \e[0m\r\n\e[32mmost prominent festival is Durga Puja, a major Hindu celebration. Other significant festivals include Diwali, Kali Puja,\e[0m\r\n\e[32mHoli, Saraswati Puja, Poush Parbon, Poila Boishakh \e[0m\e[1;32m(\e[0m\e[32mBengali New Year\e[0m\e[1;32m)\e[0m\e[32m, Christmas, Eid al-Fitr, and Eid al-Adha. There \e[0m\r\n\e[32mare also events like the Kolkata International Cinema Festival and food festivals.\e[0m\r\n\r\n\e[32m**Differences:**\e[0m\r\n\r\n\e[32m*   **Religious vs. Cultural/Secular Focus:** Kolkata's festivals have a strong religious and traditional Hindu basis, \e[0m\r\n\e[32mwith Durga Puja being the most significant. While Paris also has cultural and religious events \e[0m\e[1;32m(\e[0m\e[32mlike Christmas and Eid\e[0m\e[1;32m)\e[0m\e[32m,\e[0m\r\n\e[32mmany of its highlighted festivals, such as music festivals and fashion week, appear to be more secular or culturally \e[0m\r\n\e[32mdriven, catering to a broader international audience.\e[0m\r\n\e[32m*   **Scale and Nature of Major Festivals:** Durga Puja in Kolkata is described as a massive, city-wide event with \e[0m\r\n\e[32melaborate pandals and decorations, deeply ingrained in the local identity. Paris's major events, while significant, seem\e[0m\r\n\e[32mto be more diverse in nature, ranging from large-scale music festivals to industry-specific events like fashion week.\e[0m\r\n\e[32m*   **Cultural Heritage:** Kolkata's festivals are deeply rooted in Bengali traditions and Hindu religious practices. \e[0m\r\n\e[32mParis's festivals, while also reflecting French culture, often have a more cosmopolitan and international appeal, \e[0m\r\n\e[32mdrawing from global trends in music, art, and fashion.\e[0m\r\n\r\n\e[32mIn summary, while both cities celebrate a variety of festivals, Kolkata's calendar is dominated by religious and \e[0m\r\n\e[32mtraditional celebrations deeply tied to its cultural heritage, whereas Paris offers a more diverse mix of cultural, \e[0m\r\n\e[32martistic, and secular events with a strong international flavor.\e[0m\r\n\r\n"
+  - delay: 1033
+    content: "2026-01-04 06:04:03,478 - KodeAgent - INFO - {'cost': 0.0001608, 'prompt_tokens': 1060, 'completion_tokens': 137, 'total_tokens': 1197}\r\n2026-01-04 06:04:03,478 - KodeAgent - INFO - Task 1b2f7494-ed59-4224-9410-1e60927972fe usage: LLM Usage Report\r\n============================================================\r\nTotal LLM Calls: 7\r\nTotal Tokens: 18,444\r\n  - Prompt Tokens: 17,065\r\n  - Completion Tokens: 1,379\r\nTotal Cost: $0.0023\r\n============================================================\r\n- [x] Find a list of festivals celebrated in Paris.\r\n- [x] Find a list of festivals celebrated in Kolkata.\r\n- [x] Compare the festivals of Paris and Kolkata to identify their differences.\r\n- [x] Summarize the findings on the festivals in Paris and their differences from Kolkata.\r\n"
+  - delay: 5521
+    content: "\e[?2004l\r\r\n\r\n"
