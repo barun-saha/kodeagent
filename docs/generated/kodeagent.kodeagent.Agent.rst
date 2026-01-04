@@ -1,4 +1,4 @@
-kodeagent.kodeagent.Agent
+﻿kodeagent.kodeagent.Agent
 =========================
 
 .. currentmodule:: kodeagent.kodeagent
@@ -25,6 +25,8 @@ kodeagent.kodeagent.Agent
       ~Agent.get_usage_report
       ~Agent.init_history
       ~Agent.parse_text_response
+      ~Agent.post_run
+      ~Agent.pre_run
       ~Agent.response
       ~Agent.run
       ~Agent.salvage_response
