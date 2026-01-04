@@ -1367,6 +1367,16 @@ async def test_salvage_response():
         result = await agent.salvage_response()
         assert 'attempted' in result
 
+    agent.task = Task(description='Test Task')
+    agent.msg_idx_of_new_task = 0
+    
+    with patch('kodeagent.kutils.call_llm', new_callable=AsyncMock) as mock_call:
+        mock_call.return_value = 'Salvaged content'
+        result = await agent.salvage_response()
+        assert result == 'Salvaged content'
+        mock_call.assert_called_once()
+        assert 'Test Task' in str(mock_call.call_args)
+
 
 def test_get_history():
     """Test get_history method."""
@@ -3392,30 +3402,11 @@ async def test_record_thought_adds_missing_role(react_agent):
 
 @pytest.fixture
 def mock_agent():
-    agent = ReActAgent(
-        name="CoverageAgent",
-        model_name="test-model",
-        tools=[],
-        max_iterations=1
-    )
+    agent = ReActAgent(name='CoverageAgent', model_name='test-model', tools=[], max_iterations=1)
     # Mock usage tracker to avoid side effects
     agent.usage_tracker = MagicMock()
     return agent
 
-@pytest.mark.asyncio
-async def test_salvage_response(mock_agent):
-    """Test the salvage_response method (Lines 548-568)."""
-    mock_agent.task = Task(description="Test Task")
-    mock_agent.msg_idx_of_new_task = 0
-    
-    with patch("kodeagent.kutils.call_llm", new_callable=AsyncMock) as mock_call:
-        mock_call.return_value = "Salvaged content"
-        
-        result = await mock_agent.salvage_response()
-        
-        assert result == "Salvaged content"
-        mock_call.assert_called_once()
-        assert "Test Task" in str(mock_call.call_args)
 
 @pytest.mark.asyncio
 async def test_create_initial_plan_retry_error(mock_agent):
@@ -3435,6 +3426,7 @@ async def test_create_initial_plan_retry_error(mock_agent):
     # Verify error history added
     assert len(mock_agent.messages) > 0
     assert "Unable to start solving" in mock_agent.messages[-1].content
+
 
 @pytest.mark.asyncio
 async def test_run_validations(mock_agent):
@@ -3456,6 +3448,7 @@ async def test_run_validations(mock_agent):
         async for _ in mock_agent.run("Task", files=many_files):
             pass
 
+
 @pytest.mark.asyncio
 async def test_pre_run_error_propagation(mock_agent):
     """Test that runtime error in pre_run (from initial plan) is handled."""
@@ -3475,6 +3468,7 @@ async def test_pre_run_error_propagation(mock_agent):
     assert error_resp['value'] == 'Plan failed'
     assert error_resp['metadata']['is_error'] is True
 
+
 @pytest.mark.asyncio
 async def test_agent_abstract_properties():
     """Test Agent abstract base class properties."""
@@ -3488,6 +3482,7 @@ async def test_agent_abstract_properties():
     # Test artifacts property
     agent.task_output_files = ["file1"]
     assert agent.artifacts == ["file1"]
+
 
 @pytest.mark.asyncio
 async def test_run_loop_retry_error(mock_agent):
@@ -3527,6 +3522,7 @@ async def test_run_loop_retry_error(mock_agent):
     assert len(error_resps) == 1
     assert "Rate limit exceeded" in error_resps[0]['value']
 
+
 @pytest.mark.asyncio
 async def test_run_loop_update_plan_retry_error(mock_agent):
     """Test RetryError during plan update (Lines 979-990)."""
@@ -3560,6 +3556,7 @@ async def test_run_loop_update_plan_retry_error(mock_agent):
             break
             
     assert any("Rate limit exceeded during plan update" in r['value'] for r in responses)
+
 
 @pytest.mark.asyncio
 async def test_observer_retry_error(mock_agent):
@@ -3595,6 +3592,7 @@ async def test_observer_retry_error(mock_agent):
     # If we got here without exception, it passed the try/except block
     assert True
 
+
 @pytest.mark.asyncio
 async def test_salvage_response_retry_error(mock_agent):
     """Test failure to salvage response (Lines 1032-1036)."""
@@ -3628,6 +3626,7 @@ async def test_salvage_response_retry_error(mock_agent):
     final_resp = [r for r in responses if r['type'] == 'final'][0]
     assert "summary of progress" not in final_resp['value']
 
+
 @pytest.mark.asyncio
 async def test_record_thought_parsing_failures(mock_agent):
     """Test _record_thought parsing failure loops (Lines 1172-1203)."""
@@ -3644,5 +3643,3 @@ async def test_record_thought_parsing_failures(mock_agent):
     # Check history for feedback messages
     feedback_msgs = [m for m in mock_agent.messages if "Parsing Error" in m.content]
     assert len(feedback_msgs) >= 2
-
-
