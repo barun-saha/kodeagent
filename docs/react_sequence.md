@@ -1,6 +1,6 @@
-# How ReActAgent Works?
+# How Agents Work?
 
-With so many LLM calls, it may be helpful to visualize the sequence of operations and LLM interactions that occur when using the ReActAgent. Below is a detailed breakdown of the key steps, iterations, and LLM calls involved in the ReActAgent's workflow with `max_iterations=3` for illustration.
+With so many LLM calls, it may be helpful to visualize the sequence of operations and LLM interactions that occur when using KodeAgent. Below is a detailed breakdown of the key steps, iterations, and LLM calls involved in the ReActAgent's workflow with `max_iterations=3` for illustration. Some of the steps are common for CodeActAgent as well, except for the code execution parts.
 
 ```
 INITIALIZATION PHASE

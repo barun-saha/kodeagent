@@ -55,7 +55,7 @@ print(final_response)
 
 `agent.task` provides access to the current task object, which contains useful information such as the task inputs, the final result, and LLM usage statistics. Refer to the API documentation for more details.
 
-The agent also tracks the LLM usage statistics for each task. This can be accessed in two ways: raw data (`dict`) and formatted report (`str`), for example:
+The agent also tracks the LLM usage statistics (reported by LiteLLM) for each task, detailing the component-wise token usage and the cost in USD. This can be accessed in two ways: raw data (`dict`) and formatted report (`str`), for example:
 
 ```python
 # Access raw LLM usage data
@@ -63,6 +63,11 @@ llm_usage_data = agent.get_usage_metrics()
 # Print formatted LLM usage report
 llm_usage_report = agent.get_usage_report()
 print(llm_usage_report)
+```
+
+You can also view the plan followed by the agent to complete the task:
+```python
+print(agent.current_plan)
 ```
 
 

@@ -1,4 +1,4 @@
-﻿kodeagent.kodeagent.Agent
+kodeagent.kodeagent.Agent
 =========================
 
 .. currentmodule:: kodeagent.kodeagent
