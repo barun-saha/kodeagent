@@ -62,7 +62,7 @@ The `run_env` parameter specifies the environment where the agent's code will ex
 The only way to execute any task is by invoking the `run()` method with the task description. The `run()` method provides streaming responses from the task execution, which can be iterated over asynchronously. However, often you may want to access the final response from the agent. This can be accessed via `agent.task.result`:
 
 ```python
-for _ in agent.run('Some task description'):
+async for _ in agent.run('Some task description'):
     pass
 final_response = agent.task.result
 print(final_response)
