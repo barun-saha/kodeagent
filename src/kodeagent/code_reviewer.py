@@ -18,7 +18,8 @@ class CodeSecurityReviewer:
             self,
             model_name: str,
             litellm_params: Optional[dict] = None,
-            usage_tracker: Optional[UsageTracker] = None
+            usage_tracker: Optional[UsageTracker] = None,
+            tool_names: Optional[set[str]] = None
     ):
         """
         Initialize the CodeSecurityReviewer.
@@ -27,10 +28,12 @@ class CodeSecurityReviewer:
             model_name: The name of the LLM model to use.
             litellm_params: Optional parameters for the LLM.
             usage_tracker: Optional UsageTracker instance.
+            tool_names: Optional set of whitelisted tool names provided by the user.
         """
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
         self.usage_tracker = usage_tracker
+        self.tool_names = tool_names or set()
 
     async def review(self, code: str) -> CodeReview:
         """
@@ -42,14 +45,24 @@ class CodeSecurityReviewer:
         Returns:
             A CodeReview object containing the review results.
         """
+        # Format the system prompt with whitelisted tools
+        if self.tool_names:
+            tools_list = '\n'.join(f'- {tool}' for tool in sorted(self.tool_names))
+        else:
+            tools_list = '- [None provided]'
+        
+        system_prompt = CODE_SECURITY_SYSTEM_PROMPT.format(
+            whitelisted_tools=tools_list
+        )
+        
         messages = [
             {
-                "role": "system",
-                "content": CODE_SECURITY_SYSTEM_PROMPT,
+                'role': 'system',
+                'content': system_prompt,
             },
             {
-                "role": "user",
-                "content": f'Review this code:\n{code}',
+                'role': 'user',
+                'content': f'Review this code:\n{code}',
             },
         ]
         review_response = await ku.call_llm(

@@ -229,3 +229,136 @@ async def test_code_reviewer_llm_error_propagation():
             await reviewer.review(code)
         
         assert 'LLM API error' in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_code_reviewer_initialization_with_tool_names():
+    """Test CodeSecurityReviewer initialization with tool names."""
+    model_name = 'gemini/gemini-2.0-flash-lite'
+    tool_names = {'calculator', 'search_web', 'download_file'}
+    
+    reviewer = CodeSecurityReviewer(
+        model_name=model_name,
+        litellm_params={},
+        tool_names=tool_names
+    )
+    
+    assert reviewer.model_name == model_name
+    assert reviewer.tool_names == tool_names
+
+
+@pytest.mark.asyncio
+async def test_code_reviewer_with_whitelisted_calculator_tool():
+    """Test that calculator tool usage is allowed when whitelisted."""
+    mock_response = (
+        '{"is_secure": true, '
+        '"reason": "Code uses whitelisted calculator tool which is safe"}'
+    )
+    
+    with patch('kodeagent.kutils.call_llm') as mock_llm:
+        mock_llm.return_value = mock_response
+        
+        reviewer = CodeSecurityReviewer(
+            model_name='test-model',
+            litellm_params={},
+            tool_names={'calculator'}
+        )
+        
+        # Code that uses the calculator tool
+        code_with_calculator = (
+            'import ast\n'
+            'import operator\n'
+            'import re\n'
+            'result = calculator("2 + 2")\n'
+            'print(result)'
+        )
+        review = await reviewer.review(code_with_calculator)
+        
+        assert isinstance(review, CodeReview)
+        assert review.is_secure is True
+        
+        # Verify the system prompt includes whitelisted tools
+        call_args = mock_llm.call_args
+        messages = call_args.kwargs['messages']
+        system_prompt = messages[0]['content']
+        assert 'calculator' in system_prompt
+        assert 'Whitelisted User-Provided Tools' in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_code_reviewer_without_whitelisted_tools():
+    """Test that tool names default to empty set when not provided."""
+    mock_response = '{"is_secure": true, "reason": "Code is safe"}'
+    
+    with patch('kodeagent.kutils.call_llm') as mock_llm:
+        mock_llm.return_value = mock_response
+        
+        reviewer = CodeSecurityReviewer(
+            model_name='test-model',
+            litellm_params={}
+        )
+        
+        code = 'print("hello")'
+        await reviewer.review(code)
+        
+        # Verify the system prompt includes "None provided" for tools
+        call_args = mock_llm.call_args
+        messages = call_args.kwargs['messages']
+        system_prompt = messages[0]['content']
+        assert '[None provided]' in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_code_reviewer_with_multiple_whitelisted_tools():
+    """Test that multiple tools can be whitelisted."""
+    mock_response = '{"is_secure": true, "reason": "All tools are whitelisted"}'
+    tool_names = {'calculator', 'search_web', 'download_file', 'generate_image'}
+    
+    with patch('kodeagent.kutils.call_llm') as mock_llm:
+        mock_llm.return_value = mock_response
+        
+        reviewer = CodeSecurityReviewer(
+            model_name='test-model',
+            litellm_params={},
+            tool_names=tool_names
+        )
+        
+        code = 'result = calculator("1+1")'
+        await reviewer.review(code)
+        
+        # Verify all tools are mentioned in the system prompt
+        call_args = mock_llm.call_args
+        messages = call_args.kwargs['messages']
+        system_prompt = messages[0]['content']
+        
+        for tool in tool_names:
+            assert tool in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_code_reviewer_prompt_formatting_with_tools():
+    """Test that whitelisted tools are properly formatted in the prompt."""
+    mock_response = '{"is_secure": true, "reason": "Safe"}'
+    tool_names = {'calculator', 'search_web'}
+    
+    with patch('kodeagent.kutils.call_llm') as mock_llm:
+        mock_llm.return_value = mock_response
+        
+        reviewer = CodeSecurityReviewer(
+            model_name='test-model',
+            litellm_params={},
+            tool_names=tool_names
+        )
+        
+        code = 'x = 1'
+        await reviewer.review(code)
+        
+        # Verify tools are listed with bullet points
+        call_args = mock_llm.call_args
+        messages = call_args.kwargs['messages']
+        system_prompt = messages[0]['content']
+        
+        # Tools should be sorted and formatted as list items
+        assert '- calculator' in system_prompt
+        assert '- search_web' in system_prompt
+        assert 'IMPORTANT' in system_prompt  # The warning about whitelisted tools

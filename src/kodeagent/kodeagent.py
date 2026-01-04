@@ -1695,7 +1695,8 @@ class CodeActAgent(ReActAgent):
             env_vars_to_set=env_vars_to_set,
             litellm_params=litellm_params,
             work_dir=self.work_dir,
-            usage_tracker=self.usage_tracker
+            usage_tracker=self.usage_tracker,
+            tool_names=self.tool_names
         )
 
     def formatted_history_for_llm(self) -> list[dict]:
@@ -2004,7 +2005,7 @@ def print_response(response: AgentResponse, only_final: bool = True):
 async def main():
     """Demonstrate the use of ReActAgent and CodeActAgent."""
     litellm_params = {'temperature': 0, 'timeout': 30}
-    model_name = 'gemini/gemini-2.0-flash-lite'
+    model_name = 'gemini/gemini-2.5-flash-lite'
     # model_name = 'openai/gpt-4.1-mini'
 
     agent = ReActAgent(
