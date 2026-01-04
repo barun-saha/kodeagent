@@ -5,11 +5,12 @@
 [![Documentation Status](https://readthedocs.org/projects/kodeagent/badge/?version=latest)](https://kodeagent.readthedocs.io/en/latest/?badge=latest)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Known Vulnerabilities](https://snyk.io/test/github/barun-saha/kodeagent/badge.svg)](https://snyk.io/test/github/barun-saha/kodeagent)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/kodeagent)
 
 
 KodeAgent is a frameworkless, minimalistic approach to building AI agents. KodeAgent is a small (~2,000 lines of pure Python) engine designed to be the robust reasoning core inside your larger system, not the entire platform.
 
-![KodeAgent Demo](examples/kodeagent_demo.gif)
+![KodeAgent Demo](assets/demo.gif)
 
 
 ## ✅ Why KodeAgent?
@@ -98,7 +99,7 @@ agent = CodeActAgent(
 )
 ```
 
-That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [kodeagent.py](src/kodeagent/kodeagent.py) module.
+That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [kodeagent.py](src/kodeagent/kodeagent.py) module and [API documentation](https://kodeagent.readthedocs.io/en/latest/usage.html).
 
 KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm), enabling it to work with any capable LLM. Currently, KodeAgent has been tested with Gemini 2.5 Flash Lite. For advanced tasks, you can try Gemini 2.5 Pro.
 
