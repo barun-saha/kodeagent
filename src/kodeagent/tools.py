@@ -374,7 +374,7 @@ def download_file(
         # Check for HTTP errors
         if response.status_code == 403:
             result['error'] = (
-                'ERROR: Access forbidden (403) for ' + url + '\n'
+                f'ERROR: Access forbidden (403) for: {url}\n'
                 'The website is blocking automated access. Possible reasons:\n'
                 '- Website requires login/authentication\n'
                 '- Website blocks bots/scrapers\n'
@@ -383,7 +383,7 @@ def download_file(
             )
             return result
         if response.status_code == 404:
-            result['error'] = 'ERROR: File not found (404) at ' + url
+            result['error'] = f'ERROR: File not found (404) at {url}'
             return result
         if response.status_code == 429:
             result['error'] = (
