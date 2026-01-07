@@ -2,6 +2,7 @@
 Test suite for tools.py module.
 Tests all tools with appropriate mocking for web APIs and external dependencies.
 """
+
 import pytest
 from unittest.mock import Mock, patch, mock_open, MagicMock
 
@@ -16,7 +17,7 @@ from kodeagent.tools import (
     search_arxiv,
     transcribe_youtube,
     transcribe_audio,
-    generate_image
+    generate_image,
 )
 
 
@@ -29,7 +30,7 @@ class TestToolDecorator:
         @tool
         def sample_func(x: int, y: str) -> str:
             """Sample function for testing."""
-            return f"{x}-{y}"
+            return f'{x}-{y}'
 
         assert hasattr(sample_func, 'name')
         assert hasattr(sample_func, 'description')
@@ -50,6 +51,7 @@ class TestToolDecorator:
     def test_tool_decorator_rejects_async_functions(self):
         """Test that @tool raises error for async functions."""
         with pytest.raises(ValueError, match='async functions is not supported'):
+
             @tool
             async def async_func():
                 """Async function."""
@@ -61,13 +63,13 @@ class TestToolDecorator:
         @tool
         def func_with_args(name: str, age: int, active: bool = True) -> str:
             """Function with multiple arguments."""
-            return f"{name}-{age}-{active}"
+            return f'{name}-{age}-{active}'
 
         schema = func_with_args.args_schema
         assert schema is not None
         # Test that schema can validate correct inputs
-        validated = schema(name="John", age=30, active=False)
-        assert validated.name == "John"
+        validated = schema(name='John', age=30, active=False)
+        assert validated.name == 'John'
         assert validated.age == 30
         assert validated.active is False
 
@@ -201,7 +203,7 @@ class TestSearchWeb:
         ]
         mock_ddgs.return_value.text.return_value = iter(mock_results)
 
-        result = search_web("test query", max_results=2)
+        result = search_web('test query', max_results=2)
 
         assert '# Search Discovery' in result
         assert 'Result 1' in result
@@ -213,11 +215,11 @@ class TestSearchWeb:
     @patch('ddgs.DDGS')
     def test_search_web_empty_query(self, mock_ddgs, mock_sleep):
         """Test search with empty query."""
-        result = search_web("")
+        result = search_web('')
         assert 'ERROR' in result
         assert 'cannot be empty' in result
 
-        result = search_web("   ")
+        result = search_web('   ')
         assert 'ERROR' in result
 
     @patch('time.sleep')
@@ -233,8 +235,8 @@ class TestSearchWeb:
 
         # Test capping at 20
         mock_ddgs.return_value.text.return_value = iter([])
-        result = search_web("test", max_results=100)
-        mock_ddgs.return_value.text.assert_called_with("test", max_results=20)
+        result = search_web('test', max_results=100)
+        mock_ddgs.return_value.text.assert_called_with('test', max_results=20)
 
     @patch('time.sleep')
     @patch('ddgs.DDGS')
@@ -242,7 +244,7 @@ class TestSearchWeb:
         """Test web search with no results."""
         mock_ddgs.return_value.text.return_value = iter([])
 
-        result = search_web("nonexistent query")
+        result = search_web('nonexistent query')
 
         assert 'No results found' in result
         assert 'Try:' in result
@@ -253,18 +255,16 @@ class TestSearchWeb:
         """Test SSL error fallback to verify=False."""
         mock_ddgs_instance = MagicMock()
         mock_ddgs.side_effect = [
-            Exception("SSL certificate verify failed"),
-            mock_ddgs_instance
+            Exception('SSL certificate verify failed'),
+            mock_ddgs_instance,
         ]
-        mock_ddgs_instance.text.return_value = iter([
-            {'title': 'Result', 'href': 'https://example.com', 'body': 'Description'}
-        ])
-
-        result = search_web("test query")
+        mock_ddgs_instance.text.return_value = iter(
+            [{'title': 'Result', 'href': 'https://example.com', 'body': 'Description'}]
+        )
+        result = search_web('test query')
 
         assert 'Result' in result
         assert mock_ddgs.call_count == 2
-
 
     @patch('time.sleep')
     @patch('ddgs.DDGS')
@@ -278,9 +278,8 @@ class TestSearchWeb:
     @patch('ddgs.DDGS')
     def test_search_web_rate_limit_error(self, mock_ddgs, mock_sleep):
         """Test rate limit error handling."""
-        mock_ddgs.return_value.text.side_effect = Exception("Ratelimit exceeded")
-
-        result = search_web("test query")
+        mock_ddgs.return_value.text.side_effect = Exception('Ratelimit exceeded')
+        result = search_web('test query')
 
         assert 'ERROR' in result
         assert 'rate limit' in result.lower()
@@ -289,9 +288,9 @@ class TestSearchWeb:
     @patch('ddgs.DDGS')
     def test_search_web_timeout_error(self, mock_ddgs, mock_sleep):
         """Test timeout error handling."""
-        mock_ddgs.return_value.text.side_effect = Exception("Request timeout")
+        mock_ddgs.return_value.text.side_effect = Exception('Request timeout')
 
-        result = search_web("test query")
+        result = search_web('test query')
 
         assert 'ERROR' in result
         assert 'timeout' in result.lower() or 'timed out' in result.lower()
@@ -300,9 +299,8 @@ class TestSearchWeb:
     @patch('ddgs.DDGS')
     def test_search_web_generic_error(self, mock_ddgs, mock_sleep):
         """Test generic error handling."""
-        mock_ddgs.return_value.text.side_effect = Exception("Unknown error")
-
-        result = search_web("test query")
+        mock_ddgs.return_value.text.side_effect = Exception('Unknown error')
+        result = search_web('test query')
 
         assert 'ERROR' in result
         assert 'unknown error' in result.lower()
@@ -313,7 +311,7 @@ class TestSearchWeb:
         """Test missing duckduckgo-search library."""
         with patch('ddgs.DDGS', side_effect=ImportError("No module named 'duckduckgo_search'")):
             # Need to reload or handle differently
-            result = search_web("test")
+            result = search_web('test')
         assert 'ERROR: Required library `ddgs` not installed' in result
 
 
@@ -322,10 +320,11 @@ class TestDownloadFile:
 
     def test_download_file_import_error(self):
         """Test download_file with ImportError."""
-        import sys
+
         with patch.dict('sys.modules', {'requests': None}):
-            result = download_file("https://example.com/file.pdf")
-            assert 'ERROR: Required lib `requests` not installed' in result
+            result = download_file('https://example.com/file.pdf')
+            assert 'ERROR' in result['error']
+            assert 'requests' in result['error']
 
     @patch('requests.get')
     def test_download_file_success(self, mock_get):
@@ -336,39 +335,41 @@ class TestDownloadFile:
         mock_response.iter_content.return_value = [b'chunk1', b'chunk2']
         mock_get.return_value = mock_response
 
-        result = download_file("https://example.com/file.pdf")
+        result = download_file('https://example.com/file.pdf')
 
-        assert 'SUCCESS' in result
-        assert 'file.pdf' in result
-        assert 'application/pdf' in result
+        assert result['error'] is None
+        assert result['orig_name'] == 'file.pdf'
+        assert result['content_type'] == 'application/pdf'
+        assert result['path'] is not None
+        assert result['size'] == '0.0 KB'
 
         # Extract path and cleanup
-        if 'Saved to:' in result:
-            from pathlib import Path
-            path = Path(result.split('Saved to:')[1].split('\n')[0].strip())
-            if path.exists():
-                path.unlink()
+        from pathlib import Path
+
+        path = Path(result['path'])
+        if path.exists():
+            path.unlink()
 
     @patch('requests.get')
     def test_download_file_empty_url(self, mock_get):
         """Test download with empty URL."""
-        result = download_file("")
-        assert 'ERROR' in result
-        assert 'cannot be empty' in result
+        result = download_file('')
+        assert 'ERROR' in result['error']
+        assert 'cannot be empty' in result['error']
 
     @patch('requests.get')
     def test_download_file_invalid_url_scheme(self, mock_get):
         """Test download with invalid URL scheme."""
-        result = download_file("ftp://example.com/file.pdf")
-        assert 'ERROR' in result
-        assert 'must start with http' in result
+        result = download_file('ftp://example.com/file.pdf')
+        assert 'ERROR' in result['error']
+        assert 'must start with http' in result['error']
 
     @patch('requests.get')
     def test_download_file_invalid_url_format(self, mock_get):
         """Test download with malformed URL."""
-        result = download_file("http://")
-        assert 'ERROR' in result
-        assert 'Invalid URL' in result
+        result = download_file('http://')
+        assert 'ERROR' in result['error']
+        assert 'Invalid URL' in result['error']
 
     @patch('requests.get')
     def test_download_file_custom_filename(self, mock_get):
@@ -379,17 +380,17 @@ class TestDownloadFile:
         mock_response.iter_content.return_value = [b'data']
         mock_get.return_value = mock_response
 
-        result = download_file("https://example.com/file.pdf", save_name="custom.pdf")
+        result = download_file('https://example.com/file.pdf', save_name='custom.pdf')
 
-        assert 'SUCCESS' in result
-        assert 'custom.pdf' in result
+        assert result['error'] is None
+        assert result['orig_name'] == 'custom.pdf'
 
         # Cleanup
-        if 'Saved to:' in result:
-            from pathlib import Path
-            path = Path(result.split('Saved to:')[1].split('\n')[0].strip())
-            if path.exists():
-                path.unlink()
+        from pathlib import Path
+
+        path = Path(result['path'])
+        if path.exists():
+            path.unlink()
 
     @patch('requests.get')
     def test_download_file_sanitizes_filename(self, mock_get):
@@ -400,16 +401,16 @@ class TestDownloadFile:
         mock_response.iter_content.return_value = [b'data']
         mock_get.return_value = mock_response
 
-        result = download_file("https://example.com/file.pdf", save_name="bad<>name.pdf")
+        result = download_file('https://example.com/file.pdf', save_name='bad<>name.pdf')
 
-        assert 'SUCCESS' in result
-        # Should have sanitized the filename
+        assert result['error'] is None
+        # Sanitization happens in download_file logic
 
-        if 'Saved to:' in result:
-            from pathlib import Path
-            path = Path(result.split('Saved to:')[1].split('\n')[0].strip())
-            if path.exists():
-                path.unlink()
+        from pathlib import Path
+
+        path = Path(result['path'])
+        if path.exists():
+            path.unlink()
 
     @patch('requests.get')
     def test_download_file_403_error(self, mock_get):
@@ -419,11 +420,11 @@ class TestDownloadFile:
         mock_response.reason = 'Forbidden'
         mock_get.return_value = mock_response
 
-        result = download_file("https://example.com/file.pdf")
+        result = download_file('https://example.com/file.pdf')
 
-        assert 'ERROR' in result
-        assert '403' in result
-        assert 'forbidden' in result.lower()
+        assert 'ERROR' in result['error']
+        assert '403' in result['error']
+        assert 'forbidden' in result['error'].lower()
 
     @patch('requests.get')
     def test_download_file_404_error(self, mock_get):
@@ -432,11 +433,10 @@ class TestDownloadFile:
         mock_response.status_code = 404
         mock_response.reason = 'Not Found'
         mock_get.return_value = mock_response
+        result = download_file('https://example.com/file.pdf')
 
-        result = download_file("https://example.com/file.pdf")
-
-        assert 'ERROR' in result
-        assert '404' in result
+        assert 'ERROR' in result['error']
+        assert '404' in result['error']
 
     @patch('requests.get')
     def test_download_file_429_error(self, mock_get):
@@ -445,12 +445,11 @@ class TestDownloadFile:
         mock_response.status_code = 429
         mock_response.reason = 'Too Many Requests'
         mock_get.return_value = mock_response
+        result = download_file('https://example.com/file.pdf')
 
-        result = download_file("https://example.com/file.pdf")
-
-        assert 'ERROR' in result
-        assert '429' in result
-        assert 'rate limit' in result.lower()
+        assert 'ERROR' in result['error']
+        assert '429' in result['error']
+        assert 'rate limit' in result['error'].lower()
 
     @patch('requests.get')
     def test_download_file_file_too_large_header(self, mock_get):
@@ -459,11 +458,10 @@ class TestDownloadFile:
         mock_response.status_code = 200
         mock_response.headers = {'Content-Length': str(101 * 1024 * 1024)}  # 101 MB
         mock_get.return_value = mock_response
+        result = download_file('https://example.com/file.pdf')
 
-        result = download_file("https://example.com/file.pdf")
-
-        assert 'ERROR' in result
-        assert 'too large' in result.lower()
+        assert 'ERROR' in result['error']
+        assert 'too large' in result['error'].lower()
 
     @patch('requests.get')
     def test_download_file_file_too_large_during_download(self, mock_get):
@@ -475,33 +473,32 @@ class TestDownloadFile:
         large_chunk = b'x' * (10 * 1024 * 1024)  # 10MB chunks
         mock_response.iter_content.return_value = [large_chunk] * 11  # 110MB total
         mock_get.return_value = mock_response
+        result = download_file('https://example.com/file.pdf')
 
-        result = download_file("https://example.com/file.pdf")
-
-        assert 'ERROR' in result
-        assert '100 MB' in result
+        assert 'ERROR' in result['error']
+        assert '100 MB' in result['error']
 
     @patch('requests.get')
     def test_download_file_timeout(self, mock_get):
         """Test download timeout."""
         import requests
+
         mock_get.side_effect = requests.exceptions.Timeout()
+        result = download_file('https://example.com/file.pdf')
 
-        result = download_file("https://example.com/file.pdf")
-
-        assert 'ERROR' in result
-        assert 'timed out' in result.lower()
+        assert 'ERROR' in result['error']
+        assert 'timed out' in result['error'].lower()
 
     @patch('requests.get')
     def test_download_file_connection_error(self, mock_get):
         """Test download connection error."""
         import requests
-        mock_get.side_effect = requests.exceptions.ConnectionError("Connection failed")
 
-        result = download_file("https://example.com/file.pdf")
+        mock_get.side_effect = requests.exceptions.ConnectionError('Connection failed')
+        result = download_file('https://example.com/file.pdf')
 
-        assert 'ERROR' in result
-        assert 'Connection failed' in result
+        assert 'ERROR' in result['error']
+        assert 'Connection failed' in result['error']
 
     @patch('requests.get')
     def test_download_file_generic_400_error(self, mock_get):
@@ -510,32 +507,32 @@ class TestDownloadFile:
         mock_response.status_code = 418
         mock_response.reason = "I'm a teapot"
         mock_get.return_value = mock_response
+        result = download_file('https://example.com/file.pdf')
 
-        result = download_file("https://example.com/file.pdf")
-
-        assert 'ERROR' in result
-        assert '418' in result
-        assert "I'm a teapot" in result
+        assert 'ERROR' in result['error']
+        assert '418' in result['error']
+        assert "I'm a teapot" in result['error']
 
     @patch('requests.get')
     def test_download_file_request_exception(self, mock_get):
         """Test download with a generic RequestException."""
         import requests
-        mock_get.side_effect = requests.exceptions.RequestException("Some request error")
 
-        result = download_file("https://example.com/file.pdf")
+        mock_get.side_effect = requests.exceptions.RequestException('Some request error')
+        result = download_file('https://example.com/file.pdf')
 
-        assert 'ERROR' in result
-        assert 'Download failed' in result
-        assert 'Some request error' in result
+        assert 'ERROR' in result['error']
+        assert 'Download failed' in result['error']
+        assert 'Some request error' in result['error']
 
     def test_download_file_urlparse_exception(self):
         """Test that an exception during URL parsing is handled."""
         # urlparse on non-string type can raise an exception
-        with patch('urllib.parse.urlparse', side_effect=Exception("mocked exception")):
-            result = download_file("http://example.com")
-            assert 'ERROR: Invalid URL format' in result
-            assert 'mocked exception' in result
+        with patch('urllib.parse.urlparse', side_effect=Exception('mocked exception')):
+            result = download_file('http://example.com')
+            assert 'ERROR' in result['error']
+            assert 'Invalid URL format' in result['error']
+            assert 'mocked exception' in result['error']
 
     @patch('requests.get')
     def test_download_file_no_filename_in_url(self, mock_get):
@@ -545,18 +542,17 @@ class TestDownloadFile:
         mock_response.headers = {'Content-Type': 'text/html'}
         mock_response.iter_content.return_value = [b'data']
         mock_get.return_value = mock_response
+        result = download_file('http://example.com/')
 
-        result = download_file("http://example.com/")
-
-        assert 'SUCCESS' in result
-        assert 'downloaded_file' in result
+        assert result['error'] is None
+        assert 'downloaded_file' in result['orig_name']
 
         # Cleanup
-        if 'Saved to:' in result:
-            from pathlib import Path
-            path = Path(result.split('Saved to:')[1].split('\n')[0].strip())
-            if path.exists():
-                path.unlink()
+        from pathlib import Path
+
+        path = Path(result['path'])
+        if path.exists():
+            path.unlink()
 
     @patch('requests.get')
     def test_download_file_with_headers(self, mock_get):
@@ -566,8 +562,7 @@ class TestDownloadFile:
         mock_response.headers = {'Content-Type': 'application/pdf'}
         mock_response.iter_content.return_value = [b'data']
         mock_get.return_value = mock_response
-
-        result = download_file("https://example.com/file.pdf")
+        result = download_file('https://example.com/file.pdf')
 
         mock_get.assert_called_once()
         call_kwargs = mock_get.call_args[1]
@@ -577,11 +572,11 @@ class TestDownloadFile:
         assert 'Chrome' in call_kwargs['headers']['User-Agent']
 
         # Cleanup
-        if 'Saved to:' in result:
-            from pathlib import Path
-            path = Path(result.split('Saved to:')[1].split('\n')[0].strip())
-            if path.exists():
-                path.unlink()
+        from pathlib import Path
+
+        path = Path(result['path'])
+        if path.exists():
+            path.unlink()
 
     @patch('requests.get')
     def test_download_file_with_save_dir(self, mock_get, tmp_path):
@@ -593,14 +588,13 @@ class TestDownloadFile:
         mock_get.return_value = mock_response
 
         # Use a temporary directory
-        save_dir = tmp_path / "downloads"
+        save_dir = tmp_path / 'downloads'
         save_dir.mkdir()
+        result = download_file('https://example.com/test.txt', save_dir=str(save_dir))
 
-        result = download_file("https://example.com/test.txt", save_dir=str(save_dir))
-
-        assert 'SUCCESS' in result
-        expected_path = save_dir / "test.txt"
-        assert str(expected_path.as_posix()) in result.replace('\\', '/')
+        assert result['error'] is None
+        expected_path = save_dir / 'test.txt'
+        assert result['path'].replace('\\', '/') == expected_path.as_posix().replace('\\', '/')
         assert expected_path.exists()
         assert expected_path.read_text() == 'hello'
 
@@ -614,18 +608,17 @@ class TestDownloadFile:
         mock_get.return_value = mock_response
 
         # Use a temporary directory
-        save_dir = tmp_path / "output"
+        save_dir = tmp_path / 'output'
         save_dir.mkdir()
-
         result = download_file(
-            "https://example.com/test.txt",
+            'https://example.com/test.txt',
             save_dir=str(save_dir),
-            save_name="my_file.txt"
+            save_name='my_file.txt',
         )
 
-        assert 'SUCCESS' in result
-        expected_path = save_dir / "my_file.txt"
-        assert str(expected_path.as_posix()) in result.replace('\\', '/')
+        assert result['path'] is not None
+        expected_path = save_dir / 'my_file.txt'
+        assert str(expected_path.as_posix()) in result['path'].replace('\\', '/')
         assert expected_path.exists()
         assert expected_path.read_text() == 'world'
 
@@ -639,13 +632,12 @@ class TestDownloadFile:
         mock_get.return_value = mock_response
 
         # Path that does not exist
-        save_dir = tmp_path / "new_folder"
+        save_dir = tmp_path / 'new_folder'
+        result = download_file('https://example.com/test.txt', save_dir=str(save_dir))
 
-        result = download_file("https://example.com/test.txt", save_dir=str(save_dir))
-
-        assert 'SUCCESS' in result
+        assert result['error'] is None
         assert save_dir.is_dir()
-        expected_file = save_dir / "test.txt"
+        expected_file = save_dir / 'test.txt'
         assert expected_file.exists()
         assert expected_file.read_text() == 'data'
 
@@ -659,13 +651,22 @@ class TestDownloadFile:
         mock_get.return_value = mock_response
 
         # Use an invalid path that causes OSError
-        with patch('builtins.open', side_effect=OSError("Permission denied")):
-            result = download_file("https://example.com/test.txt", save_dir="/protected/path")
+        with patch('builtins.open', side_effect=OSError('Permission denied')):
+            result = download_file('https://example.com/test.txt', save_dir='/protected/path')
 
-        assert 'SUCCESS' in result
+        assert result['error'] is None
         # Should have saved to a temp file
-        assert 'kodeagent_' in result
-        assert '/protected/path' not in result
+        assert 'kodeagent_' in result['path']
+        assert '/protected/path' not in result['path']
+
+    @patch('requests.get')
+    def test_download_file_unexpected_error(self, mock_get):
+        """Test catch-all Exception handling."""
+        mock_get.side_effect = Exception('Surprise error')
+        result = download_file('https://example.com/file.pdf')
+        assert 'ERROR' in result['error']
+        assert 'Unexpected error' in result['error']
+        assert 'Surprise error' in result['error']
 
 
 class TestReadWebpage:
@@ -703,28 +704,28 @@ class TestReadWebpage:
     @patch('requests.get')
     def test_read_webpage_empty_url(self, mock_get):
         """Test reading with empty URL."""
-        result = read_webpage("")
+        result = read_webpage('')
         assert 'ERROR' in result
         assert 'cannot be empty' in result
 
     @patch('requests.get')
     def test_read_webpage_invalid_url_scheme(self, mock_get):
         """Test reading with invalid URL scheme."""
-        result = read_webpage("ftp://example.com")
+        result = read_webpage('ftp://example.com')
         assert 'ERROR' in result
         assert 'must start with http' in result
 
     @patch('requests.get')
     def test_read_webpage_invalid_url_format(self, mock_get):
         """Test reading with malformed URL."""
-        result = read_webpage("http://")
+        result = read_webpage('http://')
         assert 'ERROR' in result
         assert 'Invalid URL' in result
 
     @patch('requests.get')
     def test_read_webpage_pdf_url(self, mock_get):
         """Test that PDF URLs are rejected with helpful message."""
-        result = read_webpage("https://example.com/document.pdf")
+        result = read_webpage('https://example.com/document.pdf')
         assert 'ERROR' in result
         assert 'document file' in result
         assert 'extract_as_markdown' in result
@@ -754,8 +755,7 @@ class TestReadWebpage:
         long_content = 'A' * 10000
         mock_response.content = f'<html><body><main>{long_content}</main></body></html>'.encode()
         mock_get.return_value = mock_response
-
-        result = read_webpage("https://example.com", max_length=500)
+        result = read_webpage('https://example.com', max_length=500)
 
         assert 'truncated' in result.lower()
         assert len(result) < 1000  # Should be truncated
@@ -768,7 +768,7 @@ class TestReadWebpage:
         mock_response.reason = 'Forbidden'
         mock_get.return_value = mock_response
 
-        result = read_webpage("https://example.com")
+        result = read_webpage('https://example.com')
 
         assert 'ERROR' in result
         assert '403' in result
@@ -781,8 +781,7 @@ class TestReadWebpage:
         mock_response.status_code = 404
         mock_response.reason = 'Not Found'
         mock_get.return_value = mock_response
-
-        result = read_webpage("https://example.com")
+        result = read_webpage('https://example.com')
 
         assert 'ERROR' in result
         assert '404' in result
@@ -794,8 +793,7 @@ class TestReadWebpage:
         mock_response.status_code = 200
         mock_response.headers = {'Content-Type': 'application/json'}
         mock_get.return_value = mock_response
-
-        result = read_webpage("https://example.com")
+        result = read_webpage('https://example.com')
 
         assert 'ERROR' in result
         assert 'does not point to a webpage' in result
@@ -808,7 +806,7 @@ class TestReadWebpage:
         mock_response.headers = {'Content-Type': 'application/pdf'}
         mock_get.return_value = mock_response
 
-        result = read_webpage("https://example.com/file")
+        result = read_webpage('https://example.com/file')
 
         assert 'ERROR' in result
         assert 'PDF' in result
@@ -822,8 +820,7 @@ class TestReadWebpage:
         mock_response.headers = {'Content-Type': 'text/html'}
         mock_response.content = b'<html><body></body></html>'
         mock_get.return_value = mock_response
-
-        result = read_webpage("https://example.com")
+        result = read_webpage('https://example.com')
 
         assert 'ERROR' in result
         assert 'Could not extract meaningful content' in result
@@ -832,9 +829,9 @@ class TestReadWebpage:
     def test_read_webpage_timeout(self, mock_get):
         """Test timeout error."""
         import requests
-        mock_get.side_effect = requests.exceptions.Timeout()
 
-        result = read_webpage("https://example.com")
+        mock_get.side_effect = requests.exceptions.Timeout()
+        result = read_webpage('https://example.com')
 
         assert 'ERROR' in result
         assert 'timed out' in result.lower()
@@ -843,9 +840,9 @@ class TestReadWebpage:
     def test_read_webpage_connection_error(self, mock_get):
         """Test connection error."""
         import requests
-        mock_get.side_effect = requests.exceptions.ConnectionError()
 
-        result = read_webpage("https://example.com")
+        mock_get.side_effect = requests.exceptions.ConnectionError()
+        result = read_webpage('https://example.com')
 
         assert 'ERROR' in result
         assert 'Could not connect' in result
@@ -857,8 +854,7 @@ class TestReadWebpage:
         mock_response.status_code = 503
         mock_response.reason = 'Service Unavailable'
         mock_get.return_value = mock_response
-
-        result = read_webpage("https://example.com")
+        result = read_webpage('https://example.com')
 
         assert 'ERROR' in result
         assert '503' in result
@@ -868,9 +864,9 @@ class TestReadWebpage:
     def test_read_webpage_request_exception(self, mock_get):
         """Test generic RequestException."""
         import requests
-        mock_get.side_effect = requests.exceptions.RequestException("Some other request error")
 
-        result = read_webpage("https://example.com")
+        mock_get.side_effect = requests.exceptions.RequestException('Some other request error')
+        result = read_webpage('https://example.com')
 
         assert 'ERROR' in result
         assert 'Request failed' in result
@@ -878,8 +874,8 @@ class TestReadWebpage:
 
     def test_read_webpage_urlparse_exception(self):
         """Test that an exception during URL parsing is handled."""
-        with patch('urllib.parse.urlparse', side_effect=Exception("mocked exception")):
-            result = read_webpage("http://example.com")
+        with patch('urllib.parse.urlparse', side_effect=Exception('mocked exception')):
+            result = read_webpage('http://example.com')
             assert 'ERROR: Invalid URL format' in result
             assert 'mocked exception' in result
 
@@ -905,8 +901,7 @@ class TestReadWebpage:
         mock_response.headers = {'Content-Type': 'text/html'}
         mock_response.content = b'<html><body><main>Content</main></body></html>'
         mock_get.return_value = mock_response
-
-        read_webpage("https://example.com")
+        read_webpage('https://example.com')
 
         call_kwargs = mock_get.call_args[1]
         headers = call_kwargs['headers']
@@ -923,10 +918,9 @@ class TestExtractAsMarkdown:
     def test_extract_pdf_success(self, mock_markitdown):
         """Test successful PDF extraction."""
         mock_result = Mock()
-        mock_result.text_content = "# PDF Content\n\nThis is extracted text."
+        mock_result.text_content = '# PDF Content\n\nThis is extracted text.'
         mock_markitdown.return_value.convert.return_value = mock_result
-
-        result = extract_as_markdown("https://example.com/file.pdf")
+        result = extract_as_markdown('https://example.com/file.pdf')
 
         assert '# Extracted Content' in result
         assert 'PDF Content' in result
@@ -936,14 +930,14 @@ class TestExtractAsMarkdown:
     @patch('markitdown.MarkItDown')
     def test_extract_empty_input(self, mock_markitdown):
         """Test extraction with empty input."""
-        result = extract_as_markdown("")
+        result = extract_as_markdown('')
         assert 'ERROR' in result
         assert 'cannot be empty' in result
 
     @patch('markitdown.MarkItDown')
     def test_extract_invalid_url(self, mock_markitdown):
         """Test extraction with invalid URL."""
-        result = extract_as_markdown("http://")
+        result = extract_as_markdown('http://')
         assert 'ERROR' in result
         assert 'Invalid URL' in result
 
@@ -971,24 +965,25 @@ class TestExtractAsMarkdown:
 
     def test_extract_urlparse_exception(self):
         """Test that an exception during URL parsing is handled."""
-        with patch('urllib.parse.urlparse', side_effect=Exception("mocked exception")):
-            result = extract_as_markdown("http://example.com/file.pdf")
+        with patch('urllib.parse.urlparse', side_effect=Exception('mocked exception')):
+            result = extract_as_markdown('http://example.com/file.pdf')
             assert 'ERROR: Invalid URL format' in result
             assert 'mocked exception' in result
 
     def test_extract_import_error(self):
         """Test that ImportError is handled when markitdown is not installed."""
         import sys
+
         with patch.dict('sys.modules', {'markitdown': None}):
-            result = extract_as_markdown("http://example.com/file.pdf")
+            result = extract_as_markdown('http://example.com/file.pdf')
             assert 'ERROR: Required lib `markitdown` is missing' in result
 
     @patch('markitdown.MarkItDown')
     def test_extract_memory_error(self, mock_markitdown):
         """Test MemoryError handling."""
-        mock_markitdown.return_value.convert.side_effect = MemoryError("Out of memory")
+        mock_markitdown.return_value.convert.side_effect = MemoryError('Out of memory')
 
-        result = extract_as_markdown("https://example.com/file.pdf")
+        result = extract_as_markdown('https://example.com/file.pdf')
 
         assert 'ERROR' in result
         assert 'out of memory' in result.lower()
@@ -996,9 +991,8 @@ class TestExtractAsMarkdown:
     @patch('markitdown.MarkItDown')
     def test_extract_generic_exception(self, mock_markitdown):
         """Test generic exception handling."""
-        mock_markitdown.return_value.convert.side_effect = Exception("Some other error")
-
-        result = extract_as_markdown("https://example.com/file.pdf")
+        mock_markitdown.return_value.convert.side_effect = Exception('Some other error')
+        result = extract_as_markdown('https://example.com/file.pdf')
 
         assert 'ERROR' in result
         assert 'some other error' in result.lower()
@@ -1007,10 +1001,10 @@ class TestExtractAsMarkdown:
     def test_extract_with_excessive_whitespace(self, mock_markitdown):
         """Test that excessive whitespace is cleaned from the output."""
         mock_result = Mock()
-        mock_result.text_content = "This   is a    test.\n\n\n\nThis is another line."
+        mock_result.text_content = 'This   is a    test.\n\n\n\nThis is another line.'
         mock_markitdown.return_value.convert.return_value = mock_result
 
-        result = extract_as_markdown("https://example.com/file.pdf")
+        result = extract_as_markdown('https://example.com/file.pdf')
 
         assert 'This  is a  test.' in result
         assert '\n\n\nThis is another line.' in result
@@ -1018,7 +1012,7 @@ class TestExtractAsMarkdown:
     @patch('markitdown.MarkItDown')
     def test_extract_unsupported_format(self, mock_markitdown):
         """Test extraction with unsupported file format."""
-        result = extract_as_markdown("https://example.com/file.txt")
+        result = extract_as_markdown('https://example.com/file.txt')
 
         assert 'ERROR' in result
         assert 'Unsupported file format' in result
@@ -1027,7 +1021,7 @@ class TestExtractAsMarkdown:
     @patch('markitdown.MarkItDown')
     def test_extract_html_suggests_read_webpage(self, mock_markitdown):
         """Test that HTML files suggest using read_webpage."""
-        result = extract_as_markdown("https://example.com/page.html")
+        result = extract_as_markdown('https://example.com/page.html')
 
         assert 'ERROR' in result
         assert 'read_webpage' in result
@@ -1036,26 +1030,26 @@ class TestExtractAsMarkdown:
     def test_extract_max_length_validation(self, mock_markitdown):
         """Test max_length validation."""
         mock_result = Mock()
-        mock_result.text_content = "Test content"
+        mock_result.text_content = 'Test content'
         mock_markitdown.return_value.convert.return_value = mock_result
 
         # Values below 100 should be clamped to 100 (no error)
-        result = extract_as_markdown("https://example.com/file.pdf", max_length=50)
+        result = extract_as_markdown('https://example.com/file.pdf', max_length=50)
         assert 'ERROR' not in result
         assert 'Test content' in result
 
         # Values above 1000000 should be clamped to 1000000 (no error)
-        result = extract_as_markdown("https://example.com/file.pdf", max_length=2000000)
+        result = extract_as_markdown('https://example.com/file.pdf', max_length=2000000)
         assert 'ERROR' not in result
 
     @patch('markitdown.MarkItDown')
     def test_extract_max_length_truncation(self, mock_markitdown):
         """Test content truncation with max_length."""
         mock_result = Mock()
-        mock_result.text_content = "A" * 10000
+        mock_result.text_content = 'A' * 10000
         mock_markitdown.return_value.convert.return_value = mock_result
 
-        result = extract_as_markdown("https://example.com/file.pdf", max_length=500)
+        result = extract_as_markdown('https://example.com/file.pdf', max_length=500)
 
         assert 'truncated' in result.lower()
         assert '10,000' in result or '10000' in result
@@ -1063,9 +1057,9 @@ class TestExtractAsMarkdown:
     @patch('markitdown.MarkItDown')
     def test_extract_403_error(self, mock_markitdown):
         """Test 403 error handling."""
-        mock_markitdown.return_value.convert.side_effect = Exception("403 Forbidden")
+        mock_markitdown.return_value.convert.side_effect = Exception('403 Forbidden')
 
-        result = extract_as_markdown("https://example.com/file.pdf")
+        result = extract_as_markdown('https://example.com/file.pdf')
 
         assert 'ERROR' in result
         assert '403' in result
@@ -1074,9 +1068,9 @@ class TestExtractAsMarkdown:
     @patch('markitdown.MarkItDown')
     def test_extract_404_error(self, mock_markitdown):
         """Test 404 error handling."""
-        mock_markitdown.return_value.convert.side_effect = Exception("404 Not Found")
+        mock_markitdown.return_value.convert.side_effect = Exception('404 Not Found')
 
-        result = extract_as_markdown("https://example.com/file.pdf")
+        result = extract_as_markdown('https://example.com/file.pdf')
 
         assert 'ERROR' in result
         assert '404' in result
@@ -1093,9 +1087,9 @@ class TestExtractAsMarkdown:
     @patch('markitdown.MarkItDown')
     def test_extract_pdf_specific_error(self, mock_markitdown):
         """Test PDF-specific error handling."""
-        mock_markitdown.return_value.convert.side_effect = Exception("PDF extraction failed")
+        mock_markitdown.return_value.convert.side_effect = Exception('PDF extraction failed')
 
-        result = extract_as_markdown("https://example.com/file.pdf")
+        result = extract_as_markdown('https://example.com/file.pdf')
 
         assert 'ERROR' in result
         assert 'PDF' in result
@@ -1107,7 +1101,7 @@ class TestExtractAsMarkdown:
         mock_result.text_content = ''
         mock_markitdown.return_value.convert.return_value = mock_result
 
-        result = extract_as_markdown("https://example.com/file.pdf")
+        result = extract_as_markdown('https://example.com/file.pdf')
 
         assert 'ERROR' in result
         assert 'No content could be extracted' in result
@@ -1133,10 +1127,10 @@ class TestExtractAsMarkdown:
     def test_extract_docx_format(self, mock_markitdown):
         """Test DOCX file extraction."""
         mock_result = Mock()
-        mock_result.text_content = "DOCX content"
+        mock_result.text_content = 'DOCX content'
         mock_markitdown.return_value.convert.return_value = mock_result
 
-        result = extract_as_markdown("https://example.com/file.docx")
+        result = extract_as_markdown('https://example.com/file.docx')
 
         assert 'DOCX content' in result
         assert 'DOCX' in result
@@ -1145,10 +1139,10 @@ class TestExtractAsMarkdown:
     def test_extract_xlsx_format(self, mock_markitdown):
         """Test XLSX file extraction."""
         mock_result = Mock()
-        mock_result.text_content = "Spreadsheet data"
+        mock_result.text_content = 'Spreadsheet data'
         mock_markitdown.return_value.convert.return_value = mock_result
 
-        result = extract_as_markdown("https://example.com/file.xlsx")
+        result = extract_as_markdown('https://example.com/file.xlsx')
 
         assert 'Spreadsheet data' in result
         assert 'XLSX' in result
@@ -1157,10 +1151,10 @@ class TestExtractAsMarkdown:
     def test_extract_pptx_format(self, mock_markitdown):
         """Test PPTX file extraction."""
         mock_result = Mock()
-        mock_result.text_content = "Presentation content"
+        mock_result.text_content = 'Presentation content'
         mock_markitdown.return_value.convert.return_value = mock_result
 
-        result = extract_as_markdown("https://example.com/file.pptx")
+        result = extract_as_markdown('https://example.com/file.pptx')
 
         assert 'Presentation content' in result
         assert 'PPTX' in result
@@ -1181,7 +1175,7 @@ class TestSearchWikipedia:
         mock_page_obj.summary = 'Python is a high-level programming language.'
         mock_page.return_value = mock_page_obj
 
-        result = search_wikipedia("Python programming")
+        result = search_wikipedia('Python programming')
 
         assert 'Python (programming language)' in result
         assert 'Python is a high-level programming language.' in result
@@ -1192,7 +1186,7 @@ class TestSearchWikipedia:
         """Test Wikipedia search with no results."""
         mock_search.return_value = []
 
-        result = search_wikipedia("xyznonexistent")
+        result = search_wikipedia('xyznonexistent')
 
         assert 'No results found' in result
 
@@ -1203,10 +1197,10 @@ class TestSearchWikipedia:
 
         mock_search.side_effect = DisambiguationError(
             'Python',
-            ['Python (programming language)', 'Python (genus)', 'Monty Python']
+            ['Python (programming language)', 'Python (genus)', 'Monty Python'],
         )
 
-        result = search_wikipedia("Python")
+        result = search_wikipedia('Python')
 
         assert 'DisambiguationError' in result
         assert 'Python (programming language)' in result
@@ -1218,9 +1212,9 @@ class TestSearchWikipedia:
         mock_search.return_value = ['Result1', 'Result2', 'Result3']
         mock_page.return_value = Mock(title='Test', url='http://test.com', summary='Summary')
 
-        search_wikipedia("test", max_results=2)
+        search_wikipedia('test', max_results=2)
 
-        mock_search.assert_called_once_with("test", results=2)
+        mock_search.assert_called_once_with('test', results=2)
 
 
 class TestSearchArxiv:
@@ -1242,7 +1236,7 @@ class TestSearchArxiv:
 
         mock_client.return_value.results.return_value = [mock_result]
 
-        result = search_arxiv("machine learning")
+        result = search_arxiv('machine learning')
 
         assert 'Test Paper' in result
         assert 'John Doe' in result
@@ -1254,7 +1248,7 @@ class TestSearchArxiv:
         """Test arXiv search with no results."""
         mock_client.return_value.results.return_value = []
 
-        result = search_arxiv("nonexistent topic")
+        result = search_arxiv('nonexistent topic')
 
         assert 'No results found' in result
 
@@ -1276,16 +1270,16 @@ class TestSearchArxiv:
 
         mock_client.return_value.results.return_value = [mock_result]
 
-        result = search_arxiv("test")
+        result = search_arxiv('test')
 
         assert 'John Doe, Jane Smith' in result
 
     @patch('arxiv.Client')
     def test_search_arxiv_exception_handling(self, mock_client):
         """Test arXiv search exception handling."""
-        mock_client.side_effect = Exception("API Error")
+        mock_client.side_effect = Exception('API Error')
 
-        result = search_arxiv("test")
+        result = search_arxiv('test')
 
         assert 'error occurred' in result.lower()
         assert 'API Error' in result
@@ -1293,16 +1287,19 @@ class TestSearchArxiv:
     def test_search_arxiv_import_error(self):
         """Test arXiv search with ImportError."""
         import sys
+
         with patch.dict('sys.modules', {'arxiv': None}):
-            result = search_arxiv("test")
+            result = search_arxiv('test')
             assert 'An error occurred' in result
 
     def test_search_wikipedia_import_error(self):
         """Test Wikipedia search with ImportError."""
         import sys
+
         with patch.dict('sys.modules', {'wikipedia': None}):
-            result = search_wikipedia("test")
+            result = search_wikipedia('test')
             assert '`wikipedia` was not found' in result
+
 
 class TestTranscribeYoutube:
     """Tests for the transcribe_youtube tool."""
@@ -1330,7 +1327,7 @@ class TestTranscribeYoutube:
         """Test YouTube transcript when subtitles are disabled."""
         from youtube_transcript_api._errors import TranscriptsDisabled
 
-        mock_api.return_value.fetch.side_effect = TranscriptsDisabled("video_id")
+        mock_api.return_value.fetch.side_effect = TranscriptsDisabled('video_id')
 
         result = transcribe_youtube('aBc4E')
 
@@ -1342,9 +1339,7 @@ class TestTranscribeYoutube:
         """Test YouTube transcript when no transcript is found."""
         from youtube_transcript_api._errors import NoTranscriptFound
 
-        mock_api.return_value.fetch.side_effect = NoTranscriptFound(
-            'video_id', [], None
-        )
+        mock_api.return_value.fetch.side_effect = NoTranscriptFound('video_id', [], None)
 
         result = transcribe_youtube('aBc4E')
 
@@ -1422,9 +1417,10 @@ class TestTranscribeAudio:
 
     def test_transcribe_audio_import_error(self):
         """Test audio transcription with ImportError."""
-        import sys
         with patch.dict('sys.modules', {'requests': None}):
             result = transcribe_audio('/path/to/audio.mp3')
+            assert 'Audio transcription error' in result
+
 
 class TestGenerateImage:
     """Tests for the generate_image tool."""
@@ -1448,7 +1444,9 @@ class TestGenerateImage:
     @patch('builtins.open', new_callable=mock_open)
     @patch('base64.b64decode')
     @patch('os.path.abspath')
-    def test_generate_image_b64_success(self, mock_abspath, mock_b64decode, mock_file, mock_image_gen):
+    def test_generate_image_b64_success(
+        self, mock_abspath, mock_b64decode, mock_file, mock_image_gen
+    ):
         """Test successful image generation returning base64 data."""
         mock_response = Mock()
         mock_data = Mock()
@@ -1484,11 +1482,10 @@ class TestGenerateImage:
     @patch('litellm.image_generation')
     def test_generate_image_exception(self, mock_image_gen):
         """Test image generation with exception."""
-        mock_image_gen.side_effect = Exception("API Error")
+        mock_image_gen.side_effect = Exception('API Error')
 
         result = generate_image('test prompt', model_name='test-model')
 
         assert 'Error' in result
         assert 'Image generation failed' in result
         assert 'API Error' in result
-
