@@ -1417,10 +1417,9 @@ class TestTranscribeAudio:
 
     def test_transcribe_audio_import_error(self):
         """Test audio transcription with ImportError."""
-        import sys
-
         with patch.dict('sys.modules', {'requests': None}):
             result = transcribe_audio('/path/to/audio.mp3')
+            assert 'Audio transcription error' in result
 
 
 class TestGenerateImage:
