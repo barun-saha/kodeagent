@@ -268,7 +268,7 @@ def download_file(
     url: str,
     save_name: Optional[str] = None,
     save_dir: Optional[str] = None
-) -> str:
+) -> dict:
     """
     Download a file from the internet and save it locally.
     Use this for downloading images, PDFs, data files, or any binary content.
@@ -288,35 +288,50 @@ def download_file(
          file in a temporary directory. Recommended to specify absolute path.
 
     Returns:
-        Success message with the final path to the downloaded file, or error message
-         if download fails.
+        A dictionary with the following fields:
+        - path: str or None -- Final path to the downloaded file.
+        - orig_name: str or None -- Original filename.
+        - size: str or None -- Formatted file size.
+        - content_type: str or None -- Content type of the file.
+        - error: str or None -- Error message if download fails (mutually exclusive with others).
     """
     import re
     import tempfile
     from pathlib import Path
     from urllib.parse import urlparse, unquote
 
+    result: dict[str, str | None] = {
+        'path': None, 'orig_name': None, 'size': None, 'content_type': None, 'error': None
+    }
+
     try:
         import requests
     except ImportError:
-        return 'ERROR: Required lib `requests` not installed. Install with: `pip install requests`'
+        result['error'] = (
+            'ERROR: Required lib `requests` not installed. Install with: `pip install requests`'
+        )
+        return result
 
     # Validate URL
     if not url or not url.strip():
-        return 'ERROR: URL cannot be empty.'
+        result['error'] = 'ERROR: URL cannot be empty.'
+        return result
 
     url = url.strip()
 
     if not url.startswith(('http://', 'https://')):
-        return 'ERROR: URL must start with http:// or https://'
+        result['error'] = 'ERROR: URL must start with http:// or https://'
+        return result
 
     # Validate URL format
     try:
         parsed = urlparse(url)
         if not parsed.netloc:
-            return 'ERROR: Invalid URL format - missing domain name.'
+            result['error'] = 'ERROR: Invalid URL format - missing domain name.'
+            return result
     except Exception as e:
-        return f'ERROR: Invalid URL format - {str(e)}'
+        result['error'] = f'ERROR: Invalid URL format - {str(e)}'
+        return result
 
     # Determine filename
     if save_name:
@@ -356,22 +371,28 @@ def download_file(
             allow_redirects=True
         )
 
-        # Check for errors
+        # Check for HTTP errors
         if response.status_code == 403:
-            return (
-                f'ERROR: Access forbidden (403) for {url}\n'
+            result['error'] = (
+                'ERROR: Access forbidden (403) for ' + url + '\n'
                 'The website is blocking automated access. Possible reasons:\n'
                 '- Website requires login/authentication\n'
                 '- Website blocks bots/scrapers\n'
                 '- Geographic restrictions\n'
                 'Try accessing the URL in a browser first to verify it works.'
             )
+            return result
         if response.status_code == 404:
-            return f'ERROR: File not found (404) at {url}'
+            result['error'] = 'ERROR: File not found (404) at ' + url
+            return result
         if response.status_code == 429:
-            return 'ERROR: Too many requests (429). The server is rate limiting. Wait and retry.'
+            result['error'] = (
+                'ERROR: Too many requests (429). The server is rate limiting. Wait and retry.'
+            )
+            return result
         if response.status_code >= 400:
-            return f'ERROR: HTTP {response.status_code} - {response.reason}\nURL: {url}'
+            result['error'] = f'ERROR: HTTP {response.status_code} - {response.reason}\nURL: {url}'
+            return result
 
         response.raise_for_status()
 
@@ -380,9 +401,10 @@ def download_file(
         if content_length:
             size_mb = int(content_length) / (1024 * 1024)
             if size_mb > 100:
-                return (
+                result['error'] = (
                     f'ERROR: File too large ({size_mb:.1f} MB). Maximum supported size is 100 MB.'
                 )
+                return result
 
         final_path = None
         f = None
@@ -392,18 +414,14 @@ def download_file(
                 p.mkdir(parents=True, exist_ok=True)
                 final_path = p / save_name
                 f = open(final_path, 'wb')
-            except Exception: # pylint: disable=broad-exception-caught
+            except Exception:  # pylint: disable=broad-exception-caught
                 final_path = None
 
         if not final_path:
             # Create temp file with proper extension
             file_ext = Path(save_name).suffix
             # pylint: disable=consider-using-with
-            f = tempfile.NamedTemporaryFile(
-                delete=False,
-                suffix=file_ext,
-                prefix='kodeagent_'
-            )
+            f = tempfile.NamedTemporaryFile(delete=False, suffix=file_ext, prefix='kodeagent_')
             final_path = Path(f.name)
 
         try:
@@ -420,9 +438,14 @@ def download_file(
                         f.close()
                         if final_path.exists():
                             final_path.unlink()
-                        return 'ERROR: File exceeded 100 MB during download. Aborted.'
+
+                        result['error'] = (
+                            'ERROR: File exceeded 100 MB during download. Aborted.'
+                        )
+                        return result
         finally:
-            f.close()
+            if f:
+                f.close()
 
         # Normalize path for cross-platform compatibility
         final_path_str = str(final_path.as_posix())
@@ -435,31 +458,32 @@ def download_file(
             else f'{actual_size / (1024 * 1024):.1f} MB'
         )
 
-        return (
-            'SUCCESS: File downloaded successfully!\n'
-            f'- Saved to: {final_path_str}\n'
-            f'- Original filename: {save_name}\n'
-            f'- Size: {size_str}\n'
-            f'- Content type: {response.headers.get("Content-Type", "unknown")}\n\n'
-            'You can now use this file path with other tools.'
-        )
+        result['path'] = final_path_str
+        result['orig_name'] = save_name
+        result['size'] = size_str
+        result['content_type'] = response.headers.get('Content-Type', 'unknown')
+        return result
 
     except requests.exceptions.Timeout:
-        return (
+        result['error'] = (
             'ERROR: Download timed out after 30 seconds.\n'
             'The file may be too large or the server is slow. Try again.'
         )
+        return result
     except requests.exceptions.ConnectionError as e:
-        return (
+        result['error'] = (
             f'ERROR: Connection failed - {str(e)}\nPossible causes:\n'
             '- No internet connection\n'
             '- Invalid domain name\n'
             '- Server is down'
         )
+        return result
     except requests.exceptions.RequestException as e:
-        return f'ERROR: Download failed - {str(e)}'
+        result['error'] = f'ERROR: Download failed - {str(e)}'
+        return result
     except Exception as e:
-        return f'ERROR: Unexpected error - {type(e).__name__}: {str(e)}'
+        result['error'] = f'ERROR: Unexpected error - {type(e).__name__}: {str(e)}'
+        return result
 
 
 @tool
@@ -496,9 +520,7 @@ def extract_as_markdown(url_or_path: str, max_length: Optional[int] = None) -> s
     try:
         from markitdown import MarkItDown
     except ImportError:
-        return (
-            'ERROR: Required lib `markitdown` is missing. Install with: `pip install markitdown`'
-        )
+        return 'ERROR: Required lib `markitdown` is missing. Install with: `pip install markitdown`'
 
     # Validate input
     if not url_or_path or not url_or_path.strip():
@@ -536,10 +558,10 @@ def extract_as_markdown(url_or_path: str, max_length: Optional[int] = None) -> s
     supported_formats = {'.pdf', '.docx', '.xlsx', '.pptx'}
     if file_ext not in supported_formats:
         return (
-            f'ERROR: Unsupported file format \'{file_ext}\'\n'
+            f"ERROR: Unsupported file format '{file_ext}'\n"
             f'Supported formats: {", ".join(supported_formats)}\n\n'
-            f'For HTML web pages, use \'read_webpage\' instead.\n'
-            f'For other files, use \'download_file\' first.'
+            f"For HTML web pages, use 'read_webpage' instead.\n"
+            f"For other files, use 'download_file' first."
         )
 
     # Validate max_length
@@ -740,12 +762,7 @@ def read_webpage(url: str, max_length: int = 50000) -> str:
     }
 
     try:
-        response = requests.get(
-            url,
-            headers=headers,
-            timeout=20,
-            allow_redirects=True
-        )
+        response = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
 
         # Handle HTTP errors
         if response.status_code == 403:
@@ -789,20 +806,43 @@ def read_webpage(url: str, max_length: int = 50000) -> str:
         soup = BeautifulSoup(response.content, 'html.parser')
 
         # Remove unwanted elements
-        for element in soup([
-            'script', 'style', 'nav', 'footer', 'header',
-            'aside', 'iframe', 'noscript', 'svg', 'form',
-            'button', '[role="navigation"]', '[role="banner"]',
-            '[role="complementary"]', '.advertisement', '.ad',
-            '.sidebar', '.menu', '.navigation'
-        ]):
+        for element in soup(
+            [
+                'script',
+                'style',
+                'nav',
+                'footer',
+                'header',
+                'aside',
+                'iframe',
+                'noscript',
+                'svg',
+                'form',
+                'button',
+                '[role="navigation"]',
+                '[role="banner"]',
+                '[role="complementary"]',
+                '.advertisement',
+                '.ad',
+                '.sidebar',
+                '.menu',
+                '.navigation',
+            ]
+        ):
             element.decompose()
 
         # Try to find main content area
         for selector in [
-            'main', 'article', '[role="main"]', '.main-content',
-            '#main-content', '#content', '.post-content',
-            '.entry-content', '.article-content', '.page-content'
+            'main',
+            'article',
+            '[role="main"]',
+            '.main-content',
+            '#main-content',
+            '#content',
+            '.post-content',
+            '.entry-content',
+            '.article-content',
+            '.page-content',
         ]:
             main_content = soup.select_one(selector)
             if main_content:
@@ -895,7 +935,7 @@ def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
         markdown_results = []
         for title in results:
             page = wikipedia.page(title)
-            markdown_results.append(f"### [{page.title}]({page.url})\n{page.summary}")
+            markdown_results.append(f'### [{page.title}]({page.url})\n{page.summary}')
 
         return '\n\n'.join(markdown_results)
     except wikipedia.exceptions.DisambiguationError as de:
@@ -923,9 +963,7 @@ def search_arxiv(query: str, max_results: int = 5) -> str:
         # Construct the default API client
         client = arxiv.Client()
         search = arxiv.Search(
-            query=query,
-            max_results=max_results,
-            sort_by=arxiv.SortCriterion.Relevance
+            query=query, max_results=max_results, sort_by=arxiv.SortCriterion.Relevance
         )
 
         results = list(client.results(search))
@@ -992,6 +1030,7 @@ def transcribe_audio(file_path: str) -> Any:
         The transcript of the audio file as text.
     """
     import os
+
     try:
         import requests
 
@@ -1003,7 +1042,7 @@ def transcribe_audio(file_path: str) -> Any:
                 data={
                     'model': 'whisper-v3-turbo',
                     'temperature': '0',
-                    'vad_model': 'silero'
+                    'vad_model': 'silero',
                 },
                 timeout=15,
             )
@@ -1057,6 +1096,6 @@ def generate_image(prompt: str, model_name: str) -> str:
 if __name__ == '__main__':
     img_url = generate_image(
         prompt='A futuristic cityscape at sunset, with flying cars and neon lights',
-        model_name='gemini/imagen-4.0-generate-001'
+        model_name='gemini/imagen-4.0-generate-001',
     )
     print(f'Generated image URL: {img_url}')
