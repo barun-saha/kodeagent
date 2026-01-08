@@ -1,22 +1,17 @@
-"""
-This module defines the `tool` decorator and a set of built-in tools for KodeAgent.
+"""This module defines the `tool` decorator and a set of built-in tools for KodeAgent.
 All tools import necessary dependencies within their function bodies to ensure they are
 self-contained and can operate in isolated environments. Similarly, all variables are declared
 locally within the functions.
 """
+
 import asyncio
 import inspect
 import textwrap
+from collections.abc import Callable
 from functools import wraps
-from typing import (
-    Callable,
-    Any,
-    Union,
-    Optional
-)
+from typing import Any
 
 import pydantic as pyd
-
 
 DEFAULT_TOOLS_IMPORTS = [
     'ast',
@@ -42,8 +37,7 @@ DEFAULT_TOOLS_IMPORTS = [
 
 
 def tool(func: Callable) -> Callable:
-    """
-    A decorator to convert any Python function into a tool with additional metadata.
+    """A decorator to convert any Python function into a tool with additional metadata.
     Tooling based on async functions is not supported.
 
     Args:
@@ -82,9 +76,8 @@ def tool(func: Callable) -> Callable:
 
 
 @tool
-def calculator(expression: str) -> Union[float, None]:
-    """
-    A simple calculator tool that can evaluate basic arithmetic expressions.
+def calculator(expression: str) -> float | None:
+    """A simple calculator tool that can evaluate basic arithmetic expressions.
 
     Examples:
         - "2 + 2" returns 4.0
@@ -108,7 +101,7 @@ def calculator(expression: str) -> Union[float, None]:
     import re
 
     # Clean the expression
-    expression = expression.replace("'", "").replace('^', '**')
+    expression = expression.replace("'", '').replace('^', '**')
 
     # Define a regex pattern for valid mathematical expressions
     calculator_regex = re.compile(r'^[\d+\-*/().\s]+$')
@@ -160,8 +153,7 @@ def calculator(expression: str) -> Union[float, None]:
 
 @tool
 def search_web(query: str, max_results: int = 10) -> str:
-    """
-    Search the web using DuckDuckGo and return top results with titles and links.
+    """Search the web using DuckDuckGo and return top results with titles and links.
     Use this when you need current information, news, or general web search.
 
     The results include clickable links that can be visited using the `read_webpage` tool
@@ -183,8 +175,8 @@ def search_web(query: str, max_results: int = 10) -> str:
         For any question requiring a specific, accurate answer, always use `read_webpage`
         on a result URL.
     """
-    import time
     import random
+    import time
     from datetime import datetime
 
     today = datetime.now().strftime('%Y-%m-%d')
@@ -224,9 +216,9 @@ def search_web(query: str, max_results: int = 10) -> str:
         if not results or len(results) == 0:
             return (
                 f"No results found for '{query}'. Try:\n"
-                "- Using fewer, more common words\n"
-                "- Removing special characters\n"
-                "- Being less specific"
+                '- Using fewer, more common words\n'
+                '- Removing special characters\n'
+                '- Being less specific'
             )
 
         # Format results as clean Markdown
@@ -264,13 +256,8 @@ def search_web(query: str, max_results: int = 10) -> str:
 
 
 @tool
-def download_file(
-    url: str,
-    save_name: Optional[str] = None,
-    save_dir: Optional[str] = None
-) -> dict:
-    """
-    Download a file from the internet and save it locally.
+def download_file(url: str, save_name: str | None = None, save_dir: str | None = None) -> dict:
+    """Download a file from the internet and save it locally.
     Use this for downloading images, PDFs, data files, or any binary content.
 
     For reading webpage content as text, use 'read_webpage' instead.
@@ -298,10 +285,14 @@ def download_file(
     import re
     import tempfile
     from pathlib import Path
-    from urllib.parse import urlparse, unquote
+    from urllib.parse import unquote, urlparse
 
     result: dict[str, str | None] = {
-        'path': None, 'orig_name': None, 'size': None, 'content_type': None, 'error': None
+        'path': None,
+        'orig_name': None,
+        'size': None,
+        'content_type': None,
+        'error': None,
     }
 
     try:
@@ -363,13 +354,7 @@ def download_file(
 
     try:
         # Make request with streaming for large files
-        response = requests.get(
-            url,
-            headers=headers,
-            timeout=30,
-            stream=True,
-            allow_redirects=True
-        )
+        response = requests.get(url, headers=headers, timeout=30, stream=True, allow_redirects=True)
 
         # Check for HTTP errors
         if response.status_code == 403:
@@ -439,9 +424,7 @@ def download_file(
                         if final_path.exists():
                             final_path.unlink()
 
-                        result['error'] = (
-                            'ERROR: File exceeded 100 MB during download. Aborted.'
-                        )
+                        result['error'] = 'ERROR: File exceeded 100 MB during download. Aborted.'
                         return result
         finally:
             if f:
@@ -487,9 +470,8 @@ def download_file(
 
 
 @tool
-def extract_as_markdown(url_or_path: str, max_length: Optional[int] = None) -> str:
-    """
-    Extract content from documents (PDF, DOCX, XLSX, PPTX) as Markdown text.
+def extract_as_markdown(url_or_path: str, max_length: int | None = None) -> str:
+    """Extract content from documents (PDF, DOCX, XLSX, PPTX) as Markdown text.
     Works with both URLs and local file paths.
 
     Supported formats:
@@ -674,8 +656,7 @@ def extract_as_markdown(url_or_path: str, max_length: Optional[int] = None) -> s
 
 @tool
 def read_webpage(url: str, max_length: int = 50000) -> str:
-    """
-    Read and extract the main text content from HTML web pages as clean Markdown.
+    """Read and extract the main text content from HTML web pages as clean Markdown.
     Use this after 'search_web' to read articles, blogs, documentation, or any HTML content.
 
     This tool intelligently extracts readable text while removing ads, navigation,
@@ -909,9 +890,8 @@ def read_webpage(url: str, max_length: int = 50000) -> str:
 
 
 @tool
-def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
-    """
-    Search Wikipedia (only) and return the top search results as Markdown text.
+def search_wikipedia(query: str, max_results: int | None = 3) -> str:
+    """Search Wikipedia (only) and return the top search results as Markdown text.
     The input should be a search query. The output will contain the title, summary, and link
     to the Wikipedia page.
 
@@ -944,8 +924,7 @@ def search_wikipedia(query: str, max_results: Optional[int] = 3) -> str:
 
 @tool
 def search_arxiv(query: str, max_results: int = 5) -> str:
-    """
-    Search for academic papers on arXiv.org. The input is a search query.
+    """Search for academic papers on arXiv.org. The input is a search query.
     This tool is highly specialized and should be used exclusively for
     finding scientific and academic papers. It returns the top search results
     with the title, authors, summary, and a link to the PDF.
@@ -987,8 +966,7 @@ def search_arxiv(query: str, max_results: int = 5) -> str:
 
 @tool
 def transcribe_youtube(video_id: str) -> str:
-    """
-    Retrieve the transcript/subtitles for YouTube videos (only). It also works for automatically
+    """Retrieve the transcript/subtitles for YouTube videos (only). It also works for automatically
     generated subtitles, supports translating subtitles. The input should be a valid YouTube
     video ID. E.g., the URL https://www.youtube.com/watch?v=aBc4E has the video ID `aBc4E`.
 
@@ -998,7 +976,8 @@ def transcribe_youtube(video_id: str) -> str:
     Returns:
         The transcript/subtitle of the video, if available.
     """
-    from youtube_transcript_api import YouTubeTranscriptApi, _errors as yt_errors
+    from youtube_transcript_api import YouTubeTranscriptApi
+    from youtube_transcript_api import _errors as yt_errors
 
     try:
         transcript = YouTubeTranscriptApi().fetch(video_id)
@@ -1018,8 +997,7 @@ def transcribe_youtube(video_id: str) -> str:
 
 @tool
 def transcribe_audio(file_path: str) -> Any:
-    """
-    Convert audio files to text using OpenAI's Whisper model via Fireworks API.
+    """Convert audio files to text using OpenAI's Whisper model via Fireworks API.
     The input should be a path to an audio file (e.g., .mp3, .wav, .flac).
     The audio file should be in a format that Whisper supports.
 
@@ -1057,8 +1035,7 @@ def transcribe_audio(file_path: str) -> Any:
 
 @tool
 def generate_image(prompt: str, model_name: str) -> str:
-    """
-    Generate an image based on a text prompt using the specified model.
+    """Generate an image based on a text prompt using the specified model.
     It returns the image URL or the file path of the generated image.
 
     Args:

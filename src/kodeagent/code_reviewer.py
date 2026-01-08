@@ -1,28 +1,25 @@
-"""
-Review code for security vulnerabilities.
-"""
+"""Review code for security vulnerabilities."""
+
 import uuid
-from typing import Optional
 
 from . import kutils as ku
 from .models import CodeReview
 from .usage_tracker import UsageTracker
-
 
 CODE_SECURITY_SYSTEM_PROMPT = ku.read_prompt('code_guardrail.txt')
 
 
 class CodeSecurityReviewer:
     """Review code for security vulnerabilities."""
+
     def __init__(
-            self,
-            model_name: str,
-            litellm_params: Optional[dict] = None,
-            usage_tracker: Optional[UsageTracker] = None,
-            tool_names: Optional[set[str]] = None
+        self,
+        model_name: str,
+        litellm_params: dict | None = None,
+        usage_tracker: UsageTracker | None = None,
+        tool_names: set[str] | None = None,
     ):
-        """
-        Initialize the CodeSecurityReviewer.
+        """Initialize the CodeSecurityReviewer.
 
         Args:
             model_name: The name of the LLM model to use.
@@ -36,8 +33,7 @@ class CodeSecurityReviewer:
         self.tool_names = tool_names or set()
 
     async def review(self, code: str) -> CodeReview:
-        """
-        Review the code for security vulnerabilities.
+        """Review the code for security vulnerabilities.
 
         Args:
             code: The code to review.
@@ -50,11 +46,9 @@ class CodeSecurityReviewer:
             tools_list = '\n'.join(f'- {tool}' for tool in sorted(self.tool_names))
         else:
             tools_list = '- [None provided]'
-        
-        system_prompt = CODE_SECURITY_SYSTEM_PROMPT.format(
-            whitelisted_tools=tools_list
-        )
-        
+
+        system_prompt = CODE_SECURITY_SYSTEM_PROMPT.format(whitelisted_tools=tools_list)
+
         messages = [
             {
                 'role': 'system',
@@ -72,6 +66,6 @@ class CodeSecurityReviewer:
             response_format=CodeReview,
             trace_id=uuid.uuid4().hex,
             usage_tracker=self.usage_tracker,
-            component_name='CodeSecurityReviewer'
+            component_name='CodeSecurityReviewer',
         )
         return CodeReview.model_validate_json(review_response)

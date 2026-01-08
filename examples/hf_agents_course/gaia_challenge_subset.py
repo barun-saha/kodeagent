@@ -1,5 +1,4 @@
-"""
-Use KodeAgent to solve the hands-on exercises from Hugging Face's Agents course:
+"""Use KodeAgent to solve the hands-on exercises from Hugging Face's Agents course:
 https://huggingface.co/learn/agents-course/en/unit4/hands-on
 
 As of June 8, 2025, the evaluation scores (max) are:
@@ -9,6 +8,7 @@ azure/gpt-4.1-mini: 45%
 
 The scores may vary for different runs.
 """
+
 import asyncio
 import json
 import os
@@ -25,7 +25,6 @@ sys.path.append('..')
 
 import kodeagent as ka
 
-
 DEFAULT_API_URL = 'https://agents-course-unit4-scoring.hf.space'
 IMG_EXTENSIONS = ['png', 'jpg', 'jpeg']
 TXT_EXTENSIONS = ['txt', 'py', 'js', 'csv']
@@ -36,8 +35,7 @@ os.environ['PYTHONUTF8'] = '1'
 
 
 def get_questions_list() -> list[dict]:
-    """
-    Get the questions via HTTP request to https://agents-course-unit4-scoring.hf.space/questions
+    """Get the questions via HTTP request to https://agents-course-unit4-scoring.hf.space/questions
 
     Returns:
         A list of available questions.
@@ -50,8 +48,7 @@ def get_questions_list() -> list[dict]:
 
 
 def get_code_act_agent(model_name: str) -> ka.Agent:
-    """
-    Create a CodeActAgent for solving the GAIA benchmark tasks.
+    """Create a CodeActAgent for solving the GAIA benchmark tasks.
 
     Args:
         model_name: The LLM to use.
@@ -65,31 +62,41 @@ def get_code_act_agent(model_name: str) -> ka.Agent:
         name='Multi-task agent',
         model_name=model_name,
         tools=[
-            ka.search_web, ka.extract_as_markdown, ka.download_file, ka.transcribe_youtube,
-            ka.search_wikipedia, ka.transcribe_audio,
+            ka.search_web,
+            ka.extract_as_markdown,
+            ka.download_file,
+            ka.transcribe_youtube,
+            ka.search_wikipedia,
+            ka.transcribe_audio,
         ],
         run_env='host',
         max_iterations=10,
         litellm_params=litellm_params,
         allowed_imports=[
-            'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'ddgs', 'markitdown', 'youtube_transcript_api', 'wikipedia',
+            'os',
+            're',
+            'time',
+            'random',
+            'requests',
+            'tempfile',
+            'ddgs',
+            'markitdown',
+            'youtube_transcript_api',
+            'wikipedia',
         ],
         pip_packages=(
-            'ddgs~=9.5.2;"markitdown[all]";'
-            'youtube-transcript-api~=1.2.2;wikipedia~=1.4.0'
+            'ddgs~=9.5.2;"markitdown[all]";youtube-transcript-api~=1.2.2;wikipedia~=1.4.0'
         ),
         env_vars_to_set={'FIREWORKS_API_KEY': os.environ.get('FIREWORKS_API_KEY', '')},
         timeout=35,
-        filter_tools_for_task=False
+        filter_tools_for_task=False,
     )
 
     return agent
 
 
 def get_multiagent(model_name: str) -> ka.Agent:
-    """
-    Create a SupervisorAgent with two agents to solve the GAIA benchmark tasks.
+    """Create a SupervisorAgent with two agents to solve the GAIA benchmark tasks.
     Probably going to fail.
 
     Args:
@@ -103,40 +110,49 @@ def get_multiagent(model_name: str) -> ka.Agent:
     agent1 = ka.ReActAgent(
         name='Audio video transcription agent',
         model_name=model_name,
-        tools=[ka.transcribe_youtube, ka.transcribe_audio, ka.download_file, ],
+        tools=[
+            ka.transcribe_youtube,
+            ka.transcribe_audio,
+            ka.download_file,
+        ],
         max_iterations=5,
     )
     agent2 = ka.CodeActAgent(
         name='Information retrieval agent',
         model_name=model_name,
-        tools=[ka.search_web, ka.extract_as_markdown, ka.download_file, ka.search_wikipedia, ],
+        tools=[
+            ka.search_web,
+            ka.extract_as_markdown,
+            ka.download_file,
+            ka.search_wikipedia,
+        ],
         run_env='host',
         max_iterations=7,
         litellm_params=litellm_params,
         allowed_imports=[
-            'os', 're', 'time', 'random', 'requests', 'tempfile',
-            'duckduckgo_search', 'markitdown', 'wikipedia',
+            'os',
+            're',
+            'time',
+            'random',
+            'requests',
+            'tempfile',
+            'duckduckgo_search',
+            'markitdown',
+            'wikipedia',
         ],
-        pip_packages=(
-            'duckduckgo_search~=8.0.1;"markitdown[all]";wikipedia~=1.4.0'
-        ),
+        pip_packages=('duckduckgo_search~=8.0.1;"markitdown[all]";wikipedia~=1.4.0'),
         env_vars_to_set={'FIREWORKS_API_KEY': os.environ.get('FIREWORKS_API_KEY', '')},
         timeout=35,
     )
     agency = ka.SupervisorAgent(
-        name='Supervisor',
-        model_name=model_name,
-        agents=[agent1, agent2],
-        max_iterations=5
+        name='Supervisor', model_name=model_name, agents=[agent1, agent2], max_iterations=5
     )
 
     return agency
 
 
 async def main():
-    """
-    Evaluate a subset of the GAIA benchmark for HF Agents Course finale.
-    """
+    """Evaluate a subset of the GAIA benchmark for HF Agents Course finale."""
     questions = get_questions_list()
     model_name = 'gemini/gemini-2.0-flash-lite'  # 45% score
     # model_name = 'gemini/gemini-2.5-flash-preview-05-20'  # 60% score
@@ -190,7 +206,8 @@ async def main():
                 if response['type'] == 'final':
                     answer = (
                         response['value'].content
-                        if isinstance(response['value'], ka.ChatMessage) else response['value']
+                        if isinstance(response['value'], ka.ChatMessage)
+                        else response['value']
                     )
                     rich.print(f'[blue][bold]Agent[/bold]: {answer}[/blue]\n')
             print(agent.current_plan)
@@ -204,9 +221,9 @@ async def main():
     submission_data = {
         'username': username.strip(),
         'agent_code': agent_code,
-        'answers': answers_payload
+        'answers': answers_payload,
     }
-    print(f'Agent finished. Submitting {len(answers_payload)} answers for user \'{username}\'...')
+    print(f"Agent finished. Submitting {len(answers_payload)} answers for user '{username}'...")
 
     # Submit
     print(f'Submitting {len(answers_payload)} answers to: {submit_url}')

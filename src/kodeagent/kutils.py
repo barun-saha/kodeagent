@@ -1,28 +1,27 @@
-"""
-A minimal set of utilities used by KodeAgent.
+"""A minimal set of utilities used by KodeAgent.
 This module will be copied along with code for CodeAgent, so keep it minimum.
 """
+
 import base64
 import logging
 import mimetypes
 import os
 import re
-from typing import Optional, Any, Type
+from typing import Any
 
 import litellm
 import pydantic as pyd
 import requests
 from tenacity import (
-    wait_random_exponential,
     AsyncRetrying,
-    stop_after_attempt,
     RetryError,
+    before_sleep_log,
     retry_if_exception_type,
-    before_sleep_log
+    stop_after_attempt,
+    wait_random_exponential,
 )
 
 from .usage_tracker import UsageMetrics
-
 
 DEFAULT_MAX_LLM_RETRIES = 3
 LOGGERS_TO_SUPPRESS = [
@@ -55,16 +54,14 @@ if hasattr(logging, 'captureWarnings'):
     logging.captureWarnings(True)
 
 
-def get_logger(name: Optional[str] = 'KodeAgent') -> logging.Logger:
-    """
-    Get a logger for KodeAgent.
+def get_logger(name: str | None = 'KodeAgent') -> logging.Logger:
+    """Get a logger for KodeAgent.
 
     Returns:
         A logger instance.
     """
     logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     logging.getLogger('LiteLLM').setLevel(logging.WARNING)
     logging.getLogger('langfuse').disabled = True
@@ -77,8 +74,7 @@ logger = logging.getLogger('KodeAgent')
 
 
 def read_prompt(filename: str) -> str:
-    """
-    Reads a prompt from the `prompts` directory.
+    """Reads a prompt from the `prompts` directory.
 
     Args:
         filename: Name of the prompt file to read.
@@ -93,21 +89,18 @@ def read_prompt(filename: str) -> str:
     prompt_path = os.path.join(os.path.dirname(__file__), 'prompts', filename)
 
     try:
-        with open(prompt_path, 'r', encoding='utf-8') as f:
+        with open(prompt_path, encoding='utf-8') as f:
             return f.read()
     except FileNotFoundError as fnfe:
         raise FileNotFoundError(
             f'Prompt file `{filename}` not found in the prompts directory: {prompt_path}'
         ) from fnfe
     except Exception as e:
-        raise RuntimeError(
-            f'Error reading prompt file `{filename}`: {e}'
-        ) from e
+        raise RuntimeError(f'Error reading prompt file `{filename}`: {e}') from e
 
 
 def is_it_url(path: str) -> bool:
-    """
-    Check whether a given path is a URL.
+    """Check whether a given path is a URL.
 
     Args:
         path: The path.
@@ -119,8 +112,7 @@ def is_it_url(path: str) -> bool:
 
 
 def detect_file_type(url: str) -> str:
-    """
-    Identify the content/MIME type of file pointed by a URL.
+    """Identify the content/MIME type of file pointed by a URL.
 
     Args:
         url: The URL to the file.
@@ -152,8 +144,7 @@ def detect_file_type(url: str) -> str:
 
 
 def is_image_file(file_type) -> bool:
-    """
-    Identify whether a given MIME type is an image.
+    """Identify whether a given MIME type is an image.
 
     Args:
         file_type: The file/content type.
@@ -165,17 +156,16 @@ def is_image_file(file_type) -> bool:
 
 
 async def call_llm(
-        model_name: str,
-        litellm_params: dict,
-        messages: list[dict],
-        response_format: Optional[Type[pyd.BaseModel]] = None,
-        trace_id: Optional[str] = None,
-        max_retries: int = DEFAULT_MAX_LLM_RETRIES,
-        usage_tracker: Optional[Any] = None,
-        component_name: str = 'unknown'
+    model_name: str,
+    litellm_params: dict,
+    messages: list[dict],
+    response_format: type[pyd.BaseModel] | None = None,
+    trace_id: str | None = None,
+    max_retries: int = DEFAULT_MAX_LLM_RETRIES,
+    usage_tracker: Any | None = None,
+    component_name: str = 'unknown',
 ) -> str | None:
-    """
-    Call the LLM with the given parameters and response format.
+    """Call the LLM with the given parameters and response format.
 
     Args:
         model_name: The name of the LLM model to use.
@@ -208,10 +198,10 @@ async def call_llm(
     try:
         # Use AsyncRetrying to handle retries in a non-blocking way
         async for attempt in AsyncRetrying(
-                stop=stop_after_attempt(max_retries),
-                wait=wait_random_exponential(multiplier=1, max=60),
-                retry=retry_if_exception_type(Exception),
-                before_sleep=before_sleep_log(logger, logging.WARNING)
+            stop=stop_after_attempt(max_retries),
+            wait=wait_random_exponential(multiplier=1, max=60),
+            retry=retry_if_exception_type(Exception),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
         ):
             with attempt:
                 # Use the asynchronous litellm call
@@ -228,7 +218,7 @@ async def call_llm(
                             'attempt': attempt.retry_state.attempt_number,
                         },
                         'tags': [model_name],
-                    }
+                    },
                 )
 
                 # Check for empty content
@@ -251,7 +241,7 @@ async def call_llm(
                             prompt_tokens=token_usage['prompt_tokens'],
                             completion_tokens=token_usage['completion_tokens'],
                             total_tokens=token_usage['total_tokens'],
-                            cost=token_usage['cost'] or 0.0
+                            cost=token_usage['cost'] or 0.0,
                         )
                         await usage_tracker.record_usage(component_name, metrics)
                     except Exception as e:
@@ -262,22 +252,13 @@ async def call_llm(
     except RetryError:
         raise
     except Exception as e:
-        logger.exception(
-            'LLM call failed after repeated attempts: %s',
-            str(e), exc_info=True
-        )
+        logger.exception('LLM call failed after repeated attempts: %s', str(e), exc_info=True)
         # print('\n\ncall_llm MESSAGES:\n', '\n'.join([str(msg) for msg in messages]), '\n\n')
-        raise ValueError(
-            'Failed to get a valid response from LLM after multiple retries.'
-        ) from e
+        raise ValueError('Failed to get a valid response from LLM after multiple retries.') from e
 
 
-def make_user_message(
-        text_content: str,
-        files: Optional[list[str]] = None
-) -> list[dict[str, Any]]:
-    """
-    Create a single user message to be sent to LiteLLM.
+def make_user_message(text_content: str, files: list[str] | None = None) -> list[dict[str, Any]]:
+    """Create a single user message to be sent to LiteLLM.
 
     Args:
         text_content: The text content of the message.
@@ -295,9 +276,8 @@ def make_user_message(
             is_image = False
             if is_it_url(item):
                 if any(
-                        ext in item.lower() for ext in [
-                            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'
-                        ]
+                    ext in item.lower()
+                    for ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
                 ) or is_image_file(detect_file_type(item)):
                     is_image = True
             elif os.path.isfile(item):
@@ -309,7 +289,7 @@ def make_user_message(
                     logger.error(
                         'Error guessing MIME type for local file %s...will ignore it',
                         item,
-                        exc_info=True
+                        exc_info=True,
                     )
                     # If an error occurs, treat it as not an image to continue processing
                     is_image = False
@@ -327,21 +307,22 @@ def make_user_message(
                         except Exception:
                             logger.warning(
                                 'Could not guess MIME type, defaulting to octet-stream',
-                                exc_info=True
+                                exc_info=True,
                             )
                             mime_type = 'application/octet-stream'
 
                         mime_type = mime_type if mime_type else 'application/octet-stream'
-                        content.append({
-                            'type': 'image_url',
-                            'image_url': {'url': f'data:{mime_type};base64,{encoded_image}'}
-                        })
+                        content.append(
+                            {
+                                'type': 'image_url',
+                                'image_url': {'url': f'data:{mime_type};base64,{encoded_image}'},
+                            }
+                        )
                     except FileNotFoundError:
                         logger.error('Image file not found: %s...will ignore it', item)
                     except Exception as e:
                         logger.error(
-                            'Error processing local image %s: %s...will ignore it',
-                            item, e
+                            'Error processing local image %s: %s...will ignore it', item, e
                         )
                 else:
                     logger.error('Invalid image file path or URL: %s...will ignore it', item)
@@ -352,22 +333,22 @@ def make_user_message(
                     try:
                         mime_type, _ = mimetypes.guess_type(item)
                         if mime_type and (
-                                'text' in mime_type
-                                or mime_type in ('application/json', 'application/xml')
+                            'text' in mime_type
+                            or mime_type in ('application/json', 'application/xml')
                         ):
                             try:
-                                with open(item, 'r', encoding='utf-8') as f:
+                                with open(item, encoding='utf-8') as f:
                                     file_content = f.read()
                                 content.append(
                                     {
                                         'type': 'text',
-                                        'text': f'File {item} content:\n{file_content}'
+                                        'text': f'File {item} content:\n{file_content}',
                                     }
                                 )
                             except Exception:
                                 logger.error(
-                                    'Error reading text file `%s`...will fallback to path only'
-                                    , item
+                                    'Error reading text file `%s`...will fallback to path only',
+                                    item,
                                 )
                                 content.append({'type': 'text', 'text': f'Input file: {item}'})
                         else:
@@ -377,7 +358,7 @@ def make_user_message(
                         logger.error(
                             'Error guessing MIME type for local file %s...will ignore it',
                             item,
-                            exc_info=True
+                            exc_info=True,
                         )
                         # content.append({'type': 'text', 'text': f'Input file: {item}'})
                 else:
@@ -388,8 +369,7 @@ def make_user_message(
 
 
 def combine_user_messages(messages: list) -> list:
-    """
-    Combines consecutive user messages into a single message with a list of content items.
+    """Combines consecutive user messages into a single message with a list of content items.
 
     Returns:
         A new list of messages with combined user messages.
@@ -418,8 +398,7 @@ def combine_user_messages(messages: list) -> list:
 
 
 def clean_json_string(json_str: str) -> str:
-    """
-    Clean and repair common JSON formatting issues from LLM responses.
+    """Clean and repair common JSON formatting issues from LLM responses.
 
     Args:
         json_str: Potentially malformed JSON string
@@ -440,7 +419,7 @@ def clean_json_string(json_str: str) -> str:
     end_idx = json_str.rfind('}')
 
     if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-        json_str = json_str[start_idx:end_idx + 1]
+        json_str = json_str[start_idx : end_idx + 1]
 
     # Remove trailing quotes/whitespace
     json_str = re.sub(r'[\'"\s]*$', '', json_str)

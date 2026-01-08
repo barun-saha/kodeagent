@@ -1,19 +1,14 @@
-"""
-Integration tests for the KodeAgent package.
+"""Integration tests for the KodeAgent package.
 These tests make real API calls and should not be run in unit test suites.
 """
+
 import datetime
 import os
+
 import pytest
 
-from kodeagent import (
-    ReActAgent,
-    CodeActAgent,
-    calculator,
-    search_arxiv
-)
+from kodeagent import CodeActAgent, ReActAgent, calculator, search_arxiv
 from kodeagent.kutils import call_llm
-
 
 MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
 
@@ -25,7 +20,7 @@ async def test_call_llm():
         model_name=MODEL_NAME,
         litellm_params={},
         messages=[{'role': 'user', 'content': 'Hello!'}],
-        trace_id='integration-test'
+        trace_id='integration-test',
     )
     assert isinstance(response, str)
     assert len(response) > 0
@@ -47,7 +42,7 @@ async def test_get_relevant_tools_integration():
         model_name=MODEL_NAME,
         tools=[calculator],
         description='Test ReAct agent for arithmetic tasks',
-        max_iterations=3
+        max_iterations=3,
     )
 
     task_description = 'What is 2 plus 3?'
@@ -94,7 +89,7 @@ async def test_react_agent_llm_integration():
         model_name=MODEL_NAME,
         tools=[],
         description='Test ReAct agent for integration tests',
-        max_iterations=3
+        max_iterations=3,
     )
 
     responses = []
