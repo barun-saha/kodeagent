@@ -1,11 +1,11 @@
-"""
-Quick start example for KodeAgent with web search and webpage reading tools.
-"""
+"""Quick start example for KodeAgent with web search and webpage reading tools."""
+
 from kodeagent import ReActAgent, print_response
 from kodeagent.tools import read_webpage, search_web
 
 
 async def main():
+    """Quick start example for KodeAgent with web search and webpage reading tools."""
     litellm_params = {'temperature': 0, 'timeout': 30}
     agent = ReActAgent(
         name='Web agent',

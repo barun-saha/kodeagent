@@ -146,7 +146,7 @@ records:
   - delay: 248
     content: t
   - delay: 230
-    content: '_quick_start.py '
+    content: '_quickstart.py '
   - delay: 678
     content: "\r\n\e[?2004l\r"
   - delay: 1678

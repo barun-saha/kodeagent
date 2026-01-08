@@ -1,23 +1,23 @@
-"""
-Test suite for tools.py module.
+"""Test suite for tools.py module.
 Tests all tools with appropriate mocking for web APIs and external dependencies.
 """
 
+from unittest.mock import MagicMock, Mock, mock_open, patch
+
 import pytest
-from unittest.mock import Mock, patch, mock_open, MagicMock
 
 from kodeagent.tools import (
-    tool,
     calculator,
-    search_web,
     download_file,
     extract_as_markdown,
-    read_webpage,
-    search_wikipedia,
-    search_arxiv,
-    transcribe_youtube,
-    transcribe_audio,
     generate_image,
+    read_webpage,
+    search_arxiv,
+    search_web,
+    search_wikipedia,
+    tool,
+    transcribe_audio,
+    transcribe_youtube,
 )
 
 
@@ -154,8 +154,7 @@ class TestCalculator:
 
     @patch('re.compile')
     def test_calculator_rejects_disallowed_binary_operator_after_regex(self, mock_compile):
-        """
-        Tests that disallowed binary operators are rejected by eval_node,
+        """Tests that disallowed binary operators are rejected by eval_node,
         by mocking the regex to allow the operator through.
         """
         # Mock the regex to be permissive
@@ -167,8 +166,7 @@ class TestCalculator:
 
     @patch('re.compile')
     def test_calculator_rejects_disallowed_unary_operator_after_regex(self, mock_compile):
-        """
-        Tests that disallowed unary operators are rejected by eval_node,
+        """Tests that disallowed unary operators are rejected by eval_node,
         by mocking the regex to allow the operator through.
         """
         mock_regex = MagicMock()
@@ -179,8 +177,7 @@ class TestCalculator:
 
     @patch('re.compile')
     def test_calculator_rejects_function_calls_after_regex(self, mock_compile):
-        """
-        Tests that function calls are rejected by eval_node,
+        """Tests that function calls are rejected by eval_node,
         by mocking the regex to allow the operator through.
         """
         mock_regex = MagicMock()
@@ -199,7 +196,7 @@ class TestSearchWeb:
         """Test basic web search."""
         mock_results = [
             {'title': 'Result 1', 'href': 'https://example.com/1', 'body': 'Description 1'},
-            {'title': 'Result 2', 'href': 'https://example.com/2', 'body': 'Description 2'}
+            {'title': 'Result 2', 'href': 'https://example.com/2', 'body': 'Description 2'},
         ]
         mock_ddgs.return_value.text.return_value = iter(mock_results)
 
@@ -320,7 +317,6 @@ class TestDownloadFile:
 
     def test_download_file_import_error(self):
         """Test download_file with ImportError."""
-
         with patch.dict('sys.modules', {'requests': None}):
             result = download_file('https://example.com/file.pdf')
             assert 'ERROR' in result['error']
@@ -678,7 +674,7 @@ class TestReadWebpage:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {'Content-Type': 'text/html'}
-        mock_response.content = b'''
+        mock_response.content = b"""
             <html>
                 <head><title>Test Page</title></head>
                 <body>
@@ -690,7 +686,7 @@ class TestReadWebpage:
                     <footer>Footer</footer>
                 </body>
             </html>
-        '''
+        """
         mock_get.return_value = mock_response
 
         result = read_webpage('https://example.com/page')
@@ -972,8 +968,6 @@ class TestExtractAsMarkdown:
 
     def test_extract_import_error(self):
         """Test that ImportError is handled when markitdown is not installed."""
-        import sys
-
         with patch.dict('sys.modules', {'markitdown': None}):
             result = extract_as_markdown('http://example.com/file.pdf')
             assert 'ERROR: Required lib `markitdown` is missing' in result
@@ -1286,16 +1280,12 @@ class TestSearchArxiv:
 
     def test_search_arxiv_import_error(self):
         """Test arXiv search with ImportError."""
-        import sys
-
         with patch.dict('sys.modules', {'arxiv': None}):
             result = search_arxiv('test')
             assert 'An error occurred' in result
 
     def test_search_wikipedia_import_error(self):
         """Test Wikipedia search with ImportError."""
-        import sys
-
         with patch.dict('sys.modules', {'wikipedia': None}):
             result = search_wikipedia('test')
             assert '`wikipedia` was not found' in result

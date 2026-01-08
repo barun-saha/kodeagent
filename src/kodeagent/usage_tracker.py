@@ -1,15 +1,13 @@
-"""
-Track and report LLM usage metrics (tokens and cost) across components.
-"""
+"""Track and report LLM usage metrics (tokens and cost) across components."""
+
 import asyncio
 
-from .models import UsageMetrics, ComponentUsage
+from .models import ComponentUsage, UsageMetrics
 
 
 class UsageTracker:
-    """
-    Track cumulative LLM usage across components.
-    
+    """Track cumulative LLM usage across components.
+
     Note: LLM usage is tracked only when calls are made via `call_llm` method. Any other LLM calls
     will not be tracked. E.g., if tools invoke LLMs directly, those calls will not be tracked.
     """
@@ -20,8 +18,7 @@ class UsageTracker:
         self._lock = asyncio.Lock()
 
     async def record_usage(self, component: str, metrics: UsageMetrics) -> None:
-        """
-        Record usage from a single LLM call. Uses lock to ensure coroutine safety.
+        """Record usage from a single LLM call. Uses lock to ensure coroutine safety.
 
         Args:
             component: Name of the component making the call.
@@ -29,9 +26,7 @@ class UsageTracker:
         """
         async with self._lock:
             if component not in self._usage_by_component:
-                self._usage_by_component[component] = ComponentUsage(
-                    component_name=component
-                )
+                self._usage_by_component[component] = ComponentUsage(component_name=component)
 
             usage = self._usage_by_component[component]
             usage.call_count += 1
@@ -41,8 +36,7 @@ class UsageTracker:
             usage.total_cost += metrics.cost
 
     def get_total_usage(self) -> ComponentUsage:
-        """
-        Get aggregated usage across all components.
+        """Get aggregated usage across all components.
 
         Returns:
             ComponentUsage with totals across all components.
@@ -57,8 +51,7 @@ class UsageTracker:
         return total
 
     def get_usage_by_component(self) -> dict[str, ComponentUsage]:
-        """
-        Get usage breakdown by component.
+        """Get usage breakdown by component.
 
         Returns:
             Dictionary mapping component names to their usage.
@@ -66,8 +59,7 @@ class UsageTracker:
         return dict(self._usage_by_component)
 
     def format_report(self, include_breakdown: bool = True) -> str:
-        """
-        Generate a formatted usage report.
+        """Generate a formatted usage report.
 
         Args:
             include_breakdown: Whether to include per-component breakdown.
@@ -94,9 +86,7 @@ class UsageTracker:
 
             # Sort components by total cost (descending)
             sorted_components = sorted(
-                self._usage_by_component.items(),
-                key=lambda x: x[1].total_cost,
-                reverse=True
+                self._usage_by_component.items(), key=lambda x: x[1].total_cost, reverse=True
             )
 
             for component_name, usage in sorted_components:

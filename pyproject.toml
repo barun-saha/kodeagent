@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77.0.3"]
+requires = ["setuptools>=80.9.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -37,3 +37,18 @@ pythonpath = "src"
 [project.urls]
 "Homepage" = "https://github.com/barun-saha/kodeagent"
 "Bug Tracker" = "https://github.com/barun-saha/kodeagent/issues"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "D"]
+# Blank line; punctuation; long line; non-top level import
+ignore = ["UP030", "D205", "D415", "E501", "E40"]
+
+[tool.ruff.format]
+quote-style = "single"
+docstring-code-format = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

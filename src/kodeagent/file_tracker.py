@@ -1,13 +1,12 @@
-"""
-File tracking and interception utility for KodeAgent.
+"""File tracking and interception utility for KodeAgent.
 Provides a thread-safe way to monitor and redirect file creation using builtins.open patching.
 """
+
 import builtins
 import contextvars
 import os
 import threading
-from typing import List, Dict, Any, Optional
-
+from typing import Any, Optional
 
 # Context variable to hold the active interceptor for the current thread/context
 _active_interceptor: contextvars.ContextVar[Optional['OutputInterceptor']] = contextvars.ContextVar(
@@ -19,29 +18,27 @@ _original_open = builtins.open
 
 
 class OutputInterceptor:
-    """
-    Intercepts file operations in agent code execution or tool calls.
+    """Intercepts file operations in agent code execution or tool calls.
     Redirects writes to a controlled sandbox directory and logs events.
     """
-    def __init__(self, sandbox_root: Optional[str] = None):
-        """
-        Initialize the interceptor.
+
+    def __init__(self, sandbox_root: str | None = None):
+        """Initialize the interceptor.
 
         Args:
-            sandbox_root: Target directory for file redirection. 
+            sandbox_root: Target directory for file redirection.
              If None, files are tracked but not redirected.
         """
         self.sandbox_root = sandbox_root
         if self.sandbox_root:
             os.makedirs(self.sandbox_root, exist_ok=True)
-            
-        self._events: List[Dict[str, Any]] = []
+
+        self._events: list[dict[str, Any]] = []
         self._lock = threading.Lock()
-        self._token: Optional[contextvars.Token] = None
+        self._token: contextvars.Token | None = None
 
     def _should_intercept(self, mode: str) -> bool:
-        """
-        Only intercept write/append modes.
+        """Only intercept write/append modes.
 
         Args:
             mode: The mode in which to open the file.
@@ -55,17 +52,16 @@ class OutputInterceptor:
         self,
         original_open,
         path,
-        mode="r",
+        mode='r',
         buffering=-1,
         encoding=None,
         errors=None,
         newline=None,
         closefd=True,
-        opener=None
+        opener=None,
     ):
-        """
-        Replacement for builtins.open.
-        
+        """Replacement for builtins.open.
+
         Args:
             original_open: The original builtins.open function.
             path: The path to the file to open.
@@ -78,7 +74,7 @@ class OutputInterceptor:
             opener: The opener function.
         """
         is_write = self._should_intercept(mode)
-        
+
         target_path = path
         if is_write and self.sandbox_root:
             # Redirect to sandbox if root is provided
@@ -89,11 +85,7 @@ class OutputInterceptor:
             with self._lock:
                 # Avoid duplicates
                 if not any(e['path'] == target_path for e in self._events):
-                    self._events.append({
-                        'original_path': path,
-                        'path': target_path,
-                        'mode': mode
-                    })
+                    self._events.append({'original_path': path, 'path': target_path, 'mode': mode})
 
         return original_open(
             target_path, mode, buffering, encoding, errors, newline, closefd, opener
@@ -109,9 +101,7 @@ class OutputInterceptor:
         self.stop()
 
     def start(self):
-        """
-        Activate interception for the current context.
-        """
+        """Activate interception for the current context."""
         self._token = _active_interceptor.set(self)
 
     def stop(self):
@@ -120,7 +110,7 @@ class OutputInterceptor:
             _active_interceptor.reset(self._token)
             self._token = None
 
-    def get_manifest(self) -> List[str]:
+    def get_manifest(self) -> list[str]:
         """Return a list of unique file paths that were written to."""
         with self._lock:
             return [e['path'] for e in self._events]
@@ -133,17 +123,16 @@ class OutputInterceptor:
 
 def _patched_open(
     file,
-    mode="r",
+    mode='r',
     buffering=-1,
     encoding=None,
     errors=None,
     newline=None,
     closefd=True,
-    opener=None
+    opener=None,
 ):
-    """
-    Global patch for builtins.open that delegates to the active interceptor if any.
-    
+    """Global patch for builtins.open that delegates to the active interceptor if any.
+
     Args:
         file: The file to open.
         mode: The mode in which to open the file.
