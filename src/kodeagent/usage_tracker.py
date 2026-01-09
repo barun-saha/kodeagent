@@ -86,7 +86,7 @@ class UsageTracker:
 
             # Sort components by total cost (descending)
             sorted_components = sorted(
-                self._usage_by_component.items(), key=lambda x: x[1].total_cost, reverse=True
+                self._usage_by_component.items(), key=lambda x: x[0], reverse=False
             )
 
             for component_name, usage in sorted_components:

@@ -625,9 +625,6 @@ class Agent(ABC):
 
     def add_to_history(self, message: ChatMessage):
         """Add a chat message to the agent's message history."""
-        assert isinstance(
-            message, ChatMessage
-        ), f'add_to_history() expects a `ChatMessage`; got `{type(message)}`'
         self.messages.append(message)
 
     def get_tools_description(self, tools: list[Any] | None = None) -> str:
