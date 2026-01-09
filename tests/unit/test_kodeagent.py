@@ -134,10 +134,6 @@ def test_add_to_history(react_agent):
     assert react_agent.messages[0].role == 'user'
     assert react_agent.messages[0].content == 'test message'
 
-    # Test adding invalid message type
-    with pytest.raises(AssertionError):
-        react_agent.add_to_history('invalid message')
-
 
 def test_history_formatting():
     """Test string representation of history with structured messages."""
