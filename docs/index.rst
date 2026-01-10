@@ -1,7 +1,7 @@
 KodeAgent Documentation
 =======================
 
-Welcome to the documentation for **KodeAgent!**
+Welcome to the documentation for **KodeAgent: The Minimal Agent Engine!**
 
 KodeAgent is a minimalistic approach to build AI agents.
 Please select a section below or choose a version in the bottom-left corner.
