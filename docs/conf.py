@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath('../src'))
 
 # --- Project information ---
 project = 'KodeAgent'
-copyright = '2025, Barun Saha'
+copyright = '2025-2026, Barun Saha'
 author = 'Barun Saha'
 
 # --- General configuration ---
@@ -52,6 +52,9 @@ source_suffix = {
 html_theme = 'pydata_sphinx_theme'
 master_doc = 'index'
 html_show_sourcelink = True
+
+html_static_path = ['_static']
+html_logo = "_static/KodeAgent.png"
 
 html_context = {
     'display_github': True,

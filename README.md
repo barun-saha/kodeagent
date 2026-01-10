@@ -1,4 +1,6 @@
-# 🤖 KodeAgent: The Minimal Agent Engine
+![KodeAgent.png](assets/KodeAgent.png)
+
+# KodeAgent: The Minimal Agent Engine
 
 [![pypi](https://img.shields.io/pypi/v/kodeagent.svg)](https://pypi.org/project/kodeagent/)
 [![codecov](https://codecov.io/gh/barun-saha/kodeagent/branch/main/graph/badge.svg)](https://codecov.io/gh/barun-saha/kodeagent)
