@@ -301,3 +301,5 @@ cython_debug/
 benchmarks/gaia_dataset/
 test_report/
 agent_workspace/
+scalene-profile.html
+scalene-profile.json

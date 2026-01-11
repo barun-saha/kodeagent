@@ -198,7 +198,7 @@ class TestSearchWeb:
             {'title': 'Result 1', 'href': 'https://example.com/1', 'body': 'Description 1'},
             {'title': 'Result 2', 'href': 'https://example.com/2', 'body': 'Description 2'},
         ]
-        mock_ddgs.return_value.text.return_value = iter(mock_results)
+        mock_ddgs.return_value.text.return_value = mock_results
 
         result = search_web('test query', max_results=2)
 
@@ -226,12 +226,12 @@ class TestSearchWeb:
         mock_results = [
             {'title': 'Result 1', 'href': 'https://example.com/1', 'body': 'Description 1'},
         ]
-        mock_ddgs.return_value.text.return_value = iter(mock_results)
+        mock_ddgs.return_value.text.return_value = mock_results
         result = search_web('test', max_results=0)
         assert 'Result 1' in result
 
         # Test capping at 20
-        mock_ddgs.return_value.text.return_value = iter([])
+        mock_ddgs.return_value.text.return_value = []
         result = search_web('test', max_results=100)
         mock_ddgs.return_value.text.assert_called_with('test', max_results=20)
 
@@ -239,7 +239,7 @@ class TestSearchWeb:
     @patch('ddgs.DDGS')
     def test_search_web_no_results(self, mock_ddgs, mock_sleep):
         """Test web search with no results."""
-        mock_ddgs.return_value.text.return_value = iter([])
+        mock_ddgs.return_value.text.return_value = []
 
         result = search_web('nonexistent query')
 
@@ -255,9 +255,9 @@ class TestSearchWeb:
             Exception('SSL certificate verify failed'),
             mock_ddgs_instance,
         ]
-        mock_ddgs_instance.text.return_value = iter(
-            [{'title': 'Result', 'href': 'https://example.com', 'body': 'Description'}]
-        )
+        mock_ddgs_instance.text.return_value = [
+            {'title': 'Result', 'href': 'https://example.com', 'body': 'Description'}
+        ]
         result = search_web('test query')
 
         assert 'Result' in result

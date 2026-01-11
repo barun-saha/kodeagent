@@ -201,12 +201,12 @@ def search_web(query: str, max_results: int = 10) -> str:
         # Use verify=True for security, but handle SSL errors gracefully
         try:
             engine = DDGS(timeout=20)
-            results = list(engine.text(query, max_results=max_results))
+            results = engine.text(query, max_results=max_results)
         except Exception as ssl_error:
             # Fallback to verify=False only if SSL fails
             if 'SSL' in str(ssl_error) or 'certificate' in str(ssl_error).lower():
                 engine = DDGS(timeout=20, verify=False)
-                results = list(engine.text(query, max_results=max_results))
+                results = engine.text(query, max_results=max_results)
             else:
                 raise
 
