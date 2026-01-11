@@ -1,4 +1,4 @@
-![KodeAgent.png](assets/icons/256/KodeAgent.png)
+![KodeAgent](https://raw.githubusercontent.com/barun-saha/kodeagent/refs/heads/main/assets/KodeAgent.png)
 
 # KodeAgent: The Minimal Agent Engine
 
@@ -13,7 +13,7 @@
 
 KodeAgent is a frameworkless, minimalistic approach to building AI agents. Written in ~2,000 lines of pure Python, KodeAgent is designed to be the robust reasoning core inside your larger system, not the entire platform.
 
-![KodeAgent Demo](assets/demo.gif)
+![KodeAgent Demo](https://raw.githubusercontent.com/barun-saha/kodeagent/refs/heads/main/assets/demo.gif)
 
 
 ## ✅ Why KodeAgent?
