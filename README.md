@@ -1,4 +1,4 @@
-![KodeAgent](https://raw.githubusercontent.com/barun-saha/kodeagent/refs/heads/main/assets/KodeAgent.png)
+![KodeAgent](https://raw.githubusercontent.com/barun-saha/kodeagent/refs/heads/main/assets/icons/256/KodeAgent.png)
 
 # KodeAgent: The Minimal Agent Engine
 
