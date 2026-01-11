@@ -54,7 +54,7 @@ master_doc = 'index'
 html_show_sourcelink = True
 
 html_static_path = ['_static']
-html_logo = "_static/KodeAgent.png"
+html_logo = '_static/KodeAgent.png'
 
 html_context = {
     'display_github': True,
