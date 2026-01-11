@@ -1,0 +1,22 @@
+# Output options
+outfile: scalene-profile.html   # Output file name
+
+# Profiling mode (use only one)
+#cpu-only: true              # CPU profiling only (faster)
+# gpu: true                 # Include GPU profiling
+memory: true              # Include memory profiling
+
+## Filter what gets profiled
+#profile-only: "kodeagent,kutils"    # Only profile these paths
+#profile-exclude: "tests,venv"          # Exclude these paths
+profile-all: false                     # Profile all code, not just target
+
+# Performance tuning
+cpu-percent-threshold: 1     # Min CPU% to report (default: 1)
+cpu-sampling-rate: 0.01      # Sampling interval in seconds
+malloc-threshold: 100        # Min allocations to report
+
+# Other options
+use-virtual-time: false      # Measure CPU time only (not I/O)
+stacks: false                # Collect stack traces
+memory-leak-detector: true   # Detect likely memory leaks
