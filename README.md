@@ -1,4 +1,4 @@
-![KodeAgent.png](assets/KodeAgent.png)
+![KodeAgent.png](assets/icons/256/KodeAgent.png)
 
 # KodeAgent: The Minimal Agent Engine
 
@@ -21,7 +21,7 @@ KodeAgent is a frameworkless, minimalistic approach to building AI agents. Writt
 KodeAgent adheres to the **Unix Philosophy**: do one thing well and integrate seamlessly.
 
 Use KodeAgent because it offers:
-- **Scalable:** Designed to be memoryless with zero overhead, KodeAgent perfectly integrates into serverless and high-throughput microservices (ephemeral tasks).
+- **Scalable:** With only a few dependencies, KodeAgent perfectly integrates into serverless and high-throughput microservices.
 - **ReAct & CodeAct:** KodeAgent supports both ReAct and CodeAct agent paradigms out-of-the-box, enabling agents to reason and act using tools or by generating and executing code.
 - **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models (e.g., Gemini, OpenAI, and Claude) without changing your core logic.
 - **Auto-Correction:** Includes an internal "Observer" that monitors agent progress, detects loops or stalled plans, and provides corrective feedback to stay on track.
