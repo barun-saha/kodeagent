@@ -412,13 +412,16 @@ class CodeRunner:
         self.env_impl.local_modules_to_copy = value
 
     def check_imports(self, code: str) -> set[str]:
-        """Check for disallowed imports in code.
+        """Check for disallowed imports in code, allowing submodules.
 
         Args:
             code: The Python source code to check.
 
         Returns:
-            A set of disallowed imported module names.
+            A set of disallowed import module names found in the code.
+
+        Raises:
+            CodeSecurityError: If dangerous builtins are used.
         """
         import ast
 
@@ -429,19 +432,22 @@ class CodeRunner:
             if isinstance(node, ast.Name) and node.id in DANGEROUS_BUILTINS:
                 raise CodeSecurityError(f'Forbidden builtin: {node.id}')
 
-        for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     imported_modules.add(alias.name)
             elif isinstance(node, ast.ImportFrom):
-                imported_modules.add(node.module)
+                if node.module:
+                    imported_modules.add(node.module)
 
-        logger.debug(
-            'Imported modules found: %s // Allowed imports: %s',
-            imported_modules,
-            self.allowed_imports,
-        )
-        disallowed = imported_modules - self.allowed_imports
+        # Filter imports: allow if exact match or if it starts with 'allowed_name.'
+        disallowed = {
+            imp for imp in imported_modules
+            if not any(
+                imp == allowed or imp.startswith(f'{allowed}.')
+                for allowed in self.allowed_imports
+            )
+        }
+
         return disallowed
 
     async def run(self, tools_code: str, generated_code: str, task_id: str) -> CodeRunResult:
