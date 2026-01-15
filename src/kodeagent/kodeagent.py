@@ -983,12 +983,15 @@ class ReActAgent(Agent):
                 return
 
         max_iterations = max_iterations or self.max_iterations
+        steps_taken = 0
         try:
             # Main Loop
-            idx = 0
             for idx in range(max_iterations):
-                logger.debug('ITERATION %d/%d', idx + 1, max_iterations)
-                yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
+                steps_taken = idx + 1
+                logger.debug('ITERATION %d/%d', steps_taken, max_iterations)
+                yield self.response(
+                    rtype='log', channel='run', value=f'* Executing step {steps_taken}'
+                )
 
                 try:
                     async for update in self._think():
@@ -1058,7 +1061,7 @@ class ReActAgent(Agent):
             # Loop iteration over
             if not self.final_answer_found:
                 failure_msg = (
-                    f'Sorry, I failed to get a complete answer even after {idx + 1} steps!'
+                    f'Sorry, I failed to get a complete answer even after {steps_taken} steps!'
                 )
 
                 if summarize_progress_on_failure:
@@ -1094,6 +1097,9 @@ class ReActAgent(Agent):
         except asyncio.CancelledError:
             logger.warning('Iteration cancelled')
         finally:
+            if self.task:
+                self.task.steps_taken = steps_taken
+
             # Execute post-run hook
             async for response in self.post_run():
                 yield response

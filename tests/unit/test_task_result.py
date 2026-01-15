@@ -81,3 +81,64 @@ async def test_task_result_stored_on_init_error(mock_llm):
 
     assert 'Unable to start solving the task' in agent.task.result
     assert agent.task.is_finished is False
+
+
+@pytest.mark.asyncio
+async def test_steps_taken_recorded_on_success(mock_llm):
+    """Test that steps_taken is correctly recorded on success."""
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[])
+
+    assistant_sequence = [
+        '{"steps": [{"description": "done", "is_done": false}]}',  # Create plan
+        '{"role": "assistant", "thought": "done", "action": "FINISH", '
+        '"final_answer": "42", "task_successful": true}',  # Step 1
+        '{"steps": [{"description": "done", "is_done": true}]}',  # Update plan
+    ]
+
+    with patch('kodeagent.kutils.call_llm', side_effect=assistant_sequence):
+        async for _ in agent.run('test task'):
+            pass
+
+    assert agent.task.steps_taken == 1
+
+
+@pytest.mark.asyncio
+async def test_steps_taken_recorded_on_max_iterations(mock_llm):
+    """Test that steps_taken equals max_iterations on failure."""
+    max_iters = 3
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[], max_iterations=max_iters)
+
+    def side_effect(*args, **kwargs):
+        comp = kwargs.get('component_name', '')
+        if comp == 'Planner.create' or comp == 'Planner.update':
+            return '{"steps": [{"description": "step", "is_done": false}]}'
+        if comp == 'Agent':
+            return (
+                '{"role": "assistant", "thought": "thinking", "action": "calculator", '
+                '"args": "{\\"expression\\": \\"1+1\\"}"}'
+            )
+        if comp == 'Observer':
+            return '{"is_progressing": true, "is_in_loop": false, "reasoning": "ok"}'
+        if comp == 'Agent.salvage':
+            return 'Salvagable progress summary'
+        return 'default'
+
+    with patch('kodeagent.kutils.call_llm', side_effect=side_effect):
+        async for _ in agent.run('test task'):
+            pass
+
+    assert agent.task.steps_taken == max_iters
+
+
+@pytest.mark.asyncio
+async def test_steps_taken_on_init_error(mock_llm):
+    """Test that steps_taken is 0 if error occurs during initialization."""
+    from tenacity import RetryError
+
+    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[])
+
+    with patch('kodeagent.kutils.call_llm', side_effect=RetryError(MagicMock())):
+        async for _ in agent.run('test task'):
+            pass
+
+    assert agent.task.steps_taken == 0
