@@ -24,6 +24,7 @@ async def main():
             print_response(response, only_final=True)
 
         print(agent.current_plan)
+        print(f'Steps taken: {agent.task.steps_taken}')
 
 
 if __name__ == '__main__':

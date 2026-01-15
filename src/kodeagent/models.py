@@ -45,6 +45,10 @@ class Task(pyd.BaseModel):
         description='List of file paths generated during task execution', default_factory=list
     )
     """List of file paths generated during task execution."""
+    steps_taken: int = pyd.Field(
+        description='Number of steps taken by the agent for this task; skip this field', default=0
+    )
+    """Number of steps/iterations taken by the agent for this task."""
     total_llm_calls: int = pyd.Field(
         description='Total number of LLM calls made during task execution', default=0
     )
