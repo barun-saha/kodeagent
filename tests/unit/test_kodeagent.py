@@ -270,6 +270,40 @@ async def test_react_agent_run_success(react_agent):
 
 
 @pytest.mark.asyncio
+async def test_react_agent_max_iterations_param(react_agent):
+    """Test the max_iterations parameter in run() for ReActAgent."""
+
+    def llm_side_effect(*args, **kwargs):
+        if kwargs.get('response_format') == AgentPlan:
+            return '{"steps": [{"description": "Step 1", "is_done": false}]}'
+        if kwargs.get('response_format') == ObserverResponse:
+            return '{"is_progressing": true, "reasoning": "Progressing"}'
+
+        # Always return a tool call, never FINISH
+        return (
+            '{"role": "assistant", "thought": "I will keep going",'
+            ' "action": "calculator", "args": "{\\"expression\\": \\"2+2\\"}",'
+            ' "task_successful": false, "final_answer": null}'
+        )
+
+    with patch('kodeagent.kutils.call_llm', side_effect=llm_side_effect):
+        responses = []
+        # Override default max_iterations (3) with a smaller value (2) via run()
+        async for response in react_agent.run('Task', max_iterations=2):
+            responses.append(response)
+
+        # Should fail after exactly 2 iterations
+        final_response = next((r for r in responses if r['type'] == 'final'), None)
+        assert final_response is not None
+        assert not final_response['metadata'].get('final_answer_found')
+        assert 'even after 2 steps' in final_response['value']
+
+        # Verify it actually performed 2 iterations (step 1 and step 2 logs)
+        step_logs = [r for r in responses if r['type'] == 'log' and 'Executing step' in r['value']]
+        assert len(step_logs) == 2
+
+
+@pytest.mark.asyncio
 async def test_react_agent_run_with_tool_error():
     """Test ReActAgent handling tool execution errors."""
 
@@ -477,6 +511,39 @@ async def test_codeact_agent_host():
 
             response = ' | '.join([str(r) for r in responses])
             assert current_month in response
+
+
+@pytest.mark.asyncio
+async def test_codeact_agent_max_iterations_param(codeact_agent_factory):
+    """Test the max_iterations parameter in run() for CodeActAgent."""
+
+    def llm_side_effect(*args, **kwargs):
+        if kwargs.get('response_format') == AgentPlan:
+            return '{"steps": [{"description": "Step 1", "is_done": false}]}'
+        if kwargs.get('response_format') == ObserverResponse:
+            return '{"is_progressing": true, "reasoning": "Progressing"}'
+
+        # Always return code, never final answer
+        return (
+            '{"role": "assistant", "thought": "I will keep going",'
+            ' "code": "print(\'hello\')", "task_successful": false, "final_answer": null}'
+        )
+
+    with patch('kodeagent.kutils.call_llm', side_effect=llm_side_effect):
+        agent = codeact_agent_factory(max_iterations=5)  # Default 5
+
+        responses = []
+        # Override with 2
+        async for response in agent.run('Task', max_iterations=2):
+            responses.append(response)
+
+        final_response = next((r for r in responses if r['type'] == 'final'), None)
+        assert final_response is not None
+        assert not final_response['metadata'].get('final_answer_found')
+        assert 'even after 2 steps' in final_response['value']
+
+        step_logs = [r for r in responses if r['type'] == 'log' and 'Executing step' in r['value']]
+        assert len(step_logs) == 2
 
 
 @pytest.mark.asyncio

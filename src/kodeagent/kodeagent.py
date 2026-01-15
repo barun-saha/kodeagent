@@ -538,7 +538,11 @@ class Agent(ABC):
 
     @abstractmethod
     async def run(
-        self, task: str, files: list[str] | None = None, task_id: str | None = None
+        self,
+        task: str,
+        files: list[str] | None = None,
+        task_id: str | None = None,
+        max_iterations: int | None = None,
     ) -> AsyncIterator[AgentResponse]:
         """Execute a task using the agent."""
 
@@ -940,6 +944,7 @@ class ReActAgent(Agent):
         task: str,
         files: list[str] | None = None,
         task_id: str | None = None,
+        max_iterations: int | None = None,
         summarize_progress_on_failure: bool = True,
     ) -> AsyncIterator[AgentResponse]:
         """Solve a task using ReAct's TAO loop (or CodeAct's TCO loop).
@@ -948,6 +953,7 @@ class ReActAgent(Agent):
             task: A task to be solved by the agent.
             files: An optional list of files related to the task.
             task_id: Optional task ID.
+            max_iterations: Optional max iterations for the task.
             summarize_progress_on_failure: Whether to summarize progress if
              the agent fails to solve the task in max iterations.
 
@@ -976,11 +982,12 @@ class ReActAgent(Agent):
             if response['type'] == 'final' and response['metadata'].get('is_error'):
                 return
 
+        max_iterations = max_iterations or self.max_iterations
         try:
             # Main Loop
             idx = 0
-            for idx in range(self.max_iterations):
-                logger.debug('ITERATION %d/%d', idx + 1, self.max_iterations)
+            for idx in range(max_iterations):
+                logger.debug('ITERATION %d/%d', idx + 1, max_iterations)
                 yield self.response(rtype='log', channel='run', value=f'* Executing step {idx + 1}')
 
                 try:
