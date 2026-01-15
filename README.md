@@ -60,7 +60,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Now, in your application code, create a ReAct agent and run a task like this (see `examples/_quick_start/kodeagent_quick_start.py`):
+Now, in your application code, create a ReAct agent and run a task like this (see `examples/_quickstart/kodeagent_quickstart.py`):
 
 ```python
 from kodeagent import ReActAgent, print_response
