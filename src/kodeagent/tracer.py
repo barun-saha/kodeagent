@@ -1,0 +1,200 @@
+"""Abstract interfaces for hierarchical tracing/observability.
+
+Supports multiple observability backends (Langfuse, LangSmith, etc.) with a
+unified API for creating traces, spans, and generations. Provides no-op
+implementations when tracing is disabled.
+"""
+
+from abc import ABC, abstractmethod
+from typing import Any
+
+
+class AbstractObservation(ABC):
+    """Abstract interface for trace observations.
+
+    Represents a single node in a hierarchical trace tree. Can be a top-level
+    trace, a nested span, or an LLM generation. Implements context manager
+    protocol for use with 'with' statements.
+    """
+
+    @abstractmethod
+    def update(self, **kwargs: Any) -> None:
+        """Update observation properties during execution.
+
+        Used to log intermediate states like partial outputs, status, or
+        metadata.
+
+        Args:
+            **kwargs: Provider-specific properties (output, status, level, etc).
+        """
+
+    @abstractmethod
+    def end(self, **kwargs: Any) -> None:
+        """Explicitly signal the end of the observation.
+
+        Records final state and duration. Called automatically when using
+        context manager protocol.
+
+        Args:
+            **kwargs: Provider-specific properties (output, result, error, etc).
+        """
+
+    def __enter__(self) -> 'AbstractObservation':
+        """Context manager entry: return self for 'with' statement."""
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Context manager exit: automatically end observation."""
+        self.end()
+
+
+class AbstractTracerManager(ABC):
+    """Abstract interface for tracer management.
+
+    Factory for creating hierarchical observations. Handles initialization and
+    backend-specific configuration. Implementations should support at least one
+    tracing backend (Langfuse, LangSmith, etc.) or be a no-op when tracing is
+    disabled.
+    """
+
+    @abstractmethod
+    def start_trace(self, name: str, input_data: Any) -> AbstractObservation:
+        """Start a new top-level trace.
+
+        Args:
+            name: Identifier for the trace operation.
+            input_data: Input data to log for the trace.
+
+        Returns:
+            An observation object for the trace root.
+        """
+
+    @abstractmethod
+    def start_span(
+        self, parent: AbstractObservation, name: str, input_data: Any
+    ) -> AbstractObservation:
+        """Start a nested span under a parent observation.
+
+        Used for logical sub-operations within a trace or parent span.
+
+        Args:
+            parent: Parent observation (trace or span).
+            name: Identifier for the span operation.
+            input_data: Input data to log for the span.
+
+        Returns:
+            An observation object for the span.
+        """
+
+    @abstractmethod
+    def start_generation(
+        self, parent: AbstractObservation, name: str, input_data: Any
+    ) -> AbstractObservation:
+        """Start a nested LLM generation under a parent observation.
+
+        Used specifically for LLM calls within a trace or span.
+
+        Args:
+            parent: Parent observation (trace or span).
+            name: Identifier for the generation operation.
+            input_data: Input data (e.g., prompt) to log for the generation.
+
+        Returns:
+            An observation object for the generation.
+        """
+
+
+class NoOpObservation(AbstractObservation):
+    """No-op observation implementation.
+
+    Used when tracing is disabled. All methods are no-ops and return self
+    to support hierarchical nesting without side effects.
+    """
+
+    def update(self, **kwargs: Any) -> None:
+        """No-op: ignore all property updates."""
+
+    def end(self, **kwargs: Any) -> None:
+        """No-op: ignore end signal."""
+
+
+class NoOpTracerManager(AbstractTracerManager):
+    """No-op tracer manager implementation.
+
+    Used when no observability backend is enabled. Provides a complete no-op
+    implementation of the TracerManager interface that satisfies the contract
+    while performing no actual tracing operations.
+    """
+
+    def start_trace(self, name: str, input_data: Any) -> AbstractObservation:
+        """No-op: return a no-op observation."""
+        return NoOpObservation()
+
+    def start_span(
+        self, parent: AbstractObservation, name: str, input_data: Any
+    ) -> AbstractObservation:
+        """No-op: return a no-op observation."""
+        return NoOpObservation()
+
+    def start_generation(
+        self, parent: AbstractObservation, name: str, input_data: Any
+    ) -> AbstractObservation:
+        """No-op: return a no-op observation."""
+        return NoOpObservation()
+
+
+class LangfuseTracerManager(AbstractTracerManager):
+    """Langfuse implementation of TracerManager.
+
+    Integrates with Langfuse observability platform to create and manage
+    hierarchical traces, spans, and generations. Assumes parent observations
+    are Langfuse objects with span() and generation() methods.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the Langfuse client."""
+        from langfuse.client import Langfuse
+
+        self.client: Any = Langfuse()
+
+    def start_trace(self, name: str, input_data: Any) -> AbstractObservation:
+        """Start a new trace with Langfuse.
+
+        Args:
+            name: Identifier for the trace operation.
+            input_data: Input data to log for the trace.
+
+        Returns:
+            A Langfuse trace object wrapped as AbstractObservation.
+        """
+        return self.client.trace(name=name, input=input_data)
+
+    def start_span(
+        self, parent: AbstractObservation, name: str, input_data: Any
+    ) -> AbstractObservation:
+        """Start a nested span under a parent observation with Langfuse.
+
+        Args:
+            parent: Parent observation (assumes Langfuse Trace or Span).
+            name: Identifier for the span operation.
+            input_data: Input data to log for the span.
+
+        Returns:
+            A Langfuse span object wrapped as AbstractObservation.
+        """
+        return parent.span(name=name, input=input_data)
+
+    def start_generation(
+        self, parent: AbstractObservation, name: str, input_data: Any
+    ) -> AbstractObservation:
+        """Start a nested LLM generation under a parent observation with Langfuse.
+
+        Args:
+            parent: Parent observation (assumes Langfuse Trace or Span).
+            name: Identifier for the generation operation.
+            input_data: Input data (e.g., prompt) to log for the generation.
+
+        Returns:
+            A Langfuse generation object wrapped as AbstractObservation.
+        """
+        return parent.generation(name=name, input=input_data)
