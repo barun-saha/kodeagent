@@ -1,10 +1,9 @@
-"""Abstract interfaces for hierarchical tracing/observability.
+"""Interfaces for hierarchical tracing and agent observability.
 
-Supports multiple observability backends (Langfuse, LangSmith, etc.) with a
-unified API for creating traces, spans, and generations. Provides no-op
-implementations when tracing is disabled.
+Supports multiple observability backends (e.g., Langfuse) with a unified API for
+creating traces, spans, and generations. Provides no-op implementations when tracing is disabled.
 """
-
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -146,16 +145,23 @@ class NoOpTracerManager(AbstractTracerManager):
 class LangfuseTracerManager(AbstractTracerManager):
     """Langfuse implementation of TracerManager.
 
-    Integrates with Langfuse observability platform to create and manage
-    hierarchical traces, spans, and generations. Assumes parent observations
-    are Langfuse objects with span() and generation() methods.
+    Integrates with Langfuse observability platform to create and manage hierarchical traces,
+    spans, and generations. Assumes parent observations are Langfuse objects with span() and
+    generation() methods. Tracing is disabled if the Langfuse package is not installed.
     """
 
     def __init__(self) -> None:
         """Initialize the Langfuse client."""
-        from langfuse.client import Langfuse
+        try:
+            from langfuse.client import Langfuse
 
-        self.client: Any = Langfuse()
+            self.client: Any = Langfuse()
+        except ImportError:
+            logging.error(
+                'Langfuse package is not installed. Please install langfuse to use'
+                ' LangfuseTracerManager. Tracing will be disabled.'
+            )
+            self.client = None
 
     def start_trace(self, name: str, input_data: Any) -> AbstractObservation:
         """Start a new trace with Langfuse.
@@ -167,6 +173,8 @@ class LangfuseTracerManager(AbstractTracerManager):
         Returns:
             A Langfuse trace object wrapped as AbstractObservation.
         """
+        if not self.client:
+            return NoOpObservation()
         return self.client.trace(name=name, input=input_data)
 
     def start_span(
@@ -182,6 +190,8 @@ class LangfuseTracerManager(AbstractTracerManager):
         Returns:
             A Langfuse span object wrapped as AbstractObservation.
         """
+        if not self.client:
+            return NoOpObservation()
         return parent.span(name=name, input=input_data)
 
     def start_generation(
@@ -197,4 +207,6 @@ class LangfuseTracerManager(AbstractTracerManager):
         Returns:
             A Langfuse generation object wrapped as AbstractObservation.
         """
+        if not self.client:
+            return NoOpObservation()
         return parent.generation(name=name, input=input_data)
