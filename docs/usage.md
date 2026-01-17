@@ -1,5 +1,7 @@
 # Usage
 
+The following sections provide an overview of how to use KodeAgent to create and run intelligent agents capable of performing various tasks using LLMs and tools.
+
 
 ## Run Tasks
 
@@ -12,7 +14,7 @@ agent = ReActAgent(
     name='Web agent',
     model_name='gemini/gemini-2.5-flash-lite',
     tools=[search_web, extract_as_markdown],
-    max_iterations=7,
+    max_iterations=7,  # This parameter is being deprecated; pass it to run() instead
 )
 
 for task in [
