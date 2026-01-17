@@ -43,7 +43,7 @@ from .models import (
     ReActChatMessage,
     Task,
 )
-from .tracer import TRACING_TYPES
+from .tracer import TRACING_TYPES, create_tracer_manager
 from .usage_tracker import UsageTracker
 
 # Install the global interceptor patch
@@ -475,11 +475,7 @@ class Agent(ABC):
         self.usage_tracker = UsageTracker()
 
         # Tracing
-        if not tracing_type or tracing_type not in TRACING_TYPES:
-            self.tracer_manager: tracer.AbstractTracerManager = tracer.NoOpTracerManager()
-        elif tracing_type == 'langfuse':
-            self.tracer_manager: tracer.AbstractTracerManager = tracer.LangfuseTracerManager()
-
+        self.tracer_manager: tracer.AbstractTracerManager = create_tracer_manager(tracing_type)
         self.current_trace: tracer.AbstractObservation | None = None
 
         self.planner: Planner | None = Planner(
@@ -1041,6 +1037,8 @@ class ReActAgent(Agent):
     async def post_run(self) -> AsyncIterator[AgentResponse]:
         """Perform cleanup after the main run loop.
         - Calculate and log usage metrics.
+        - End current trace/span.
+        - Flush tracer.
 
         Returns:
             AsyncIterator[AgentResponse]: Iterator of agent responses.
@@ -1058,6 +1056,24 @@ class ReActAgent(Agent):
             logger.info(
                 'Task %s usage: %s', self.task.id, self.get_usage_report(include_breakdown=False)
             )
+
+            # End the root trace
+            if self.current_trace:
+                is_error = getattr(self.task, 'is_error', False)
+                self.current_trace.end(
+                    result=self.task.result,
+                    metadata={
+                        'is_error': is_error,
+                        'total_tokens': self.task.total_tokens,
+                        'total_cost': float(self.task.total_cost),
+                        'steps_taken': getattr(self.task, 'steps_taken', 0),
+                    },
+                )
+
+        # Flush tracer manager
+        if self.tracer_manager:
+            self.tracer_manager.flush()
+
         yield self.response(rtype='log', value='Task execution finished', channel='run')
 
     async def run(
@@ -2320,38 +2336,38 @@ async def main():
         litellm_params=litellm_params,
         filter_tools_for_task=False,
     )
-    agent = CodeActAgent(
-        name='Simple agent',
-        model_name=model_name,
-        tools=[
-            dtools.calculator,
-            dtools.search_web,
-            dtools.read_webpage,
-            dtools.extract_as_markdown,
-        ],
-        max_iterations=7,
-        litellm_params=litellm_params,
-        run_env='host',
-        allowed_imports=[
-            'math',
-            'datetime',
-            'time',
-            're',
-            'typing',
-            'mimetypes',
-            'random',
-            'ddgs',
-            'bs4',
-            'urllib.parse',
-            'requests',
-            'markitdown',
-            'pathlib',
-        ],
-        pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
-        filter_tools_for_task=False,
-        work_dir='./agent_workspace',
-        tracing_type='langfuse',
-    )
+    # agent = CodeActAgent(
+    #     name='Simple agent',
+    #     model_name=model_name,
+    #     tools=[
+    #         dtools.calculator,
+    #         dtools.search_web,
+    #         dtools.read_webpage,
+    #         dtools.extract_as_markdown,
+    #     ],
+    #     max_iterations=7,
+    #     litellm_params=litellm_params,
+    #     run_env='host',
+    #     allowed_imports=[
+    #         'math',
+    #         'datetime',
+    #         'time',
+    #         're',
+    #         'typing',
+    #         'mimetypes',
+    #         'random',
+    #         'ddgs',
+    #         'bs4',
+    #         'urllib.parse',
+    #         'requests',
+    #         'markitdown',
+    #         'pathlib',
+    #     ],
+    #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
+    #     filter_tools_for_task=False,
+    #     work_dir='./agent_workspace',
+    #     tracing_type='langfuse',
+    # )
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),

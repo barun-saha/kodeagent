@@ -1,6 +1,6 @@
 """Interfaces for hierarchical tracing and agent observability.
 
-Supports multiple observability backends (e.g., Langfuse) with a unified API for
+Supports multiple observability backends (e.g., Langfuse and LangSmith) with a unified API for
 creating traces, spans, and generations. Provides no-op implementations when tracing is disabled.
 """
 
@@ -8,8 +8,24 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Literal
 
+TRACING_TYPES = Literal['langfuse', 'langsmith']
 
-TRACING_TYPES = Literal['langfuse']
+
+def create_tracer_manager(tracing_type: TRACING_TYPES | None = None) -> 'AbstractTracerManager':
+    """Factory function to create a tracer manager based on the specified type.
+
+    Args:
+        tracing_type: The type of tracing backend to use. Defaults to None for no-op tracing.
+
+    Returns:
+        An instance of LangfuseTracerManager, LangSmithTracerManager, or NoOpTracerManager
+        for the specified tracing backend.
+    """
+    if tracing_type == 'langfuse':
+        return LangfuseTracerManager()
+    if tracing_type == 'langsmith':
+        return LangSmithTracerManager()
+    return NoOpTracerManager()
 
 
 class AbstractObservation(ABC):
@@ -106,6 +122,14 @@ class AbstractTracerManager(ABC):
             An observation object for the generation.
         """
 
+    @abstractmethod
+    def flush(self) -> None:
+        """Flush any buffered traces to the backend.
+
+        Ensures that all recorded traces and spans are sent to the observability platform
+        before the application exits.
+        """
+
 
 class NoOpObservation(AbstractObservation):
     """No-op observation implementation.
@@ -144,6 +168,9 @@ class NoOpTracerManager(AbstractTracerManager):
     ) -> AbstractObservation:
         """No-op: return a no-op observation."""
         return NoOpObservation()
+
+    def flush(self) -> None:
+        """No-op: do nothing."""
 
 
 class LangfuseTracerManager(AbstractTracerManager):
@@ -214,3 +241,144 @@ class LangfuseTracerManager(AbstractTracerManager):
         if not self.client:
             return NoOpObservation()
         return parent.generation(name=name, input=input_data)
+
+    def flush(self) -> None:
+        """Flush Langfuse traces."""
+        if self.client:
+            self.client.flush()
+
+
+class LangSmithObservation(AbstractObservation):
+    """LangSmith implementation of observation.
+
+    Wraps a LangSmith RunTree object to manage hierarchical runs.
+    """
+
+    def __init__(self, run_tree: Any) -> None:
+        """Initialize LangSmith observation.
+
+        Args:
+            run_tree: The LangSmith RunTree object.
+        """
+        self.run_tree = run_tree
+        self.ended = False
+
+        # Post the run to LangSmith immediately
+        try:
+            self.run_tree.post()
+        except Exception as e:
+            logging.error('Error creating run in LangSmith: %s', e)
+
+    def update(self, **kwargs: Any) -> None:
+        """Update observation outputs during execution.
+
+        Args:
+            **kwargs: Output data to accumulate.
+        """
+        if not self.ended:
+            if 'error' in kwargs:
+                self.run_tree.error = kwargs['error']
+            # We don't need to manually verify other updates as RunTree handles finalization on end()
+            # or we can patch if strictly needed, but post() is usually sufficient for start.
+
+    def end(self, **kwargs: Any) -> None:
+        """End the observation and send final data to LangSmith.
+
+        Args:
+            **kwargs: Final output/result data.
+        """
+        if not self.ended:
+            self.ended = True
+
+            outputs = kwargs.get('output')
+            error = kwargs.get('error')
+            metadata = kwargs.get('metadata')
+
+            # Ensure outputs is a dict for RunTree.patch() which calls outputs.copy()
+            if outputs is not None and not isinstance(outputs, dict):
+                outputs = {'output': outputs}
+
+            try:
+                if metadata:
+                    self.run_tree.add_metadata(metadata)
+
+                self.run_tree.end(outputs=outputs, error=error)
+                self.run_tree.patch()
+            except Exception as e:
+                logging.exception('Error updating run in LangSmith: %s', e)
+
+
+class LangSmithTracerManager(AbstractTracerManager):
+    """LangSmith implementation of TracerManager.
+
+    Uses LangSmith RunTree to manage hierarchical runs.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the LangSmith client."""
+        try:
+            from langsmith import Client
+
+            self.client: Any = Client()
+        except ImportError:
+            logging.error(
+                'LangSmith package is not installed. Please install langsmith to use'
+                ' LangSmithTracerManager. Tracing will be disabled.'
+            )
+            self.client = None
+
+    def start_trace(self, name: str, input_data: Any) -> AbstractObservation:
+        """Start a new trace with LangSmith."""
+        if not self.client:
+            return NoOpObservation()
+
+        try:
+            from langsmith.run_trees import RunTree
+
+            run_tree = RunTree(name=name, run_type='chain', inputs=input_data, client=self.client)
+            return LangSmithObservation(run_tree)
+        except ImportError:
+            return NoOpObservation()
+
+    def start_span(
+        self, parent: AbstractObservation, name: str, input_data: Any
+    ) -> AbstractObservation:
+        """Start a nested span under a parent observation.
+
+        Args:
+            parent: Parent observation (assumes LangSmithObservation).
+            name: Identifier for the span operation.
+            input_data: Input data to log for the span.
+
+        Returns:
+            A LangSmith span object wrapped as AbstractObservation.
+        """
+        if not self.client or not isinstance(parent, LangSmithObservation):
+            return NoOpObservation()
+
+        child_run = parent.run_tree.create_child(name=name, run_type='tool', inputs=input_data)
+        return LangSmithObservation(child_run)
+
+    def start_generation(
+        self, parent: AbstractObservation, name: str, input_data: Any
+    ) -> AbstractObservation:
+        """Start a nested LLM generation.
+
+        Args:
+            parent: Parent observation (assumes LangSmithObservation).
+            name: Identifier for the generation operation.
+            input_data: Input data (e.g., prompt) to log for the generation.
+
+        Returns:
+            A LangSmith generation object wrapped as AbstractObservation.
+        """
+        if not self.client or not isinstance(parent, LangSmithObservation):
+            return NoOpObservation()
+
+        child_run = parent.run_tree.create_child(name=name, run_type='llm', inputs=input_data)
+        return LangSmithObservation(child_run)
+
+    def flush(self) -> None:
+        """Flush LangSmith runs."""
+        if self.client and hasattr(self.client, 'flush'):
+            self.client.flush()

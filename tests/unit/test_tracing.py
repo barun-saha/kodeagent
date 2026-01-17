@@ -86,6 +86,73 @@ class TestTracerModule:
         mock_trace.generation.assert_called_once_with(name='gen', input={'in': 3})
         assert res_gen is mock_gen
 
+    @patch('langsmith.run_trees.RunTree')
+    @patch('langsmith.Client')
+    def test_langsmith_tracer_manager(
+        self, mock_client_class: MagicMock, mock_runtree_class: MagicMock
+    ) -> None:
+        """Verify LangSmithTracerManager interacts correctly with RunTree."""
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+
+        manager = tracer.LangSmithTracerManager()
+        assert manager.client is mock_client
+
+        # Test start_trace
+        mock_run_tree = MagicMock()
+        mock_runtree_class.return_value = mock_run_tree
+
+        res_obs = manager.start_trace('root', {'in': 1})
+
+        # Verify RunTree created and posted
+        mock_runtree_class.assert_called_once_with(
+            name='root', run_type='chain', inputs={'in': 1}, client=mock_client
+        )
+        mock_run_tree.post.assert_called_once()
+        assert isinstance(res_obs, tracer.LangSmithObservation)
+        assert res_obs.run_tree is mock_run_tree
+
+        # Test start_span (child)
+        mock_child_tree = MagicMock()
+        mock_run_tree.create_child.return_value = mock_child_tree
+
+        res_span = manager.start_span(res_obs, 'child', {'in': 2})
+
+        mock_run_tree.create_child.assert_called_once_with(
+            name='child', run_type='tool', inputs={'in': 2}
+        )
+        # Verify wrapped in observation
+        assert isinstance(res_span, tracer.LangSmithObservation)
+        assert res_span.run_tree is mock_child_tree
+
+        # Test end
+        res_span.end(output='done', metadata={'m': 1})
+        mock_child_tree.add_metadata.assert_called_once_with({'m': 1})
+        mock_child_tree.end.assert_called_once_with(outputs={'output': 'done'}, error=None)
+        mock_child_tree.patch.assert_called_once()
+
+    def test_tracer_manager_flush(self) -> None:
+        """Verify flush method delegates to client."""
+        # NoOp
+        noop = tracer.NoOpTracerManager()
+        noop.flush()  # Should not raise
+
+        # Langfuse
+        with patch('langfuse.client.Langfuse') as mock_lf:
+            mock_client = MagicMock()
+            mock_lf.return_value = mock_client
+            lf_manager = tracer.LangfuseTracerManager()
+            lf_manager.flush()
+            mock_client.flush.assert_called_once()
+
+        # LangSmith
+        with patch('langsmith.Client') as mock_ls:
+            mock_client = MagicMock()
+            mock_ls.return_value = mock_client
+            ls_manager = tracer.LangSmithTracerManager()
+            ls_manager.flush()
+            mock_client.flush.assert_called_once()
+
 
 class TestTracingIntegration:
     """Tests for tracing integration in kodeagent.py."""
@@ -509,3 +576,143 @@ class TestTracingIntegration:
             output='the answer',
             metadata={'task_successful': False},
         )
+
+    @pytest.mark.asyncio
+    async def test_agent_post_run_tracing(self, mock_tracer_manager: MagicMock) -> None:
+        """Verify Agent.post_run ends trace and flushes manager."""
+        agent = ReActAgent(name='test', model_name='m', tools=[])
+        agent.tracer_manager = mock_tracer_manager
+        agent.current_trace = MagicMock()
+        agent.task = Task(description='t')
+        agent.task.result = 'final'
+
+        # Mock usage metrics so post_run populates task with these values
+        with patch.object(agent, 'get_usage_metrics') as mock_metrics:
+            mock_metrics.return_value = {
+                'total': {
+                    'call_count': 1,
+                    'total_prompt_tokens': 50,
+                    'total_completion_tokens': 50,
+                    'total_tokens': 100,
+                    'total_cost': 0.01,
+                },
+                'by_component': {},
+            }
+
+            async for _ in agent.post_run():
+                pass
+
+        agent.current_trace.end.assert_called_with(
+            result='final',
+            metadata={
+                'is_error': False,
+                'total_tokens': 100,
+                'total_cost': 0.01,
+                'steps_taken': 0,
+            },
+        )
+        mock_tracer_manager.flush.assert_called_once()
+
+
+class TestTracingCoverage:
+    """Extra tests to achieve high coverage for tracer.py."""
+
+    def test_create_tracer_manager_factory(self) -> None:
+        """Test all branches of create_tracer_manager."""
+        assert isinstance(tracer.create_tracer_manager('langfuse'), tracer.LangfuseTracerManager)
+        assert isinstance(tracer.create_tracer_manager('langsmith'), tracer.LangSmithTracerManager)
+        assert isinstance(tracer.create_tracer_manager(None), tracer.NoOpTracerManager)
+        assert isinstance(tracer.create_tracer_manager('unknown'), tracer.NoOpTracerManager)
+
+    def test_langfuse_init_import_error(self) -> None:
+        """Test LangfuseTracerManager when langfuse is not installed."""
+        with patch.dict('sys.modules', {'langfuse.client': None}):
+            with patch('builtins.__import__', side_effect=ImportError):
+                manager = tracer.LangfuseTracerManager()
+                assert manager.client is None
+                assert isinstance(manager.start_trace('n', {}), tracer.NoOpObservation)
+                assert isinstance(
+                    manager.start_span(tracer.NoOpObservation(), 'n', {}), tracer.NoOpObservation
+                )
+                assert isinstance(
+                    manager.start_generation(tracer.NoOpObservation(), 'n', {}),
+                    tracer.NoOpObservation,
+                )
+
+    def test_langsmith_init_import_error(self) -> None:
+        """Test LangSmithTracerManager when langsmith is not installed."""
+        with patch.dict('sys.modules', {'langsmith': None}):
+            with patch('builtins.__import__', side_effect=ImportError):
+                manager = tracer.LangSmithTracerManager()
+                assert manager.client is None
+                assert isinstance(manager.start_trace('n', {}), tracer.NoOpObservation)
+
+    def test_langsmith_start_trace_import_error(self) -> None:
+        """Test LangSmithTracerManager.start_trace when RunTree cannot be imported."""
+        manager = tracer.LangSmithTracerManager()
+        manager.client = MagicMock()
+        with patch('builtins.__import__', side_effect=ImportError):
+            assert isinstance(manager.start_trace('n', {}), tracer.NoOpObservation)
+
+    def test_langsmith_observation_post_error(self) -> None:
+        """Test LangSmithObservation handling post() exception."""
+        mock_run_tree = MagicMock()
+        mock_run_tree.post.side_effect = Exception('post failed')
+        # Should not raise
+        obs = tracer.LangSmithObservation(mock_run_tree)
+        assert not obs.ended
+
+    def test_langsmith_observation_update_error(self) -> None:
+        """Test LangSmithObservation mapping error status."""
+        mock_run_tree = MagicMock()
+        obs = tracer.LangSmithObservation(mock_run_tree)
+        obs.update(error='some error')
+        assert mock_run_tree.error == 'some error'
+
+    def test_langsmith_observation_end_exception(self) -> None:
+        """Test LangSmithObservation handling exceptions in end()."""
+        mock_run_tree = MagicMock()
+        mock_run_tree.patch.side_effect = Exception('patch failed')
+        obs = tracer.LangSmithObservation(mock_run_tree)
+        # Should catch exception and log it
+        obs.end(output='test')
+        assert obs.ended
+
+    def test_langsmith_manager_client_none(self) -> None:
+        """Test LangSmithTracerManager methods when client is None."""
+        manager = tracer.LangSmithTracerManager()
+        manager.client = None
+        assert isinstance(manager.start_trace('n', {}), tracer.NoOpObservation)
+        assert isinstance(
+            manager.start_span(tracer.NoOpObservation(), 'n', {}), tracer.NoOpObservation
+        )
+        assert isinstance(
+            manager.start_generation(tracer.NoOpObservation(), 'n', {}), tracer.NoOpObservation
+        )
+
+    def test_langsmith_manager_wrong_parent(self) -> None:
+        """Test LangSmithTracerManager methods with wrong parent type."""
+        manager = tracer.LangSmithTracerManager()
+        manager.client = MagicMock()
+        noop = tracer.NoOpObservation()
+        assert isinstance(manager.start_span(noop, 'n', {}), tracer.NoOpObservation)
+        assert isinstance(manager.start_generation(noop, 'n', {}), tracer.NoOpObservation)
+
+    def test_langsmith_manager_start_generation(self) -> None:
+        """Test LangSmithTracerManager.start_generation correctly creates observation."""
+        manager = tracer.LangSmithTracerManager()
+        manager.client = MagicMock()
+
+        mock_parent_tree = MagicMock()
+        parent_obs = tracer.LangSmithObservation(mock_parent_tree)
+
+        mock_child_tree = MagicMock()
+        mock_parent_tree.create_child.return_value = mock_child_tree
+
+        res_obs = manager.start_generation(parent_obs, 'gen', {'prompt': 'hi'})
+
+        mock_parent_tree.create_child.assert_called_once_with(
+            name='gen', run_type='llm', inputs={'prompt': 'hi'}
+        )
+        assert isinstance(res_obs, tracer.LangSmithObservation)
+        assert res_obs.run_tree is mock_child_tree
