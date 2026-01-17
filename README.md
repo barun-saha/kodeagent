@@ -11,7 +11,7 @@
 [![Ruff](https://img.shields.io/badge/linting-ruff-%23f64e60)](https://docs.astral.sh/ruff/)
 
 
-KodeAgent is a frameworkless, minimalistic approach to building AI agents. Written in ~2,000 lines of pure Python, KodeAgent is designed to be the robust reasoning core inside your larger system, not the entire platform.
+KodeAgent is a frameworkless, minimalistic approach to building AI agents. Written in ~3 KLOC (~2.2K statements) of pure Python, KodeAgent is designed to be the robust reasoning core inside your larger system, not the entire platform.
 
 ![KodeAgent Demo](https://raw.githubusercontent.com/barun-saha/kodeagent/refs/heads/main/assets/demo.gif)
 
@@ -106,7 +106,7 @@ That's it! Your agent should start solving the task and keep streaming the updat
 
 ### API Configuration
 
-KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm) for model access and [Langfuse](https://langfuse.com/) for observability. Set your API keys as environment variables or in a `.env` file:
+KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm) for model access and [Langfuse](https://langfuse.com/) or [LangSmith](https://www.langchain.com/langsmith) for observability. Set your API keys as environment variables or in a `.env` file:
 
 | Service | Environment Variable |
 | :--- | :--- |
@@ -115,6 +115,7 @@ KodeAgent uses [LiteLLM](https://github.com/BerriAI/litellm) for model access an
 | **Anthropic** | `ANTHROPIC_API_KEY` |
 | **E2B Sandbox** | `E2B_API_KEY` |
 | **Langfuse** | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` |
+| **LangSmith** | `LANGCHAIN_API_KEY`, `LANGCHAIN_TRACING_V2` |
 
 Detailed configuration for various providers can be found in the [LiteLLM documentation](https://docs.litellm.ai/docs/set_keys).
 
@@ -136,7 +137,7 @@ agent = CodeActAgent(
     name='Data Agent',
     model_name='gemini/gemini-2.0-flash-lite',
     run_env='e2b',
-    work_dir='./agent_workspace',  # Local workspace directory to copy files to/from E2B
+    work_dir='/home/user/agent_workspace',  # Local workspace directory to copy files to/from E2B
     # ... other parameters
 )
 ```
@@ -185,9 +186,24 @@ For further details, refer to the [API documentation](https://kodeagent.readthed
 
 ## 🔭 Observability
 
-KodeAgent logs the LLM calls and usage using [Langfuse](https://langfuse.com/). The LiteLLM calls set the trace ID to the task ID. The model name as well as the response format and retry attempts for the generations are also logged (see the screenshot below). To enable tracing, create your Langfuse account and set the `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_HOST` environment variables. Read more about [Langfuse integration with LiteLLM](https://docs.litellm.ai/docs/observability/langfuse_integration).
+In addition to the logs, KodeAgent enables agent observability via third-party solutions, such as [Langfuse](https://langfuse.com/) and [LangSmith](https://www.langchain.com/langsmith).
 
-<img width="80%" height="80%" alt="KodeAgent trace on Langfuse dashboard" src="https://github.com/user-attachments/assets/78390575-9d12-4ca3-aac3-5eff084c88f0" />
+To enable tracing, set the relevant environment variables (e.g., `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` for Langfuse, or `LANGCHAIN_API_KEY` and `LANGCHAIN_TRACING_V2='true'` for LangSmith). Then, in the code, specify `tracing_type` as `langfuse` or `langsmith` when creating the agent:
+
+```python
+from kodeagent import ReActAgent
+
+agent = ReActAgent(
+    name='Web agent',
+    model_name='gemini/gemini-2.5-flash-lite',
+    tools=[search_web, read_webpage],
+    tracing_type='langfuse',  # or 'langsmith'
+)
+```
+
+Tracing is **disbled** by default (rather, a no-op tracer is used). You will need to explicitly enable it, as shown in the code snippet above. The screenshot below shows a sample trace of KodeAgent running a task on the Langfuse dashboard:
+
+<img width="80%" height="80%" alt="KodeAgent trace on Langfuse dashboard" src="https://github.com/user-attachments/assets/52530ccd-57dd-4be0-afe9-70cdab279a2e" />
 
 
 ## ⊷ Sequence Diagram for CodeAct Agent (via CodeRabbit)

@@ -29,6 +29,7 @@ from tenacity import RetryError
 
 from . import kutils as ku
 from . import tools as dtools
+from . import tracer
 from .code_runner import CODE_ENV_NAMES, CodeRunner
 from .file_tracker import OutputInterceptor, install_interceptor
 from .models import (
@@ -42,6 +43,7 @@ from .models import (
     ReActChatMessage,
     Task,
 )
+from .tracer import TRACING_TYPES, create_tracer_manager
 from .usage_tracker import UsageTracker
 
 # Install the global interceptor patch
@@ -52,9 +54,6 @@ load_dotenv()
 
 warnings.simplefilter('once', UserWarning)
 warnings.filterwarnings('ignore', message='.*Pydantic serializer warnings.*')
-
-litellm.success_callback = ['langfuse']
-litellm.failure_callback = ['langfuse']
 
 logger = ku.get_logger()
 
@@ -93,6 +92,7 @@ class Planner:
         litellm_params: dict | None = None,
         max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
         usage_tracker: UsageTracker | None = None,
+        tracer_manager: tracer.AbstractTracerManager | None = None,
     ):
         """Create a planner using the given model.
 
@@ -101,23 +101,44 @@ class Planner:
             litellm_params: LiteLLM parameters.
             max_retries: Maximum number of retries for LLM calls.
             usage_tracker: Optional UsageTracker instance to record usage.
+            tracer_manager: Optional AbstractTracerManager for hierarchical tracing.
         """
         self.model_name = model_name
         self.litellm_params = litellm_params or {}
         self.max_retries = max_retries
         self.usage_tracker = usage_tracker
+        self.tracer_manager = tracer_manager or tracer.NoOpTracerManager()
         self.plan: AgentPlan | None = None
 
-    async def create_plan(self, task: Task, agent_type: str) -> AgentPlan:
+    async def create_plan(
+        self,
+        task: Task,
+        agent_type: str,
+        parent_trace: tracer.AbstractObservation | None = None,
+    ) -> AgentPlan:
         """Create a plan to solve the given task and store it.
 
         Args:
             task: The task to solve.
             agent_type: Type of the agent that would solve the task.
+            parent_trace: Optional parent observation for hierarchical tracing.
 
         Returns:
             A plan to solve the task.
         """
+        # Create tracing span
+        parent = parent_trace or tracer.NoOpObservation()
+        plan_span = self.tracer_manager.start_span(
+            parent=parent,
+            name='plan_creation',
+            input_data={
+                'agent_type': agent_type,
+                'task_id': str(task.id),
+                'task_description': task.description,
+                'file_count': len(task.files) if task.files else 0,
+            },
+        )
+
         messages = ku.make_user_message(
             text_content=AGENT_PLAN_PROMPT.format(
                 agent_type=agent_type,
@@ -138,18 +159,42 @@ class Planner:
             component_name='Planner.create',
         )
         self.plan = AgentPlan.model_validate_json(plan_response)
+
+        # Update trace with results
+        plan_span.end(output={'steps': self.get_formatted_plan()})
+
         return self.plan
 
-    async def update_plan(self, thought: str, observation: str, task_id: str):
+    async def update_plan(
+        self,
+        thought: str,
+        observation: str,
+        task_id: str,
+        parent_trace: tracer.AbstractObservation | None = None,
+    ):
         """Update the plan based on the last thought and observation.
 
         Args:
             thought: The ReAct/CodeAct agent's thought.
             observation: The agent's observation.
             task_id: ID of the task for which the plan is to be updated.
+            parent_trace: Optional parent observation for hierarchical tracing.
         """
         if not self.plan:
             return
+
+        # Create tracing span
+        parent = parent_trace or tracer.NoOpObservation()
+        update_span = self.tracer_manager.start_span(
+            parent=parent,
+            name='plan_update',
+            input_data={
+                'task_id': str(task_id),
+                'thought_length': len(thought),
+                'observation_length': len(observation),
+                'current_steps': len(self.plan.steps) if self.plan else 0,
+            },
+        )
 
         prompt = UPDATE_PLAN_PROMPT.format(
             plan=self.plan.model_dump_json(indent=2), thought=thought, observation=observation
@@ -170,14 +215,25 @@ class Planner:
         )
         self.plan = AgentPlan.model_validate_json(plan_response)
 
+        # Update trace with results
+        update_span.end(output={'steps': self.get_formatted_plan()})
+
     def get_steps_done(self) -> list[PlanStep]:
-        """Returns the completed steps from the current plan."""
+        """Returns the completed steps from the current plan.
+
+        Returns:
+            A list of completed PlanStep objects.
+        """
         if not self.plan:
             return []
         return [step for step in self.plan.steps if step.is_done]
 
     def get_steps_pending(self) -> list[PlanStep]:
-        """Returns the pending steps from the current plan."""
+        """Returns the pending steps from the current plan.
+
+        Returns:
+            A list of pending PlanStep objects.
+        """
         if not self.plan:
             return []
         return [step for step in self.plan.steps if not step.is_done]
@@ -216,6 +272,7 @@ class Observer:
         threshold: int | None = 3,
         max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
         usage_tracker: UsageTracker | None = None,
+        tracer_manager: tracer.AbstractTracerManager | None = None,
     ):
         """Create an Observer for an agent.
 
@@ -227,6 +284,7 @@ class Observer:
              the chat history.
             max_retries: Maximum number of retries for LLM calls.
             usage_tracker: Optional UsageTracker instance to record usage.
+            tracer_manager: Optional AbstractTracerManager for hierarchical tracing.
         """
         self.threshold = threshold
         self.model_name = model_name
@@ -234,6 +292,7 @@ class Observer:
         self.litellm_params = litellm_params or {}
         self.max_retries = max_retries
         self.usage_tracker = usage_tracker
+        self.tracer_manager = tracer_manager or tracer.NoOpTracerManager()
         self.last_correction_iteration: int = 0
 
     async def observe(
@@ -243,6 +302,7 @@ class Observer:
         history: str,
         plan_before: str | AgentPlan | None,
         plan_after: str | AgentPlan | None,
+        parent_trace: tracer.AbstractObservation | None = None,
     ) -> str | None:
         """Observe the agent's state and return a corrective message if a problem is detected.
 
@@ -252,6 +312,7 @@ class Observer:
             history: Task progress history (LLM chat history).
             plan_before: The agent's plan before this iteration.
             plan_after: The updated plan.
+            parent_trace: Optional parent observation for hierarchical tracing.
 
         Returns:
             Optional correction message for the agent (LLM), e.g., what to do or avoid.
@@ -260,6 +321,19 @@ class Observer:
             return None
         if iteration - self.last_correction_iteration < self.threshold:
             return None
+
+        # Create tracing span
+        parent = parent_trace or tracer.NoOpObservation()
+        observe_span = self.tracer_manager.start_span(
+            parent=parent,
+            name='observe',
+            input_data={
+                'iteration': iteration,
+                'task_id': str(task.id),
+                'history_length': len(history),
+                'tool_count': len(self.tool_names),
+            },
+        )
 
         try:
             tool_names = '\n'.join(sorted(list(self.tool_names)))
@@ -297,10 +371,32 @@ class Observer:
                     correction += (
                         f'Here are the exact TOOL names once again for reference:\n{tool_names}'
                     )
+
+                # Update trace with correction findings
+                observe_span.end(
+                    output={
+                        'is_progressing': observation.is_progressing,
+                        'is_in_loop': observation.is_in_loop,
+                        'correction_issued': True,
+                        'observation': msg,
+                    }
+                )
+
                 return correction
+
+            # No issue detected
+            observe_span.end(
+                output={
+                    'is_progressing': observation.is_progressing,
+                    'is_in_loop': observation.is_in_loop,
+                    'correction_issued': False,
+                }
+            )
 
         except Exception as e:
             logger.exception('LLM Observer failed: %s', str(e))
+            observe_span.update(status='error', error=str(e))
+            observe_span.end(is_error=True)
             return None
 
         return None
@@ -327,6 +423,7 @@ class Agent(ABC):
         filter_tools_for_task: bool = False,
         max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
         work_dir: str | None = None,
+        tracing_type: TRACING_TYPES | None = None,
     ):
         """Create an agent.
 
@@ -341,6 +438,7 @@ class Agent(ABC):
             filter_tools_for_task: Whether the tools should be filtered for a task. Unused.
             max_retries: Maximum number of retries for LLM calls.
             work_dir: Optional local workspace directory.
+            tracing_type: Type of tracing to use.
         """
         self.id = uuid.uuid4()
         self.name: str = name
@@ -375,11 +473,17 @@ class Agent(ABC):
         self.final_answer_found = False
 
         self.usage_tracker = UsageTracker()
+
+        # Tracing
+        self.tracer_manager: tracer.AbstractTracerManager = create_tracer_manager(tracing_type)
+        self.current_trace: tracer.AbstractObservation | None = None
+
         self.planner: Planner | None = Planner(
             model_name=model_name,
             litellm_params=litellm_params,
             max_retries=self.max_retries,
             usage_tracker=self.usage_tracker,
+            tracer_manager=self.tracer_manager,
         )
         self.observer = Observer(
             model_name=model_name,
@@ -387,6 +491,7 @@ class Agent(ABC):
             tool_names=self.tool_names,
             max_retries=self.max_retries,
             usage_tracker=self.usage_tracker,
+            tracer_manager=self.tracer_manager,
         )
 
         self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
@@ -462,6 +567,16 @@ class Agent(ABC):
 
         # Reset usage tracker for new task
         self.usage_tracker.reset()
+
+        # Initialize root trace for the task
+        self.current_trace = self.tracer_manager.start_trace(
+            name=f'{self.__class__.__name__}',
+            input_data={
+                'task': description,
+                'files': files,
+                'task_id': str(self.task.id),
+            },
+        )
 
         self._observer_history_str = ''
         self._observer_history_idx = -1
@@ -785,6 +900,7 @@ class ReActAgent(Agent):
         filter_tools_for_task: bool = False,
         max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
         work_dir: str | None = None,
+        tracing_type: TRACING_TYPES | None = None,
     ):
         """Create a ReAct agent."""
         super().__init__(
@@ -798,11 +914,9 @@ class ReActAgent(Agent):
             filter_tools_for_task=filter_tools_for_task,
             max_retries=max_retries,
             work_dir=work_dir,
+            tracing_type=tracing_type,
         )
 
-        self.planner = Planner(
-            model_name, litellm_params, max_retries=max_retries, usage_tracker=self.usage_tracker
-        )
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
 
@@ -848,6 +962,7 @@ class ReActAgent(Agent):
             thought=last_thought,
             observation=last_observation,
             task_id=self.task.id,
+            parent_trace=self.current_trace,
         )
 
     def init_history(self):
@@ -869,7 +984,9 @@ class ReActAgent(Agent):
             RuntimeError: If plan creation fails.
         """
         try:
-            await self.planner.create_plan(self.task, self.__class__.__name__)
+            await self.planner.create_plan(
+                self.task, self.__class__.__name__, parent_trace=self.current_trace
+            )
         except RetryError as err:
             logger.warning('Max retries reached during plan creation.')
             error_msg = (
@@ -920,6 +1037,8 @@ class ReActAgent(Agent):
     async def post_run(self) -> AsyncIterator[AgentResponse]:
         """Perform cleanup after the main run loop.
         - Calculate and log usage metrics.
+        - End current trace/span.
+        - Flush tracer.
 
         Returns:
             AsyncIterator[AgentResponse]: Iterator of agent responses.
@@ -937,6 +1056,24 @@ class ReActAgent(Agent):
             logger.info(
                 'Task %s usage: %s', self.task.id, self.get_usage_report(include_breakdown=False)
             )
+
+            # End the root trace
+            if self.current_trace:
+                is_error = getattr(self.task, 'is_error', False)
+                self.current_trace.end(
+                    result=self.task.result,
+                    metadata={
+                        'is_error': is_error,
+                        'total_tokens': self.task.total_tokens,
+                        'total_cost': float(self.task.total_cost),
+                        'steps_taken': getattr(self.task, 'steps_taken', 0),
+                    },
+                )
+
+        # Flush tracer manager
+        if self.tracer_manager:
+            self.tracer_manager.flush()
+
         yield self.response(rtype='log', value='Task execution finished', channel='run')
 
     async def run(
@@ -1047,6 +1184,7 @@ class ReActAgent(Agent):
                         plan_before=plan_before_update,
                         plan_after=self.current_plan,
                         iteration=idx + 1,
+                        parent_trace=self.current_trace,
                     )
                 except RetryError:
                     logger.warning('Observer failed due to rate limit. Skipping observation.')
@@ -1108,9 +1246,38 @@ class ReActAgent(Agent):
         """Think about the next step using the new structured response format.
 
         Returns:
-            AsyncIterator[AgentResponse]: An async iterator of AgentResponse objects.
+            AsyncIterator[AgentResponse]: An async iterator of AgentResponse
+                objects.
         """
+        # Create a generation span for the LLM call
+        gen_span = self.tracer_manager.start_generation(
+            parent=self.current_trace,
+            name='think',
+            input_data={
+                'model': self.model_name,
+                'messages_count': len(self.messages),
+            },
+        )
+
         thought = await self._record_thought(ReActChatMessage)
+
+        if thought:
+            gen_span.update(
+                status='success',
+                has_thought=bool(thought.thought),
+                has_action=bool(getattr(thought, 'action', None)),
+                has_final_answer=bool(getattr(thought, 'final_answer', None)),
+            )
+            gen_span.end(
+                output={
+                    'thought': thought.thought,
+                    'action': getattr(thought, 'action', None),
+                },
+            )
+        else:
+            gen_span.update(status='error', error='Failed to parse response')
+            gen_span.end(output='parse_failure', is_error=True)
+
         yield self.response(rtype='step', value=thought, channel='_think')
 
     async def _record_thought(
@@ -1118,6 +1285,9 @@ class ReActAgent(Agent):
     ) -> ReActChatMessage | CodeActChatMessage | None:
         """Record the agent's thought with improved error handling and fallback parsing.
         Now returns ChatMessage directly instead of separate Response class.
+
+        Args:
+            response_format_class (type[pyd.BaseModel]): The response format class.
 
         Returns:
             Optional[Union[ReActChatMessage, CodeActChatMessage]]: The agent's thought.
@@ -1240,12 +1410,22 @@ class ReActAgent(Agent):
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
         """Take action based on the agent's previous thought.
-        Now handles explicit FINISH action with proper error handling.
+
+        Now handles explicit FINISH action with proper error handling and
+        hierarchical tracing of the act operation, tool execution, and errors.
         """
         prev_msg: ReActChatMessage = self.messages[-1]  # type: ignore
 
+        # Start root span for the entire act operation
+        act_span = self.tracer_manager.start_span(
+            parent=self.current_trace,
+            name='act',
+            input_data={'thought': getattr(prev_msg, 'thought', None)},
+        )
+
         # Check for malformed response
         if not hasattr(prev_msg, 'thought') or not prev_msg.thought:
+            act_span.update(status='error', error='Missing or empty thought field')
             self.add_to_history(
                 ChatMessage(
                     role='user',
@@ -1255,6 +1435,7 @@ class ReActAgent(Agent):
                     ),
                 )
             )
+            act_span.end(output='malformed_response')
             return
 
         # Check if this is a final answer
@@ -1262,6 +1443,16 @@ class ReActAgent(Agent):
             self.final_answer_found = True
             self.task.is_finished = True
             self.task.is_error = not prev_msg.task_successful
+
+            act_span.update(
+                status='success',
+                operation='final_answer',
+                task_successful=prev_msg.task_successful,
+            )
+            act_span.end(
+                output=prev_msg.final_answer,
+                metadata={'task_successful': prev_msg.task_successful},
+            )
 
             yield self.response(
                 rtype='final',
@@ -1278,10 +1469,20 @@ class ReActAgent(Agent):
             # Validate tool call has required fields
             if not tool_name or not tool_args:
                 error_msg = 'Error: Both action and args must be provided for tool calls.'
-                # CRITICAL: Use role='tool' instead of role='user' to maintain conversation format
+                act_span.update(
+                    status='error',
+                    operation='tool_validation_failed',
+                    error=error_msg,
+                )
+                # CRITICAL: Use role='tool' instead of role='user' to maintain
+                # conversation format
                 self.add_to_history(ChatMessage(role='tool', content=error_msg))
+                act_span.end(output='validation_error', is_error=True)
                 yield self.response(
-                    rtype='step', value=error_msg, channel='_act', metadata={'is_error': True}
+                    rtype='step',
+                    value=error_msg,
+                    channel='_act',
+                    metadata={'is_error': True},
                 )
                 return
 
@@ -1301,15 +1502,35 @@ class ReActAgent(Agent):
                 # Validate it's actually a dictionary
                 if not isinstance(tool_args_dict, dict):
                     error_msg = f'Tool args must be a dict, got {type(tool_args_dict).__name__}'
+                    act_span.update(
+                        status='error',
+                        operation='args_validation_failed',
+                        error=error_msg,
+                    )
                     self.add_to_history(ChatMessage(role='tool', content=error_msg))
+                    act_span.end(output='args_error', is_error=True)
                     yield self.response(
-                        rtype='step', value=error_msg, channel='_act', metadata={'is_error': True}
+                        rtype='step',
+                        value=error_msg,
+                        channel='_act',
+                        metadata={'is_error': True},
                     )
                     return
 
                 # Execute tool
                 if tool_name in self.tool_names:
-                    logger.debug('🛠 Running tool: %s with args: %s', tool_name, tool_args_dict)
+                    logger.debug(
+                        '🛠 Running tool: %s with args: %s',
+                        tool_name,
+                        tool_args_dict,
+                    )
+
+                    # Create nested span for tool execution
+                    tool_span = self.tracer_manager.start_span(
+                        parent=act_span,
+                        name=tool_name,
+                        input_data=tool_args_dict,
+                    )
 
                     # Intercept file creation during tool execution
                     with OutputInterceptor() as interceptor:
@@ -1319,8 +1540,32 @@ class ReActAgent(Agent):
                         for f in generated_files:
                             self.add_output_file(f)
 
+                    tool_span.update(
+                        status='success',
+                        file_count=len(generated_files),
+                    )
+                    tool_span.end(
+                        output=str(result),
+                        generated_files=generated_files,
+                    )
+
                     # Always use role='tool' for tool results
                     self.add_to_history(ChatMessage(role='tool', content=str(result)))
+
+                    act_span.update(
+                        status='success',
+                        operation='tool_execution',
+                        tool=tool_name,
+                    )
+                    act_span.end(
+                        output=str(result),
+                        metadata={
+                            'tool': tool_name,
+                            'args': tool_args_dict,
+                            'generated_files': generated_files,
+                        },
+                    )
+
                     yield self.response(
                         rtype='step',
                         value=result,
@@ -1337,24 +1582,51 @@ class ReActAgent(Agent):
                         f'Available tools: {", ".join(sorted(self.tool_names))}. '
                         'Please use an exact tool name from the list.'
                     )
+                    act_span.update(
+                        status='error',
+                        operation='tool_not_found',
+                        tool=tool_name,
+                        error=result,
+                    )
                     # Use role='tool' for tool errors too
                     self.add_to_history(ChatMessage(role='tool', content=result))
+                    act_span.end(output='tool_not_found', is_error=True)
                     yield self.response(
-                        rtype='step', value=result, channel='_act', metadata={'is_error': True}
+                        rtype='step',
+                        value=result,
+                        channel='_act',
+                        metadata={'is_error': True},
                     )
 
             except Exception as ex:
                 error_msg = (
-                    f'*** Error: Tool execution failed: {type(ex).__name__}: {str(ex)}\n'
+                    f'*** Error: Tool execution failed: {type(ex).__name__}: '
+                    f'{str(ex)}\n'
                     f'Tool: {tool_name}\n'
                     f'Args provided: {tool_args_dict}\n'
-                    f'Please check the tool signature and try again with correct arguments.'
+                    f'Please check the tool signature and try again with '
+                    f'correct arguments.'
                 )
                 logger.error(error_msg)
+                act_span.update(
+                    status='error',
+                    operation='tool_execution_exception',
+                    tool=tool_name,
+                    error_type=type(ex).__name__,
+                    error_message=str(ex),
+                )
                 # Use role='tool' to maintain proper conversation structure
                 self.add_to_history(ChatMessage(role='tool', content=error_msg))
+                act_span.end(
+                    output='exception',
+                    is_error=True,
+                    error=error_msg,
+                )
                 yield self.response(
-                    rtype='step', value=error_msg, channel='_act', metadata={'is_error': True}
+                    rtype='step',
+                    value=error_msg,
+                    channel='_act',
+                    metadata={'is_error': True},
                 )
 
     def parse_text_response(self, text: str) -> ReActChatMessage:
@@ -1598,6 +1870,7 @@ class CodeActAgent(ReActAgent):
         filter_tools_for_task: bool = False,
         max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
         work_dir: str | None = None,
+        tracing_type: TRACING_TYPES | None = None,
     ):
         """Initialize CodeAct agent."""
         super().__init__(
@@ -1611,6 +1884,7 @@ class CodeActAgent(ReActAgent):
             filter_tools_for_task=filter_tools_for_task,
             max_retries=max_retries,
             work_dir=work_dir,
+            tracing_type=tracing_type,
         )
         self.tools_source_code: str = 'from typing import *\n\n'
 
@@ -1822,15 +2096,61 @@ class CodeActAgent(ReActAgent):
         self._pending_tool_call = False
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
-        """Think step for CodeAct agent."""
+        """Think step for CodeAct agent.
+
+        Creates a generation span for LLM code generation, tracking model and
+        code output with full hierarchical tracing.
+        """
+        # Create generation span for code generation
+        gen_span = self.tracer_manager.start_generation(
+            parent=self.current_trace,
+            name='think_code',
+            input_data={
+                'model': self.model_name,
+                'messages_count': len(self.messages),
+            },
+        )
+
         msg = await self._record_thought(CodeActChatMessage)
+
+        if msg:
+            gen_span.update(
+                status='success',
+                has_thought=bool(msg.thought),
+                has_code=bool(getattr(msg, 'code', None)),
+                has_final_answer=bool(getattr(msg, 'final_answer', None)),
+            )
+            gen_span.end(
+                output={
+                    'thought': msg.thought,
+                    'code': getattr(msg, 'code', None)[:100]
+                    if getattr(msg, 'code', None)
+                    else None,
+                },
+            )
+        else:
+            gen_span.update(status='error', error='Failed to parse response')
+            gen_span.end(output='parse_failure', is_error=True)
+
         yield self.response(rtype='step', value=msg, channel='_think')
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
-        """Execute code based on CodeActAgent's previous thought."""
+        """Execute code based on CodeActAgent's previous thought.
+
+        Creates hierarchical spans for code execution with full tracing of
+        stdout, stderr, exit status, and generated files.
+        """
         prev_msg: CodeActChatMessage = self.messages[-1]  # type: ignore
 
+        # Start root span for the entire act operation
+        act_span = self.tracer_manager.start_span(
+            parent=self.current_trace,
+            name='act',
+            input_data={'thought': getattr(prev_msg, 'thought', None)},
+        )
+
         if not hasattr(prev_msg, 'thought') or not prev_msg.thought:
+            act_span.update(status='error', error='Missing or empty thought field')
             self.add_to_history(
                 ChatMessage(
                     role='user',
@@ -1840,12 +2160,23 @@ class CodeActAgent(ReActAgent):
                     ),
                 )
             )
+            act_span.end(output='malformed_response')
             return
 
         if hasattr(prev_msg, 'final_answer') and prev_msg.final_answer:
             self.final_answer_found = True
             self.task.is_finished = True
             self.task.is_error = not prev_msg.task_successful
+
+            act_span.update(
+                status='success',
+                operation='final_answer',
+                task_successful=prev_msg.task_successful,
+            )
+            act_span.end(
+                output=prev_msg.final_answer,
+                metadata={'task_successful': prev_msg.task_successful},
+            )
 
             yield self.response(
                 rtype='final',
@@ -1861,6 +2192,14 @@ class CodeActAgent(ReActAgent):
                 code = code.replace('```', '').strip()
 
                 logger.debug('🛠 Running code [truncated]: ... %s', code[-100:])
+
+                # Create nested span for code execution
+                code_span = self.tracer_manager.start_span(
+                    parent=act_span,
+                    name='code_execution',
+                    input_data={'code_length': len(code)},
+                )
+
                 stdout, stderr, exit_status, generated_files = await self.code_runner.run(
                     self.tools_source_code, code, self.task.id
                 )
@@ -1871,24 +2210,76 @@ class CodeActAgent(ReActAgent):
                     for f in files:
                         self.add_output_file(f)
 
+                code_span.update(
+                    status='success' if exit_status == 0 else 'error',
+                    exit_status=exit_status,
+                    has_stdout=bool(stdout),
+                    has_stderr=bool(stderr),
+                    file_count=len(generated_files),
+                )
+                code_span.end(
+                    output={
+                        'exit_status': exit_status,
+                        'stdout_lines': len(stdout.split('\n')) if stdout else 0,
+                        'stderr_lines': len(stderr.split('\n')) if stderr else 0,
+                    },
+                    generated_files=generated_files,
+                    is_error=exit_status != 0,
+                )
+
                 observation = f'{stdout}\n{stderr}'.strip()
                 msg = ChatMessage(role='tool', content=observation)
                 self.add_to_history(msg)
+
+                act_span.update(
+                    status='success' if exit_status == 0 else 'warning',
+                    operation='code_execution',
+                    exit_status=exit_status,
+                )
+                act_span.end(
+                    output=observation[:500],
+                    metadata={
+                        'is_error': exit_status != 0,
+                        'generated_files': generated_files,
+                        'exit_status': exit_status,
+                    },
+                )
+
                 yield self.response(
                     rtype='step',
                     value=observation,
                     channel='_act',
-                    metadata={'is_error': exit_status != 0, 'generated_files': generated_files},
+                    metadata={
+                        'is_error': exit_status != 0,
+                        'generated_files': generated_files,
+                    },
                 )
 
             except Exception as ex:
                 error_msg = f'*** Error running code: {type(ex).__name__}: {str(ex)}'
                 logger.error(error_msg)
+
+                act_span.update(
+                    status='error',
+                    operation='code_execution_exception',
+                    error_type=type(ex).__name__,
+                    error_message=str(ex),
+                )
                 # Respond as the pseudo "tool"
                 tool_msg = ChatMessage(role='tool', content=error_msg)
                 self.add_to_history(tool_msg)
+
+                act_span.end(
+                    output='exception',
+                    is_error=True,
+                    error=error_msg,
+                )
+
                 yield self.response(
-                    rtype='step', value=error_msg, channel='_act', metadata={'is_error': True}
+                    rtype='step',
+                    value=error_msg,
+                    channel='_act',
+                    metadata={'is_error': True},
                 )
 
 
@@ -1949,18 +2340,33 @@ async def main():
     #     name='Simple agent',
     #     model_name=model_name,
     #     tools=[
-    #         dtools.calculator, dtools.search_web, dtools.read_webpage, dtools.extract_as_markdown
+    #         dtools.calculator,
+    #         dtools.search_web,
+    #         dtools.read_webpage,
+    #         dtools.extract_as_markdown,
     #     ],
     #     max_iterations=7,
     #     litellm_params=litellm_params,
     #     run_env='host',
     #     allowed_imports=[
-    #         'math', 'datetime', 'time', 're', 'typing', 'mimetypes', 'random', 'ddgs',
-    #         'bs4', 'urllib.parse', 'requests', 'markitdown', 'pathlib',
+    #         'math',
+    #         'datetime',
+    #         'time',
+    #         're',
+    #         'typing',
+    #         'mimetypes',
+    #         'random',
+    #         'ddgs',
+    #         'bs4',
+    #         'urllib.parse',
+    #         'requests',
+    #         'markitdown',
+    #         'pathlib',
     #     ],
     #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
     #     filter_tools_for_task=False,
-    #     work_dir='./agent_workspace'
+    #     work_dir='./agent_workspace',
+    #     tracing_type='langfuse',
     # )
 
     the_tasks = [
