@@ -43,6 +43,7 @@ from .models import (
     ReActChatMessage,
     Task,
 )
+from .tracer import TRACING_TYPES
 from .usage_tracker import UsageTracker
 
 # Install the global interceptor patch
@@ -53,9 +54,6 @@ load_dotenv()
 
 warnings.simplefilter('once', UserWarning)
 warnings.filterwarnings('ignore', message='.*Pydantic serializer warnings.*')
-
-# litellm.success_callback = ['langfuse']
-# litellm.failure_callback = ['langfuse']
 
 logger = ku.get_logger()
 
@@ -425,7 +423,7 @@ class Agent(ABC):
         filter_tools_for_task: bool = False,
         max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
         work_dir: str | None = None,
-        tracing_type: Literal['langfuse', 'none'] = 'none',
+        tracing_type: TRACING_TYPES | None = None,
     ):
         """Create an agent.
 
@@ -440,7 +438,7 @@ class Agent(ABC):
             filter_tools_for_task: Whether the tools should be filtered for a task. Unused.
             max_retries: Maximum number of retries for LLM calls.
             work_dir: Optional local workspace directory.
-            tracing_type: Type of tracing to use ('langfuse' or 'none').
+            tracing_type: Type of tracing to use.
         """
         self.id = uuid.uuid4()
         self.name: str = name
@@ -477,10 +475,11 @@ class Agent(ABC):
         self.usage_tracker = UsageTracker()
 
         # Tracing
-        if tracing_type == 'langfuse':
-            self.tracer_manager: tracer.AbstractTracerManager = tracer.LangfuseTracerManager()
-        else:
+        if not tracing_type or tracing_type not in TRACING_TYPES:
             self.tracer_manager: tracer.AbstractTracerManager = tracer.NoOpTracerManager()
+        elif tracing_type == 'langfuse':
+            self.tracer_manager: tracer.AbstractTracerManager = tracer.LangfuseTracerManager()
+
         self.current_trace: tracer.AbstractObservation | None = None
 
         self.planner: Planner | None = Planner(
@@ -905,7 +904,7 @@ class ReActAgent(Agent):
         filter_tools_for_task: bool = False,
         max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
         work_dir: str | None = None,
-        tracing_type: Literal['langfuse', 'none'] = 'none',
+        tracing_type: TRACING_TYPES | None = None,
     ):
         """Create a ReAct agent."""
         super().__init__(
@@ -1855,7 +1854,7 @@ class CodeActAgent(ReActAgent):
         filter_tools_for_task: bool = False,
         max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
         work_dir: str | None = None,
-        tracing_type: Literal['langfuse', 'none'] = 'none',
+        tracing_type: TRACING_TYPES | None = None,
     ):
         """Initialize CodeAct agent."""
         super().__init__(

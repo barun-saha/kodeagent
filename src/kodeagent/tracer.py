@@ -3,9 +3,13 @@
 Supports multiple observability backends (e.g., Langfuse) with a unified API for
 creating traces, spans, and generations. Provides no-op implementations when tracing is disabled.
 """
+
 import logging
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Literal
+
+
+TRACING_TYPES = Literal['langfuse']
 
 
 class AbstractObservation(ABC):
