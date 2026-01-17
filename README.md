@@ -201,7 +201,7 @@ agent = ReActAgent(
 )
 ```
 
-Tracing is **diabled** by default (rather, a no-op tracer is used). You will need to explicitly enable it, as shown in the code snippet above. The screenshot below shows a sample trace of KodeAgent running a task on the Langfuse dashboard:
+Tracing is **disbled** by default (rather, a no-op tracer is used). You will need to explicitly enable it, as shown in the code snippet above. The screenshot below shows a sample trace of KodeAgent running a task on the Langfuse dashboard:
 
 <img width="80%" height="80%" alt="KodeAgent trace on Langfuse dashboard" src="https://github.com/user-attachments/assets/52530ccd-57dd-4be0-afe9-70cdab279a2e" />
 

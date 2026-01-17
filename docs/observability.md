@@ -56,7 +56,7 @@ export LANGCHAIN_PROJECT='your_project_name'  # Optional
 
 ## Viewing Traces
 
-Once observability is enabled, all agent interactions will be traced and sent to Langfuse. You can log in to your [Langfuse dashboard](https://cloud.langfuse.com) (or [LangSmith dashboard](https://smith.langchain.com)) to view detailed traces of each agent run, including:
+Once observability is enabled, all agent interactions will be traced and sent to the configured backend (Langfuse or LangSmith). You can log in to your [Langfuse dashboard](https://cloud.langfuse.com) (or [LangSmith dashboard](https://smith.langchain.com)) to view detailed traces of each agent run, including:
 - **Agent Decisions**: See each thought, action, and observation made by the agent.
 - **Tool Usage**: Monitor which tools were invoked and their outputs (or what code was written).
 - **Plan and Observations**: Review the agent's plan progress and observations made during the task.
@@ -81,7 +81,7 @@ A screenshot of a sample trace in LangSmith:
 
 The resulting trace hierarchy looks like this:
 
-```
+```text
 Agent.run() [root trace]
 ├── plan_creation [span]
 │   └── (LLM call via ku.call_llm with component_name='Planner.create')
