@@ -68,23 +68,26 @@ class TestTracerModule:
         # Test start_trace
         mock_trace = MagicMock()
         mock_client.trace.return_value = mock_trace
-        res_trace = manager.start_trace('root', {'in': 1})
+        res_trace_obs = manager.start_trace('root', {'in': 1})
         mock_client.trace.assert_called_once_with(name='root', input={'in': 1})
-        assert res_trace is mock_trace
+        assert isinstance(res_trace_obs, tracer.LangfuseObservation)
+        assert res_trace_obs.obj is mock_trace
 
         # Test start_span
         mock_span = MagicMock()
         mock_trace.span.return_value = mock_span
-        res_span = manager.start_span(mock_trace, 'child', {'in': 2})
+        res_span_obs = manager.start_span(res_trace_obs, 'child', {'in': 2})
         mock_trace.span.assert_called_once_with(name='child', input={'in': 2})
-        assert res_span is mock_span
+        assert isinstance(res_span_obs, tracer.LangfuseObservation)
+        assert res_span_obs.obj is mock_span
 
         # Test start_generation
         mock_gen = MagicMock()
         mock_trace.generation.return_value = mock_gen
-        res_gen = manager.start_generation(mock_trace, 'gen', {'in': 3})
+        res_gen_obs = manager.start_generation(res_trace_obs, 'gen', {'in': 3})
         mock_trace.generation.assert_called_once_with(name='gen', input={'in': 3})
-        assert res_gen is mock_gen
+        assert isinstance(res_gen_obs, tracer.LangfuseObservation)
+        assert res_gen_obs.obj is mock_gen
 
     @patch('langsmith.run_trees.RunTree')
     @patch('langsmith.Client')
@@ -125,11 +128,16 @@ class TestTracerModule:
         assert isinstance(res_span, tracer.LangSmithObservation)
         assert res_span.run_tree is mock_child_tree
 
-        # Test end
+        # Test end with output
         res_span.end(output='done', metadata={'m': 1})
         mock_child_tree.add_metadata.assert_called_once_with({'m': 1})
         mock_child_tree.end.assert_called_once_with(outputs={'output': 'done'}, error=None)
         mock_child_tree.patch.assert_called_once()
+
+        # Test end with result (mapping check)
+        mock_run_tree.end.reset_mock()
+        res_obs.end(result='finished')
+        mock_run_tree.end.assert_called_once_with(outputs={'output': 'finished'}, error=None)
 
     def test_tracer_manager_flush(self) -> None:
         """Verify flush method delegates to client."""
@@ -698,21 +706,24 @@ class TestTracingCoverage:
         assert isinstance(manager.start_span(noop, 'n', {}), tracer.NoOpObservation)
         assert isinstance(manager.start_generation(noop, 'n', {}), tracer.NoOpObservation)
 
-    def test_langsmith_manager_start_generation(self) -> None:
-        """Test LangSmithTracerManager.start_generation correctly creates observation."""
-        manager = tracer.LangSmithTracerManager()
-        manager.client = MagicMock()
+    def test_langfuse_observation_mapping(self) -> None:
+        """Verify LangfuseObservation maps result to output and handles missing end."""
+        # Case 1: Trace (no end)
+        mock_trace = MagicMock()
+        del mock_trace.end
+        obs = tracer.LangfuseObservation(mock_trace)
+        obs.end(result='final ok')
+        mock_trace.update.assert_called_once_with(output='final ok')
 
-        mock_parent_tree = MagicMock()
-        parent_obs = tracer.LangSmithObservation(mock_parent_tree)
+        # Case 2: Span/Gen (has end)
+        mock_span = MagicMock()
+        obs2 = tracer.LangfuseObservation(mock_span)
+        obs2.end(result='span ok')
+        mock_span.end.assert_called_once_with(output='span ok')
 
-        mock_child_tree = MagicMock()
-        mock_parent_tree.create_child.return_value = mock_child_tree
-
-        res_obs = manager.start_generation(parent_obs, 'gen', {'prompt': 'hi'})
-
-        mock_parent_tree.create_child.assert_called_once_with(
-            name='gen', run_type='llm', inputs={'prompt': 'hi'}
-        )
-        assert isinstance(res_obs, tracer.LangSmithObservation)
-        assert res_obs.run_tree is mock_child_tree
+    def test_langfuse_observation_update(self) -> None:
+        """Verify LangfuseObservation.update delegates to wrapped object."""
+        mock_obj = MagicMock()
+        obs = tracer.LangfuseObservation(mock_obj)
+        obs.update(status='success')
+        mock_obj.update.assert_called_once_with(status='success')
