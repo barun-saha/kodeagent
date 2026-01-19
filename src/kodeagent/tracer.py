@@ -173,12 +173,54 @@ class NoOpTracerManager(AbstractTracerManager):
         """No-op: do nothing."""
 
 
+class LangfuseObservation(AbstractObservation):
+    """Langfuse implementation of observation.
+
+    Wraps Langfuse Trace, Span, or Generation objects to provide a consistent
+    interface.
+    """
+
+    def __init__(self, obj: Any) -> None:
+        """Initialize Langfuse observation.
+
+        Args:
+            obj: The Langfuse Trace, Span, or Generation object.
+        """
+        self.obj = obj
+
+    def update(self, **kwargs: Any) -> None:
+        """Update observation properties.
+
+        Args:
+            **kwargs: Properties to update.
+        """
+        if hasattr(self.obj, 'update'):
+            self.obj.update(**kwargs)
+
+    def end(self, **kwargs: Any) -> None:
+        """End the observation.
+
+        Maps 'result' to 'output' for compatibility with Langfuse.
+        Calls end() if available (Spans/Generations), else update() (Traces).
+
+        Args:
+            **kwargs: Final state data.
+        """
+        # Map 'result' to 'output' if present
+        if 'result' in kwargs and 'output' not in kwargs:
+            kwargs['output'] = kwargs.pop('result')
+
+        if hasattr(self.obj, 'end'):
+            self.obj.end(**kwargs)
+        elif hasattr(self.obj, 'update'):
+            self.obj.update(**kwargs)
+
+
 class LangfuseTracerManager(AbstractTracerManager):
     """Langfuse implementation of TracerManager.
 
     Integrates with Langfuse observability platform to create and manage hierarchical traces,
-    spans, and generations. Assumes parent observations are Langfuse objects with span() and
-    generation() methods. Tracing is disabled if the Langfuse package is not installed.
+    spans, and generations. Tracing is disabled if the Langfuse package is not installed.
     """
 
     def __init__(self) -> None:
@@ -206,7 +248,7 @@ class LangfuseTracerManager(AbstractTracerManager):
         """
         if not self.client:
             return NoOpObservation()
-        return self.client.trace(name=name, input=input_data)
+        return LangfuseObservation(self.client.trace(name=name, input=input_data))
 
     def start_span(
         self, parent: AbstractObservation, name: str, input_data: Any
@@ -214,7 +256,7 @@ class LangfuseTracerManager(AbstractTracerManager):
         """Start a nested span under a parent observation with Langfuse.
 
         Args:
-            parent: Parent observation (assumes Langfuse Trace or Span).
+            parent: Parent observation (assumes LangfuseObservation).
             name: Identifier for the span operation.
             input_data: Input data to log for the span.
 
@@ -223,7 +265,13 @@ class LangfuseTracerManager(AbstractTracerManager):
         """
         if not self.client:
             return NoOpObservation()
-        return parent.span(name=name, input=input_data)
+
+        # Unwrap if it's our LangfuseObservation
+        parent_obj = parent.obj if isinstance(parent, LangfuseObservation) else parent
+
+        if hasattr(parent_obj, 'span'):
+            return LangfuseObservation(parent_obj.span(name=name, input=input_data))
+        return NoOpObservation()
 
     def start_generation(
         self, parent: AbstractObservation, name: str, input_data: Any
@@ -231,7 +279,7 @@ class LangfuseTracerManager(AbstractTracerManager):
         """Start a nested LLM generation under a parent observation with Langfuse.
 
         Args:
-            parent: Parent observation (assumes Langfuse Trace or Span).
+            parent: Parent observation (assumes LangfuseObservation).
             name: Identifier for the generation operation.
             input_data: Input data (e.g., prompt) to log for the generation.
 
@@ -240,7 +288,13 @@ class LangfuseTracerManager(AbstractTracerManager):
         """
         if not self.client:
             return NoOpObservation()
-        return parent.generation(name=name, input=input_data)
+
+        # Unwrap if it's our LangfuseObservation
+        parent_obj = parent.obj if isinstance(parent, LangfuseObservation) else parent
+
+        if hasattr(parent_obj, 'generation'):
+            return LangfuseObservation(parent_obj.generation(name=name, input=input_data))
+        return NoOpObservation()
 
     def flush(self) -> None:
         """Flush Langfuse traces."""
@@ -297,6 +351,11 @@ class LangSmithObservation(AbstractObservation):
             # Ensure outputs is a dict for RunTree.patch() which calls outputs.copy()
             if outputs is not None and not isinstance(outputs, dict):
                 outputs = {'output': outputs}
+
+            # Map 'result' to 'outputs' if provided in result keyword
+            if 'result' in kwargs and outputs is None:
+                res = kwargs.pop('result')
+                outputs = res if isinstance(res, dict) else {'output': res}
 
             try:
                 if metadata:
