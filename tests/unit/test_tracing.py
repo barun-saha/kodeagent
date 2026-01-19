@@ -709,8 +709,7 @@ class TestTracingCoverage:
     def test_langfuse_observation_mapping(self) -> None:
         """Verify LangfuseObservation maps result to output and handles missing end."""
         # Case 1: Trace (no end)
-        mock_trace = MagicMock()
-        del mock_trace.end
+        mock_trace = MagicMock(spec=['update'])
         obs = tracer.LangfuseObservation(mock_trace)
         obs.end(result='final ok')
         mock_trace.update.assert_called_once_with(output='final ok')
