@@ -7,4 +7,4 @@ Update the __version__ string here BEFORE making a release on GitHub.
 # minor: New features, backward compatible
 # major: Breaking changes, API changes
 
-__version__ = '0.7.4'
+__version__ = '0.8.0'
