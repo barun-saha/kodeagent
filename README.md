@@ -21,10 +21,10 @@ KodeAgent is a frameworkless, minimalistic approach to building AI agents. Writt
 KodeAgent adheres to the **Unix Philosophy**: do one thing well and integrate seamlessly.
 
 Use KodeAgent because it offers:
-- **Scalable:** With only a few dependencies, KodeAgent perfectly integrates into serverless and high-throughput microservices.
 - **ReAct & CodeAct:** KodeAgent supports both ReAct and CodeAct agent paradigms out-of-the-box, enabling agents to reason and act using tools or by generating and executing code.
+- **Guidance and Auto-Correction:** Includes a "Planner" to plan the steps and an internal "Observer" to monitor progress, detect loops or stalled plans, and provide corrective feedback to stay on track.
+- **Scalable:** With only a few dependencies, KodeAgent perfectly integrates into serverless environments, standalone applications, or existing platforms.
 - **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models (e.g., Gemini, OpenAI, and Claude) without changing your core logic.
-- **Auto-Correction:** Includes an internal "Observer" that monitors agent progress, detects loops or stalled plans, and provides corrective feedback to stay on track.
 - **Lightweight Glass Box:** Read the entire source and debug without fighting opaque abstraction layers. Follow the key abstractions and build something on your own!
 
 
@@ -34,7 +34,7 @@ Also, here are a few reasons why you shouldn't use KodeAgent:
 
 - KodeAgent is actively evolving, meaning some aspects may change.
 - You want to use some of the well-known frameworks.
-- You need a full-fledged platform with built-in memory management.
+- You need a full-fledged platform with built-in long-term, persistent memory management.
 
 
 ## 🚀 Quick Start
@@ -46,7 +46,7 @@ Also, here are a few reasons why you shouldn't use KodeAgent:
 
 Install [KodeAgent](https://pypi.org/project/kodeagent/) via pip:
 ```bash
-pip install kodeagent
+pip install -U kodeagent  # Upgrade existing installation
 ```
 
 Or if you want to clone the KodeAgent GitHub repository locally and run from there, use:
@@ -102,7 +102,17 @@ agent = CodeActAgent(
 )
 ```
 
-That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [kodeagent.py](src/kodeagent/kodeagent.py) module and [API documentation](https://kodeagent.readthedocs.io/en/latest/usage.html).
+That's it! Your agent should start solving the task and keep streaming the updates.
+
+By default, an agent is **stateless**—each task begins with no prior context, a clean slate. To enable context from the previous task (only), use **Recurrent Mode**:
+
+```python
+# Enable recurrent mode to leverage context from the previous run
+async for response in agent.run('Double the previous result', recurrent_mode=True):
+    print_response(response)
+```
+
+For more examples, including how to provide files as inputs, see the [kodeagent.py](src/kodeagent/kodeagent.py) module and [API documentation](https://kodeagent.readthedocs.io/en/latest/usage.html).
 
 ### API Configuration
 
@@ -188,7 +198,7 @@ For further details, refer to the [API documentation](https://kodeagent.readthed
 
 In addition to the logs, KodeAgent enables agent observability via third-party solutions, such as [Langfuse](https://langfuse.com/) and [LangSmith](https://www.langchain.com/langsmith).
 
-To enable tracing, set the relevant environment variables (e.g., `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` for Langfuse, or `LANGCHAIN_API_KEY` and `LANGCHAIN_TRACING_V2='true'` for LangSmith). Then, in the code, specify `tracing_type` as `langfuse` or `langsmith` when creating the agent:
+To enable tracing, set the relevant environment variables (e.g., `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` for Langfuse, or `LANGCHAIN_API_KEY` and `LANGCHAIN_TRACING_V2='true'` for LangSmith). Note that `langsmith` is not installed by default with KodeAgent and must be installed separately with `pip install langsmith`. Then, in the code, specify `tracing_type` as `langfuse` or `langsmith` when creating the agent:
 
 ```python
 from kodeagent import ReActAgent

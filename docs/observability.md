@@ -12,7 +12,11 @@ KodeAgent includes built-in support for observability through platforms such as 
 
 ## Enabling Observability
 
-By default, both `ReActAgent` and `CodeActAgent` have observability disabled (using a no-op tracer). To enable observability, set the `tracing_type` parameter when initializing the agent:
+By default, both `ReActAgent` and `CodeActAgent` have observability disabled (using a no-op tracer). To enable observability, set the `tracing_type` parameter when initializing the agent. 
+
+> ⓘ NOTE:
+>
+> While `langfuse` is included with KodeAgent by default, `langsmith` is not and must be installed separately using `pip install langsmith`.
 
 ```python
 from kodeagent import ReActAgent, CodeActAgent
