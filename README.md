@@ -46,7 +46,7 @@ Also, here are a few reasons why you shouldn't use KodeAgent:
 
 Install [KodeAgent](https://pypi.org/project/kodeagent/) via pip:
 ```bash
-pip install kodeagent
+pip install -U kodeagent  # Upgrade existing installation
 ```
 
 Or if you want to clone the KodeAgent GitHub repository locally and run from there, use:
@@ -198,7 +198,7 @@ For further details, refer to the [API documentation](https://kodeagent.readthed
 
 In addition to the logs, KodeAgent enables agent observability via third-party solutions, such as [Langfuse](https://langfuse.com/) and [LangSmith](https://www.langchain.com/langsmith).
 
-To enable tracing, set the relevant environment variables (e.g., `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` for Langfuse, or `LANGCHAIN_API_KEY` and `LANGCHAIN_TRACING_V2='true'` for LangSmith). Then, in the code, specify `tracing_type` as `langfuse` or `langsmith` when creating the agent:
+To enable tracing, set the relevant environment variables (e.g., `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` for Langfuse, or `LANGCHAIN_API_KEY` and `LANGCHAIN_TRACING_V2='true'` for LangSmith). Note that `langsmith` is not installed by default with KodeAgent and must be installed separately with `pip install langsmith`. Then, in the code, specify `tracing_type` as `langfuse` or `langsmith` when creating the agent:
 
 ```python
 from kodeagent import ReActAgent

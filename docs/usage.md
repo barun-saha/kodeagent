@@ -139,6 +139,10 @@ In the second run, the agent's task description is internally modified to includ
 
 When using tracing (Langfuse or LangSmith), the augmented task description is captured as the task input. This ensures that the context provided to the agent is fully visible in your observability dashboard.
 
+> ⓘ NOTE:
+>
+> While `langfuse` is included with KodeAgent by default, `langsmith` is not and must be installed separately using `pip install langsmith`.
+
 
 ## Streaming Responses
 
