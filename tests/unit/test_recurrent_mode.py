@@ -254,3 +254,12 @@ async def test_recurrent_mode_forces_assistant_role(react_agent):
         for msg in react_agent.messages:
             if hasattr(msg, 'thought'):
                 assert msg.role == 'assistant'
+
+
+@pytest.mark.asyncio
+async def test_augment_task_with_no_task(react_agent):
+    """Test _augment_task_with_previous when self.task is None."""
+    # pylint: disable=protected-access
+    task_desc = 'test task'
+    augmented = await react_agent._augment_task_with_previous(task_desc)
+    assert augmented == task_desc
