@@ -544,6 +544,50 @@ class Agent(ABC):
             logger.error('Error determining relevant tools: %s', str(e))
             return list(self.tools)
 
+    async def _augment_task_with_previous(self, current_task: str) -> str:
+        """Augment current task with previous task context.
+
+        Args:
+            current_task: The current task description.
+
+        Returns:
+            Augmented task description with previous context.
+        """
+        if not self.task:
+            return current_task
+
+        context_parts = [
+            f'\n## Previous Task Context\n\n**Previous Task**: {self.task.description}\n'
+        ]
+
+        # Add result if available, or salvage if not finished
+        if not self.task.is_finished:
+            # Task was interrupted or failed before finishing
+            summary = await self.salvage_response()
+            context_parts.append(f'**Summary of Progress**: {summary}\n')
+        elif self.task.result:
+            result_str = str(self.task.result)
+            # Truncate if too long (> 2000 chars)
+            if len(result_str) > 2000:
+                result_str = result_str[:2000] + '... [TRUNCATED]'
+            context_parts.append(f'**Result**: {result_str}\n')
+
+        # Add status indicators
+        if self.task.is_error:
+            context_parts.append('**Status**: ❌ Failed\n')
+        elif self.task.is_finished:
+            context_parts.append('**Status**: ✅ Completed\n')
+
+        # Add output files if any
+        if self.task.output_files:
+            files_str = ', '.join(self.task.output_files)
+            context_parts.append(f'**Generated Files**: {files_str}\n')
+
+        context_parts.append('\n---\n\n## Current Task\n\n')
+        context_parts.append(current_task)
+
+        return ''.join(context_parts)
+
     def _run_init(
         self, description: str, files: list[str] | None = None, task_id: str | None = None
     ):
@@ -658,8 +702,20 @@ class Agent(ABC):
         files: list[str] | None = None,
         task_id: str | None = None,
         max_iterations: int | None = None,
+        recurrent_mode: bool = False,
     ) -> AsyncIterator[AgentResponse]:
-        """Execute a task using the agent."""
+        """Execute a task using the agent.
+
+        Args:
+            task: The task description.
+            files: List of files associated with the task.
+            task_id: Optional task ID.
+            max_iterations: Optional maximum number of iterations.
+            recurrent_mode: Whether to run in recurrent mode.
+
+        Returns:
+            AsyncIterator[AgentResponse]: An iterator yielding agent responses.
+        """
 
     def response(
         self,
@@ -1083,6 +1139,7 @@ class ReActAgent(Agent):
         task_id: str | None = None,
         max_iterations: int | None = None,
         summarize_progress_on_failure: bool = True,
+        recurrent_mode: bool = False,
     ) -> AsyncIterator[AgentResponse]:
         """Solve a task using ReAct's TAO loop (or CodeAct's TCO loop).
 
@@ -1093,6 +1150,7 @@ class ReActAgent(Agent):
             max_iterations: Optional max iterations for the task.
             summarize_progress_on_failure: Whether to summarize progress if
              the agent fails to solve the task in max iterations.
+            recurrent_mode: If True, augment task with previous task context.
 
         Returns:
             Step updates on the task and the final response.
@@ -1107,6 +1165,11 @@ class ReActAgent(Agent):
             raise ValueError('Task files must be a list of file paths!')
         if files and len(files) > MAX_TASK_FILES:
             raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
+
+        # Augment task with previous context if recurrent mode enabled
+        if recurrent_mode and self.task is not None:
+            task = await self._augment_task_with_previous(task)
+            logger.debug('Recurrent mode enabled: augmented task with previous context')
 
         # 1. run() calls _run_init()
         # 2. pre_run() calls init_history() and does the logging/planning
@@ -1342,8 +1405,10 @@ class ReActAgent(Agent):
                             parsed_json['task_successful'] = False
 
                     # Validate and create message directly
-                    if 'role' not in parsed_json:
-                        parsed_json['role'] = 'assistant'  # Add role BEFORE validation
+                    # CRITICAL: Always force role to 'assistant' for model responses.
+                    # Some models (like Gemini 2.5) may hallucinate "role": "user" in
+                    # structured JSON, which breaks subsequent tool response pairings.
+                    parsed_json['role'] = 'assistant'
                     msg = response_format_class.model_validate(parsed_json)
 
                     logger.debug('Successfully parsed structured JSON response')
@@ -2334,7 +2399,6 @@ async def main():
         ],
         max_iterations=5,
         litellm_params=litellm_params,
-        filter_tools_for_task=False,
     )
     # agent = CodeActAgent(
     #     name='Simple agent',
@@ -2364,9 +2428,7 @@ async def main():
     #         'pathlib',
     #     ],
     #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
-    #     filter_tools_for_task=False,
     #     work_dir='./agent_workspace',
-    #     tracing_type='langfuse',
     # )
 
     the_tasks = [
@@ -2383,12 +2445,6 @@ async def main():
             'What is four plus seven? Also, what are the festivals in Paris?'
             ' How they differ from Kolkata?',
             None,
-        ),
-        (
-            'Summarize the notes',
-            [
-                'https://web.stanford.edu/class/cs102/lectureslides/ClassificationSlides.pdf',
-            ],
         ),
         ('Write an elegant haiku in Basho style. Save it as poem.txt', None),
         # ('generate an image of AI. Use model gemini/imagen-4.0-fast-generate-001', None),
@@ -2411,6 +2467,18 @@ async def main():
 
         await asyncio.sleep(random.uniform(0.15, 0.55))
         print('\n\n')
+
+    print('Demonstrating recurrent mode:\n')
+    # Task 1: Perform a calculation or data retrieval
+    async for response in agent.run('Find the population of France in 2023'):
+        print_response(response, only_final=True)
+
+    # Task 2: Use the result of Task 1 with recurrent_mode=True
+    async for response in agent.run(
+        'What would it be with a 0.5% growth?',
+        recurrent_mode=True,
+    ):
+        print_response(response, only_final=True)
 
 
 if __name__ == '__main__':

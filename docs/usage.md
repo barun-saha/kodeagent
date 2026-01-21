@@ -92,6 +92,54 @@ print(agent.current_plan)
 ```
 
 
+## Recurrent Mode (Memory)
+
+KodeAgent is designed to be minimalistic and **stateless** by default. Each call to `run()` is independent, and the agent does not retain conversation history or results from previous tasks.
+
+However, you can enable **Recurrent Mode** by passing `recurrent_mode=True` to the `run()` method. When enabled, the current task description is automatically augmented with context from the *immediately preceding* task executed by that agent instance.
+
+### What is Augmented?
+
+In Recurrent Mode, the agent is provided with:
+- **Previous Task**: The description of the last task.
+- **Result**: The final answer from the last task (truncated if too long).
+- **Status**: Whether the last task completed successfully or failed.
+- **Generated Files**: A list of files created during the last task.
+- **Progress Summary**: If the previous task was interrupted or failed to finish, a summary of what was achieved so far (via `salvage_response`).
+
+### Example Usage
+
+Recurrent mode is useful for chaining tasks where the second task depends on the outcome of the first:
+
+```python
+# Task 1: Perform a calculation or data retrieval
+async for response in agent.run('Find the population of France in 2023'):
+    print_response(response, only_final=True)
+
+# Task 2: Use the result of Task 1 with recurrent_mode=True
+async for response in agent.run('What would it be with a 0.5% growth?', recurrent_mode=True):
+    print_response(response, only_final=True)
+```
+
+In the second run, the agent's task description is internally modified to include:
+
+> ### Previous Task Context
+> **Previous Task**: Find the population of France in 2023  
+> **Result**: 68.1 million  
+> **Status**: ✅ Completed
+> 
+> ---
+> 
+> ### Current Task
+> 
+> What would it be with a 0.5% growth?
+> 
+
+### Tracing
+
+When using tracing (Langfuse or LangSmith), the augmented task description is captured as the task input. This ensures that the context provided to the agent is fully visible in your observability dashboard.
+
+
 ## Streaming Responses
 
 The `agent.run()` method is an asynchronous generator that yields `AgentResponse` objects. This allows you to monitor the agent's progress in real-time.

@@ -34,7 +34,7 @@ Also, here are a few reasons why you shouldn't use KodeAgent:
 
 - KodeAgent is actively evolving, meaning some aspects may change.
 - You want to use some of the well-known frameworks.
-- You need a full-fledged platform with built-in memory management.
+- You need a full-fledged platform with built-in long-term, persistent memory management.
 
 
 ## 🚀 Quick Start
@@ -102,7 +102,17 @@ agent = CodeActAgent(
 )
 ```
 
-That's it! Your agent should start solving the task and keep streaming the updates. For more examples, including how to provide files as inputs, see the [kodeagent.py](src/kodeagent/kodeagent.py) module and [API documentation](https://kodeagent.readthedocs.io/en/latest/usage.html).
+That's it! Your agent should start solving the task and keep streaming the updates.
+
+By default, an agent is **stateless**—each task begins with no prior context, a clean slate. To enable context from the previous task (only), use **Recurrent Mode**:
+
+```python
+# Enable recurrent mode to leverage context from the previous run
+async for response in agent.run('Double the previous result', recurrent_mode=True):
+    print_response(response)
+```
+
+For more examples, including how to provide files as inputs, see the [kodeagent.py](src/kodeagent/kodeagent.py) module and [API documentation](https://kodeagent.readthedocs.io/en/latest/usage.html).
 
 ### API Configuration
 
