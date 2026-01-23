@@ -9,6 +9,8 @@
 [![Known Vulnerabilities](https://snyk.io/test/github/barun-saha/kodeagent/badge.svg)](https://snyk.io/test/github/barun-saha/kodeagent)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/kodeagent)
 [![Ruff](https://img.shields.io/badge/linting-ruff-%23f64e60)](https://docs.astral.sh/ruff/)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)
+
 
 
 KodeAgent is a frameworkless, minimalistic approach to building AI agents. Written in ~3 KLOC (~2.2K statements) of pure Python, KodeAgent is designed to be the robust reasoning core inside your larger system, not the entire platform.
@@ -104,7 +106,7 @@ agent = CodeActAgent(
 
 That's it! Your agent should start solving the task and keep streaming the updates.
 
-By default, an agent is **stateless**—each task begins with no prior context, a clean slate. To enable context from the previous task (only), use **Recurrent Mode**:
+By default, an agent is **memoryless** across tasks—each task begins with no prior context, a clean slate. To enable context from the previous task (only), use **Recurrent Mode**:
 
 ```python
 # Enable recurrent mode to leverage context from the previous run
