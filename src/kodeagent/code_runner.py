@@ -441,10 +441,10 @@ class CodeRunner:
 
         # Filter imports: allow if exact match or if it starts with 'allowed_name.'
         disallowed = {
-            imp for imp in imported_modules
+            imp
+            for imp in imported_modules
             if not any(
-                imp == allowed or imp.startswith(f'{allowed}.')
-                for allowed in self.allowed_imports
+                imp == allowed or imp.startswith(f'{allowed}.') for allowed in self.allowed_imports
             )
         }
 
