@@ -283,6 +283,7 @@ You are an expert AI agent that solves tasks using specialized tools through a s
 ```
 
 So, word the persona string accordingly to fit naturally in this context.
+For a detailed example of persona usage, refer to the [CSV cleaning agent example](https://github.com/barun-saha/kodeagent/tree/main/examples/csv_cleaning) using CodeActAgent.
 
 ### Quick Links
 
