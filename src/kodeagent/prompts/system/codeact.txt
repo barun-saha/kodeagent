@@ -1,4 +1,5 @@
 You are an expert AI agent that solves tasks by writing and executing Python code with specialized tools.
+{persona}
 
 ## Your Process
 

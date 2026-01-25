@@ -36,6 +36,7 @@ async for response in agent.run(
         '/home/user/image1.jpg',
         'http://example.com/image2.jpg',
     ],
+    max_iterations=5,
 ):
     print_response(response, only_final=True)
 ```
@@ -70,7 +71,7 @@ final_response = agent.task.result
 print(final_response)
 ```
 
-> ⓘ NOTE:
+> **ⓘ NOTE**
 > 
 > The `result` is available only when the agent has found the final answer. Otherwise, it will be `None`. An agent can fail to find a final answer due to several reasons, e.g., a timeout, an error in the code, and max iterations reached. See the next section for more details on how to check if the final answer has been found.
 
@@ -123,23 +124,24 @@ async for response in agent.run('What would it be with a 0.5% growth?', recurren
 
 In the second run, the agent's task description is internally modified to include:
 
-> ### Previous Task Context
-> **Previous Task**: Find the population of France in 2023  
-> **Result**: 68.1 million  
-> **Status**: ✅ Completed
-> 
-> ---
-> 
-> ### Current Task
-> 
-> What would it be with a 0.5% growth?
-> 
+```text
+### Previous Task Context
+**Previous Task**: Find the population of France in 2023  
+**Result**: 68.1 million  
+**Status**: ✅ Completed
+
+---
+
+### Current Task
+
+What would it be with a 0.5% growth? 
+```
 
 ### Tracing
 
 When using tracing (Langfuse or LangSmith), the augmented task description is captured as the task input. This ensures that the context provided to the agent is fully visible in your observability dashboard.
 
-> ⓘ NOTE:
+> **ⓘ NOTE**
 >
 > While `langfuse` is included with KodeAgent by default, `langsmith` is not and must be installed separately using `pip install langsmith`.
 
@@ -222,3 +224,69 @@ GOOGLE_API_KEY=your_google_api_key
 The `Observer` is an internal component that monitors the agent's work to detect if it's stuck in a loop or has stalled. It can provide corrective feedback to help the agent get back on track.
 
 By default, the `Observer` is enabled and triggered based on a predefined threshold in the agent's logic. It analyzes the chat history and the current plan to ensure the agent is making meaningful progress.
+
+
+## Customizing Agent Identity
+
+KodeAgent provides two approaches to optionally customize the system prompt of ReActAgent and CodeActAgent:
+
+1. **`persona`**: Use this parameter to define a specific role or behavior for the agent while keeping the default system prompt structure. This is the recommended way to steer the agent's identity.
+2. **`system_prompt`**: Use this parameter to completely override the default system prompt with your own.
+
+Both of these parameters are optional.
+
+> **ⓘ NOTE**
+> 
+> The `persona` and `system_prompt` parameters are mutually exclusive. If both are provided, `system_prompt` will take precedence, and `persona` will be ignored.
+
+### Examples
+
+**Setting a Persona:**
+```python
+agent = ReActAgent(
+    name='Web agent',
+    model_name='gemini/gemini-2.5-flash-lite',
+    tools=[search_web, extract_as_markdown],
+    max_iterations=7,
+    persona='You are an expert assistant specialized in analyzing CSV files.',
+)
+```
+
+**Overriding the System Prompt:**
+```python
+agent = ReActAgent(
+    name='Web agent',
+    model_name='gemini/gemini-2.5-flash-lite',
+    tools=[search_web, extract_as_markdown],
+    max_iterations=7,
+    system_prompt='You are a helpful assistant. Always respond in markdown. Use these tools...',
+)
+```
+
+> **⚠ CAUTION**
+> 
+> It is strongly recommended that the default system prompt is retained almost entirely; new or additional instructions can be added to it. For example, if you are building a CSV agent, you can add instructions to analyze CSV files to the default system prompt. Removing the instructions from the default system prompt altogether may affect the agent's performance.
+
+### How is Persona Injected?
+
+The default system prompt is generic and designed to work for a wide range of tasks. In some scenarios you might want to build specialized agents that exhibit specific behaviors or expertise. The `persona` parameter allows you to do this without completely overriding the default system prompt.
+For example, if you are building a CSV agent, via `persona`, you can instruct the agent to focus on CSV analysis while still following the core instructions of the default prompt.
+
+When you provide a `persona`, it is injected into the default system prompt at a designated placeholder. This allows the agent to adapt its behavior according to the specified persona while still following the core instructions of the default prompt.
+In particular, the first few lines of the default system prompt contain a placeholder for the persona:
+
+```text
+You are an expert AI agent that solves tasks using specialized tools through a structured reasoning process.
+{persona}
+
+## Your Process
+```
+
+So, word the persona string accordingly to fit naturally in this context.
+For a detailed example of persona usage, refer to the [CSV cleaning agent example](https://github.com/barun-saha/kodeagent/tree/main/examples/csv_cleaning) using CodeActAgent.
+
+### Quick Links
+
+- [ReActAgent system prompt](https://github.com/barun-saha/kodeagent/blob/main/src/kodeagent/prompts/system/react.txt)
+- [CodeActAgent system prompt](https://github.com/barun-saha/kodeagent/blob/main/src/kodeagent/prompts/system/codeact.txt)
+
