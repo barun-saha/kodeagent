@@ -824,13 +824,6 @@ def test_task_completion():
     assert error_task.result == 'Error occurred'
 
 
-@pytest.mark.asyncio
-async def test_agent_run_cleanup():
-    """Test agent run cleanup."""
-    # this test replaces the deleted ones in this range to keep structure if needed,
-    # but I'll just remove them.
-
-
 def test_agent_str(react_agent):
     """Test the string representation of an Agent."""
     agent_str = str(react_agent)
