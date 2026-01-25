@@ -1,10 +1,10 @@
-﻿kodeagent.kodeagent
-===================
+﻿kodeagent.orchestrator
+======================
 ===================================
 
 .. currentmodule:: kodeagent
 
-.. automodule:: kodeagent.kodeagent
+.. automodule:: kodeagent.orchestrator
    :noindex:
 
 .. autosummary::
@@ -12,22 +12,14 @@
    :nosignatures:
 
    
-   llm_vision_support
-   
-   main
-   
-   print_response
-   
 
    
-   Agent
+   Observer
    
-   CodeActAgent
-   
-   ReActAgent
+   Planner
    
 
-.. automodule:: kodeagent.kodeagent
+.. automodule:: kodeagent.orchestrator
    :members:
    :undoc-members:
    :show-inheritance:
