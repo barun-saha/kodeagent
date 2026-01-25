@@ -84,7 +84,7 @@ class Agent(ABC):
         description: str | None = None,
         tools: list[Callable] | None = None,
         litellm_params: dict | None = None,
-        system_role: str | None = None,
+        persona: str | None = None,
         system_prompt: str | None = None,
         max_iterations: int = 20,
         filter_tools_for_task: bool = False,
@@ -100,10 +100,10 @@ class Agent(ABC):
             description: Optional brief description about the agent.
             tools: An optional list of tools available to the agent.
             litellm_params: LiteLLM parameters.
-            system_role: Optional system role for the agent. If provided, this gets added to
+            persona: Optional persona for the agent. If provided, this gets added to
              the system prompt.
             system_prompt: Optional system prompt for the agent. If not provided, default is used.
-             This is mutually exclusive with system_role.
+             This is mutually exclusive with persona.
             max_iterations: The max iterations an agent can perform to solve a task.
             filter_tools_for_task: Whether the tools should be filtered for a task. Unused.
             max_retries: Maximum number of retries for LLM calls.
@@ -119,7 +119,7 @@ class Agent(ABC):
         self.tools = tools or []
         self.filter_tools_for_task = filter_tools_for_task
         self.litellm_params: dict = litellm_params or {}
-        self.system_role = system_role
+        self.persona = persona
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
         self.max_retries = max_retries
@@ -622,7 +622,7 @@ class ReActAgent(Agent):
         tools: list,
         description: str | None = None,
         litellm_params: dict | None = None,
-        system_role: str | None = None,
+        persona: str | None = None,
         system_prompt: str | None = None,
         max_iterations: int = 20,
         filter_tools_for_task: bool = False,
@@ -637,7 +637,7 @@ class ReActAgent(Agent):
             tools=tools,
             litellm_params=litellm_params,
             description=description,
-            system_role=system_role,
+            persona=persona,
             system_prompt=system_prompt or REACT_SYSTEM_PROMPT,
             max_iterations=max_iterations,
             filter_tools_for_task=filter_tools_for_task,
@@ -700,7 +700,7 @@ class ReActAgent(Agent):
             ChatMessage(
                 role='system',
                 content=self.system_prompt.format(
-                    system_role=self.system_role or '', tools=self.get_tools_description()
+                    persona=self.persona or '', tools=self.get_tools_description()
                 ),
             )
         ]
@@ -1602,7 +1602,7 @@ class CodeActAgent(ReActAgent):
         tools: list[Callable] | None = None,
         description: str | None = None,
         litellm_params: dict | None = None,
-        system_role: str | None = None,
+        persona: str | None = None,
         system_prompt: str | None = None,
         max_iterations: int = 20,
         allowed_imports: list[str] | None = None,
@@ -1621,7 +1621,7 @@ class CodeActAgent(ReActAgent):
             tools=tools,
             litellm_params=litellm_params,
             max_iterations=max_iterations,
-            system_role=system_role,
+            persona=persona,
             system_prompt=system_prompt or CODE_ACT_SYSTEM_PROMPT,
             description=description,
             filter_tools_for_task=filter_tools_for_task,
@@ -1828,7 +1828,7 @@ class CodeActAgent(ReActAgent):
             ChatMessage(
                 role='system',
                 content=self.system_prompt.format(
-                    system_role=self.system_role or '',
+                    persona=self.persona or '',
                     tools=self.get_tools_description(),
                     authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports]),
                 ),

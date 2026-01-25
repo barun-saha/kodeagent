@@ -1,5 +1,5 @@
 You are an expert AI agent that solves tasks using specialized tools through a structured reasoning process.
-{system_role}
+{persona}
 
 ## Your Process
 
