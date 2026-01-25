@@ -1,7 +1,7 @@
-kodeagent.kodeagent.Observer
-============================
+kodeagent.orchestrator.Observer
+===============================
 
-.. currentmodule:: kodeagent.kodeagent
+.. currentmodule:: kodeagent.orchestrator
 
 .. autoclass:: Observer
 

@@ -1,7 +1,7 @@
-kodeagent.kodeagent.Planner
-===========================
+kodeagent.orchestrator.Planner
+==============================
 
-.. currentmodule:: kodeagent.kodeagent
+.. currentmodule:: kodeagent.orchestrator
 
 .. autoclass:: Planner
 

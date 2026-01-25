@@ -12,6 +12,7 @@ API Reference
    kodeagent.kodeagent
    kodeagent.kutils
    kodeagent.models
+   kodeagent.orchestrator
    kodeagent.pattern_detector
    kodeagent.tools
    kodeagent.tracer
