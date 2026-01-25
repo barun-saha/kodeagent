@@ -222,3 +222,41 @@ GOOGLE_API_KEY=your_google_api_key
 The `Observer` is an internal component that monitors the agent's work to detect if it's stuck in a loop or has stalled. It can provide corrective feedback to help the agent get back on track.
 
 By default, the `Observer` is enabled and triggered based on a predefined threshold in the agent's logic. It analyzes the chat history and the current plan to ensure the agent is making meaningful progress.
+
+
+## Customizing Agent Identity
+
+KodeAgent provides two approaches to optionally customize the system prompt of ReActAgent and CodeActAgent:
+
+1. **`persona`**: Use this parameter to define a specific role or behavior for the agent while keeping the default system prompt structure. This is the recommended way to steer the agent's identity.
+2. **`system_prompt`**: Use this parameter to completely override the default system prompt with your own.
+
+Both of these parameters are optional.
+
+> **⚠ NOTE:** The `persona` and `system_prompt` parameters are mutually exclusive. If both are provided, `system_prompt` will take precedence, and `persona` will be ignored.
+
+### Examples
+
+**Setting a Persona:**
+```python
+agent = ReActAgent(
+    name='Web agent',
+    model_name='gemini/gemini-2.5-flash-lite',
+    tools=[search_web, extract_as_markdown],
+    max_iterations=7,
+    persona='You are an expert assistant specialized in analyzing CSV files.',
+)
+```
+
+**Overriding the System Prompt:**
+```python
+agent = ReActAgent(
+    name='Web agent',
+    model_name='gemini/gemini-2.5-flash-lite',
+    tools=[search_web, extract_as_markdown],
+    max_iterations=7,
+    system_prompt='You are a helpful assistant. Always respond in markdown. Use these tools...',
+)
+```
+
+> **⚠ NOTE:** It is strongly recommended that the [default](https://github.com/barun-saha/kodeagent/blob/main/src/kodeagent/prompts/system/react.txt) [system](https://github.com/barun-saha/kodeagent/blob/main/src/kodeagent/prompts/system/codeact.txt) prompt is retained almost entirely; new or additional instructions can be added to it. For example, if your are building a CSV agent, you can add instructions to analyze CSV files to the default system prompt. Removing the instructions from the default system prompt altogether may affect the agent's performance.
