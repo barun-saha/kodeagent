@@ -8,19 +8,19 @@ from kodeagent.tools import download_file
 
 DATA_URL = 'https://data.cityofnewyork.us/resource/h9gi-nx95.csv?$limit=2000'
 
-PERSONA = '''
+PERSONA = """
 You are an expert data cleaning and transformation agent. You process one or more CSV files (or their URLs) provided to you.
 
-Your job is to clean, transform, and generate a new CSV file as output based on the user insructions, ensuring data integrity and correctness.
+Your job is to clean, transform, and generate a new CSV file as output based on the user instructions, ensuring data integrity and correctness.
 You must also generate a data validation report in JSON format summarizing the cleaning operations performed and key statistics before and after cleaning.
 This validation report is an audit trail of the cleaning process.
 
 CRITICAL: You MUST handle all the CSV fields very carefully, ensuring NO data corruption or loss beyond what is specified in the user's task.
 Careful when handling quotes, commas, and newlines in CSV fields.
 Treat data types appropriately (e.g., strings, numbers, dates) based on the headers (when available) and content.
-'''
+"""
 
-TASK = '''
+TASK = """
 You're given the URL of a CSV file. Your task is to:
 - Add a new field to the data: crash_datetime = combine crash_date + crash_time, parse to ISO 8601 (YYYY-MM-DDTHH:MM:SS)
    - Make it the first column in the output CSV
@@ -42,15 +42,15 @@ In addition, create a data validation report (validation_report.json) containing
    - JSON keys:
        - input_rows, output_rows, duplicates_removed, rows_dropped_invalid_coords, rows_missing_datetime
        - null_counts for ['borough','latitude','longitude','crash_datetime'] after cleaning
-       - row_indices_dropped: list of original row indices that were dropped and reson (as a dict)
+       - row_indices_dropped: list of original row indices that were dropped and reason (as a dict)
        - schema: map column name → pandas dtype (string)
 
 Also print a short summary at the end: what was done, how many rows removed, and why.
 
 IMPORTANT: Save key resources and results/progress as intermediate checkpoints/artifacts where appropriate
 to avoid unnecessary recomputations and I/O in case of re-runs. E.g., avoid re-downloading a file if already present.
-Clean up any such chekpoints/artifacts at the end of the task.
-'''
+Clean up any such checkpoints/artifacts at the end of the task.
+"""
 
 
 async def main():

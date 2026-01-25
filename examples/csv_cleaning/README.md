@@ -20,7 +20,7 @@ Demonstrate **data cleaning via program synthesis and self-check** using the Cod
 
 **Dataset:** NYC Motor Vehicle Collisions (sample 2,000 rows)
 - **Source:** NYC Open Data
-- **URL:** https://data.cityofnewyork.us/resource/h9gi-nx95.csv?$limit=2000
+- **URL:** <https://data.cityofnewyork.us/resource/h9gi-nx95.csv?$limit=2000>
 - **Format:** CSV with mixed date/time formats, inconsistent casing, missing coordinates, and duplicate records
 
 ## Expected Outputs
