@@ -140,6 +140,8 @@ class Agent(ABC):
         self._observer_history_str: str = ''
         self._observer_history_idx: int = -1
 
+        self._tool_descriptions_cache: dict[frozenset[str], str] = {}
+
         self.msg_idx_of_new_task: int = 0
         self.final_answer_found = False
 
@@ -482,8 +484,15 @@ class Agent(ABC):
         Returns:
             A formatted string describing each tool, its parameters, and example usage.
         """
+        # Create a cache key based on the tools being described
+        tools_to_describe = tools if tools is not None else self.tools
+        cache_key = frozenset(t.name for t in tools_to_describe)
+
+        if cache_key in self._tool_descriptions_cache:
+            return self._tool_descriptions_cache[cache_key]
+
         description = ''
-        filtered_tool_names = {t.name for t in (tools or self.tools)}
+        filtered_tool_names = {t.name for t in tools_to_describe}
 
         for t in self.tools:
             if t.name in filtered_tool_names:
@@ -506,6 +515,7 @@ class Agent(ABC):
 
                 description += '\n---\n\n'
 
+        self._tool_descriptions_cache[cache_key] = description
         return description
 
     @property
