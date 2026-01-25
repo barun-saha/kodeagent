@@ -6,7 +6,8 @@ from unittest.mock import ANY, MagicMock, patch
 import pytest
 
 from kodeagent import tracer
-from kodeagent.kodeagent import CodeActAgent, Observer, Planner, ReActAgent
+from kodeagent.kodeagent import CodeActAgent, ReActAgent
+from kodeagent.orchestrator import Observer, Planner
 from kodeagent.models import (
     AgentPlan,
     CodeActChatMessage,

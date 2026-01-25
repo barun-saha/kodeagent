@@ -4,15 +4,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from kodeagent.kodeagent import (
+from kodeagent.kodeagent import Task
+from kodeagent.models import AgentPlan
+from kodeagent.orchestrator import (
     OBSERVER_SYSTEM_PROMPT,
     PLAN_UPDATER_SYSTEM_PROMPT,
     PLANNER_SYSTEM_PROMPT,
     Observer,
     Planner,
-    Task,
 )
-from kodeagent.models import AgentPlan
 
 
 @pytest.fixture
