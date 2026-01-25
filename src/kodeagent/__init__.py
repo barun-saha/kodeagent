@@ -13,9 +13,9 @@ from .kodeagent import (
     llm_vision_support,
     print_response,
 )
+from .kutils import detect_file_type, is_image_file, is_it_url, make_user_message
 from .models import AgentPlan, ObserverResponse, PlanStep
 from .orchestrator import Observer, Planner
-from .kutils import detect_file_type, is_image_file, is_it_url, make_user_message
 from .tools import (
     calculator,
     download_file,

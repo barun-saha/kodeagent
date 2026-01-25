@@ -7,7 +7,6 @@ import pytest
 
 from kodeagent import tracer
 from kodeagent.kodeagent import CodeActAgent, ReActAgent
-from kodeagent.orchestrator import Observer, Planner
 from kodeagent.models import (
     AgentPlan,
     CodeActChatMessage,
@@ -15,6 +14,7 @@ from kodeagent.models import (
     ReActChatMessage,
     Task,
 )
+from kodeagent.orchestrator import Observer, Planner
 
 
 class TestTracerModule:
