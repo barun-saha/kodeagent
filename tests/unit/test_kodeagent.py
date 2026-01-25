@@ -385,6 +385,32 @@ def test_get_tools_description(react_agent):
     assert 'Description for dummy tool one' in desc
 
 
+def test_get_tools_description_caching(react_agent):
+    """Test that tool description is correctly cached."""
+    # First call - should populate cache
+    _ = react_agent.get_tools_description()
+    assert len(react_agent._tool_descriptions_cache) == 1
+
+    # Grab the key
+    cache_key = frozenset(t.name for t in react_agent.tools)
+    assert cache_key in react_agent._tool_descriptions_cache
+
+    # Manually modify cache to prove it's being used
+    react_agent._tool_descriptions_cache[cache_key] = 'CACHED_DESCRIPTION'
+
+    # Second call - should return the cached value
+    desc2 = react_agent.get_tools_description()
+    assert desc2 == 'CACHED_DESCRIPTION'
+    assert len(react_agent._tool_descriptions_cache) == 1
+
+    # Call with a subset should create a new cache entry
+    subset = [react_agent.tools[0]]
+    desc_subset = react_agent.get_tools_description(tools=subset)
+    assert len(react_agent._tool_descriptions_cache) == 2
+    assert desc_subset != 'CACHED_DESCRIPTION'
+    assert react_agent.tools[0].name in desc_subset
+
+
 @pytest.mark.asyncio
 @patch('kodeagent.kutils.call_llm')
 async def test_get_relevant_tools(mock_llm, react_agent):
