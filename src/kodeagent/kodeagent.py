@@ -830,8 +830,8 @@ class ReActAgent(Agent):
         files: list[str] | None = None,
         task_id: str | None = None,
         max_iterations: int | None = None,
-        summarize_progress_on_failure: bool = True,
         recurrent_mode: bool = False,
+        summarize_progress_on_failure: bool = True,
     ) -> AsyncIterator[AgentResponse]:
         """Solve a task using ReAct's TAO loop (or CodeAct's TCO loop).
 
@@ -840,9 +840,9 @@ class ReActAgent(Agent):
             files: An optional list of files related to the task.
             task_id: Optional task ID.
             max_iterations: Optional max iterations for the task.
+            recurrent_mode: If True, augment task with previous task context.
             summarize_progress_on_failure: Whether to summarize progress if
              the agent fails to solve the task in max iterations.
-            recurrent_mode: If True, augment task with previous task context.
 
         Returns:
             Step updates on the task and the final response.
