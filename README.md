@@ -250,7 +250,7 @@ sequenceDiagram
 ```
 
 
-# 🧪 Run Tests
+## 🧪 Run Tests
 
 To run unit tests, use:
 ```bash
