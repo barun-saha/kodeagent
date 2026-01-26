@@ -380,6 +380,7 @@ class Agent(ABC):
         task_id: str | None = None,
         max_iterations: int | None = None,
         recurrent_mode: bool = False,
+        summarize_progress_on_failure: bool = True,
     ) -> AsyncIterator[AgentResponse]:
         """Execute a task using the agent.
 
@@ -389,6 +390,7 @@ class Agent(ABC):
             task_id: Optional task ID.
             max_iterations: Optional maximum number of iterations.
             recurrent_mode: Whether to run in recurrent mode.
+            summarize_progress_on_failure: Whether to summarize progress on failure.
 
         Returns:
             AsyncIterator[AgentResponse]: An iterator yielding agent responses.
