@@ -11,6 +11,9 @@
 [![Ruff](https://img.shields.io/badge/linting-ruff-%23f64e60)](https://docs.astral.sh/ruff/)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)
 
+<a href="https://aiagentsdirectory.com?utm_source=badge&utm_medium=referral&utm_campaign=free_listing&utm_content=homepage" target="_blank" rel="noopener noreferrer">
+  <img src="https://aiagentsdirectory.com/featured-badge.svg?v=2024" alt="Featured AI Agents on AI Agents Directory" width="200" height="50" />
+</a>
 
 
 KodeAgent is a frameworkless, minimalistic approach to building AI agents. Written in ~3 KLOC (~2.2K statements) of pure Python, KodeAgent is designed to be the robust reasoning core inside your larger system, not the entire platform.
@@ -262,6 +265,26 @@ python -m pytest .\tests\integration -v --cov --cov-report=html
 Gemini and E2B API keys should be set in the `.env` file for integration tests to work.
 
 A [Kaggle notebook](https://www.kaggle.com/code/barunsaha/kodeagent-benchmark/) for benchmarking KodeAgent is also available.
+
+### Scalene Profiling
+
+The following results were measured using [Scalene](https://github.com/plasma-umass/scalene) and `psutil` on development machine (Windows 10, Python 3.10). "Peak Memory" refers to the maximum Resident Set Size (RSS), i.e., the actual RAM used by the process.
+
+```shell
+python -m scalene run -c scalene.yaml -m src.kodeagent.kodeagent
+scalene view
+```
+
+| Agent Type   | Avg. Runtime | Peak Memory (Scalene) | Peak Memory (psutil) | Notes                                        |
+|--------------|--------------|------------------------|---------------------|----------------------------------------------|
+| ReActAgent   | ~58s         | 21MB                   | 294MB               | Faster, because tools are directly executed  |
+| CodeActAgent | ~155s        | 21MB                   | 253MB               | Slower, because of code review and execution |
+
+**Notes:**
+- _Scalene_ reports the maximum _sampled_ RSS during profiling, which is useful for comparing code sections but may miss short-lived or end-of-program memory spikes.
+- _psutil_ reports the actual RSS at program _end_, which is typically higher and reflects the real-world memory footprint.
+- Actual memory usage may vary depending on your system, Python version, and workload.
+
 
 
 ## 🗺️ Roadmap & Contributions
