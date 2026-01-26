@@ -9,6 +9,7 @@ API Reference
 
    kodeagent.code_reviewer
    kodeagent.code_runner
+   kodeagent.history_formatter
    kodeagent.kodeagent
    kodeagent.kutils
    kodeagent.models

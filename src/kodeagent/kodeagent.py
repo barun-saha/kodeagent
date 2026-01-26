@@ -28,6 +28,11 @@ from . import tools as dtools
 from . import tracer
 from .code_runner import CODE_ENV_NAMES, CodeRunner
 from .file_tracker import OutputInterceptor, install_interceptor
+from .history_formatter import (
+    CodeActHistoryFormatter,
+    HistoryFormatter,
+    ReActHistoryFormatter,
+)
 from .models import (
     AGENT_RESPONSE_TYPES,
     AgentResponse,
@@ -42,7 +47,6 @@ from .usage_tracker import UsageTracker
 
 # Install the global interceptor patch
 install_interceptor()
-
 
 load_dotenv()
 
@@ -68,7 +72,6 @@ SUCCESS_MATCH = re.compile(r'Successful:\s*(true|false)', re.IGNORECASE)
 CODE_MATCH = re.compile(r'Code:\s*```(?:python)?\s*(.+?)\s*```', re.DOTALL | re.IGNORECASE)
 
 MAX_RESPONSE_PARSING_ATTEMPTS = 3
-CODE_ACT_PSEUDO_TOOL_NAME = 'code_execution'
 MAX_TASK_FILES = 10
 
 
@@ -140,6 +143,7 @@ class Agent(ABC):
         self._observer_history_str: str = ''
         self._observer_history_idx: int = -1
 
+        self._history_formatter: HistoryFormatter | None = None
         self._tool_descriptions_cache: dict[frozenset[str], str] = {}
 
         self.msg_idx_of_new_task: int = 0
@@ -376,6 +380,7 @@ class Agent(ABC):
         task_id: str | None = None,
         max_iterations: int | None = None,
         recurrent_mode: bool = False,
+        summarize_progress_on_failure: bool = True,
     ) -> AsyncIterator[AgentResponse]:
         """Execute a task using the agent.
 
@@ -385,6 +390,7 @@ class Agent(ABC):
             task_id: Optional task ID.
             max_iterations: Optional maximum number of iterations.
             recurrent_mode: Whether to run in recurrent mode.
+            summarize_progress_on_failure: Whether to summarize progress on failure.
 
         Returns:
             AsyncIterator[AgentResponse]: An iterator yielding agent responses.
@@ -659,6 +665,8 @@ class ReActAgent(Agent):
         if tools:
             logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
 
+        self._history_formatter = ReActHistoryFormatter()
+
     async def _update_plan(self):
         """Update the plan based on the last thought and observation."""
         last_thought = None
@@ -824,8 +832,8 @@ class ReActAgent(Agent):
         files: list[str] | None = None,
         task_id: str | None = None,
         max_iterations: int | None = None,
-        summarize_progress_on_failure: bool = True,
         recurrent_mode: bool = False,
+        summarize_progress_on_failure: bool = True,
     ) -> AsyncIterator[AgentResponse]:
         """Solve a task using ReAct's TAO loop (or CodeAct's TCO loop).
 
@@ -834,9 +842,9 @@ class ReActAgent(Agent):
             files: An optional list of files related to the task.
             task_id: Optional task ID.
             max_iterations: Optional max iterations for the task.
+            recurrent_mode: If True, augment task with previous task context.
             summarize_progress_on_failure: Whether to summarize progress if
              the agent fails to solve the task in max iterations.
-            recurrent_mode: If True, augment task with previous task context.
 
         Returns:
             Step updates on the task and the final response.
@@ -1494,44 +1502,31 @@ class ReActAgent(Agent):
             # We don't append directly to cache to handle user message combination logic safely
             new_formatted_segments = []
 
+            # State for history formatter
+            formatter_state = {
+                'last_tool_call_id': self._last_tool_call_id,
+                'pending_tool_call': self._pending_tool_call,
+            }
+
             for msg in new_msgs:
                 d = msg.model_dump()
                 role = d.get('role')
 
-                # Handle assistant tool call
-                if (
-                    role == 'assistant'
-                    and (hasattr(msg, 'action') and getattr(msg, 'action', None))
-                    and not getattr(msg, 'final_answer', None)
+                # Handle assistant tool call using strategy pattern if formatter is available
+                if self._history_formatter and self._history_formatter.should_format_as_tool_call(
+                    msg
                 ):
-                    tool_call_id = f'call_{uuid.uuid4().hex[:8]}'
-                    self._last_tool_call_id = tool_call_id
-                    self._pending_tool_call = True
-                    new_formatted_segments.append(
-                        {
-                            'role': 'assistant',
-                            'content': None,
-                            'tool_calls': [
-                                {
-                                    'id': tool_call_id,
-                                    'type': 'function',
-                                    'function': {
-                                        'name': getattr(msg, 'action'),
-                                        'arguments': getattr(msg, 'args', '{}'),
-                                    },
-                                }
-                            ],
-                        }
-                    )
+                    formatted_msg = self._history_formatter.format_tool_call(msg, formatter_state)
+                    new_formatted_segments.append(formatted_msg)
 
                 elif role == 'tool':
                     tool_msg = {'role': 'tool', 'content': str(d.get('content', ''))}
-                    if self._last_tool_call_id:
-                        tool_msg['tool_call_id'] = self._last_tool_call_id
+                    if formatter_state['last_tool_call_id']:
+                        tool_msg['tool_call_id'] = formatter_state['last_tool_call_id']
                         # NOTE: We keep last_tool_call_id until we are sure?
                         # In original code (direct from list): last_tool_call_id = None after usage
-                        self._last_tool_call_id = None
-                        self._pending_tool_call = False
+                        formatter_state['last_tool_call_id'] = None
+                        formatter_state['pending_tool_call'] = False
                     new_formatted_segments.append(tool_msg)
 
                 elif role == 'assistant':
@@ -1553,6 +1548,10 @@ class ReActAgent(Agent):
                 else:
                     # system
                     new_formatted_segments.append({'role': role, 'content': d.get('content', '')})
+
+            # Sync state back to agent
+            self._last_tool_call_id = formatter_state['last_tool_call_id']
+            self._pending_tool_call = formatter_state['pending_tool_call']
 
             # Incremental merge with cache
             for seg in new_formatted_segments:
@@ -1584,7 +1583,14 @@ class ReActAgent(Agent):
 
         # Safety check: if we have a pending tool call without response, add a placeholder
         # This is NOT cached, as it's a transient state
-        if self._pending_tool_call and self._last_tool_call_id:
+        # Delegate check to formatter
+        formatter_state = {
+            'last_tool_call_id': self._last_tool_call_id,
+            'pending_tool_call': self._pending_tool_call,
+        }
+        if self._history_formatter and self._history_formatter.should_add_pending_placeholder(
+            formatter_state
+        ):
             logger.warning(
                 'Found tool_call without corresponding tool response, adding placeholder'
             )
@@ -1639,6 +1645,7 @@ class CodeActAgent(ReActAgent):
             work_dir=work_dir,
             tracing_type=tracing_type,
         )
+        self._history_formatter = CodeActHistoryFormatter()
         self.tools_source_code: str = 'from typing import *\n\n'
 
         if tools:
@@ -1663,103 +1670,6 @@ class CodeActAgent(ReActAgent):
             usage_tracker=self.usage_tracker,
             tool_names=self.tool_names,
         )
-
-    def formatted_history_for_llm(self) -> list[dict]:
-        """Generate formatted message history for LLM calls.
-        Uses incremental caching to prevent message reprocessing.
-
-        Returns:
-            list[dict]: Formatted message history.
-        """
-        # Start from the next index
-        start_idx = self._history_processed_idx + 1
-
-        # If there are no new messages and we have a cache, just return it
-        if start_idx >= len(self.messages) and self._formatted_history_cache:
-            pass
-        else:
-            # Process new messages
-            new_msgs = self.messages[start_idx:]
-            new_formatted_segments = []
-
-            for msg in new_msgs:
-                d = msg.model_dump()
-                role = d.get('role')
-
-                if (
-                    role == 'assistant'
-                    and (hasattr(msg, 'code') and getattr(msg, 'code', None))
-                    and not getattr(msg, 'final_answer', None)
-                ):
-                    tool_call_id = f'call_{uuid.uuid4().hex[:8]}'
-                    self._last_tool_call_id = tool_call_id
-
-                    new_formatted_segments.append(
-                        {
-                            'role': 'assistant',
-                            'content': None,
-                            'tool_calls': [
-                                {
-                                    'id': tool_call_id,
-                                    'type': 'function',
-                                    'function': {
-                                        'name': CODE_ACT_PSEUDO_TOOL_NAME,
-                                        'arguments': json.dumps({'code': getattr(msg, 'code')}),
-                                    },
-                                }
-                            ],
-                        }
-                    )
-
-                elif role == 'tool':
-                    tool_msg = {'role': 'tool', 'content': str(d.get('content', ''))}
-                    if self._last_tool_call_id:
-                        tool_msg['tool_call_id'] = self._last_tool_call_id
-                        self._last_tool_call_id = None
-                    new_formatted_segments.append(tool_msg)
-
-                elif role == 'assistant':
-                    if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
-                        new_formatted_segments.append(
-                            {'role': 'assistant', 'content': getattr(msg, 'final_answer')}
-                        )
-                    else:
-                        new_formatted_segments.append(
-                            {'role': 'assistant', 'content': d.get('content', '')}
-                        )
-
-                elif role == 'user':
-                    usr_msgs = ku.make_user_message(
-                        text_content=d.get('content', ''), files=d.get('files', None)
-                    )
-                    new_formatted_segments.extend(usr_msgs)
-
-                else:
-                    new_formatted_segments.append({'role': role, 'content': d.get('content', '')})
-
-            # Incremental merge with cache
-            for seg in new_formatted_segments:
-                if (
-                    self._formatted_history_cache
-                    and self._formatted_history_cache[-1].get('role') == 'user'
-                    and seg.get('role') == 'user'
-                ):
-                    prev = self._formatted_history_cache[-1]
-                    prev_content = prev['content']
-                    curr_content = seg['content']
-
-                    if not isinstance(prev_content, list):
-                        prev_content = [prev_content]
-                    if not isinstance(curr_content, list):
-                        curr_content = [curr_content]
-
-                    prev['content'] = prev_content + curr_content
-                else:
-                    self._formatted_history_cache.append(seg)
-
-            self._history_processed_idx = len(self.messages) - 1
-
-        return list(self._formatted_history_cache)
 
     def parse_text_response(self, text: str) -> CodeActChatMessage:
         """Uses regex to extract components from free-form text and parse into messages.
