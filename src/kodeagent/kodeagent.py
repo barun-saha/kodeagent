@@ -72,7 +72,6 @@ SUCCESS_MATCH = re.compile(r'Successful:\s*(true|false)', re.IGNORECASE)
 CODE_MATCH = re.compile(r'Code:\s*```(?:python)?\s*(.+?)\s*```', re.DOTALL | re.IGNORECASE)
 
 MAX_RESPONSE_PARSING_ATTEMPTS = 3
-CODE_ACT_PSEUDO_TOOL_NAME = 'code_execution'
 MAX_TASK_FILES = 10
 
 
@@ -1587,10 +1586,8 @@ class ReActAgent(Agent):
             'last_tool_call_id': self._last_tool_call_id,
             'pending_tool_call': self._pending_tool_call,
         }
-        if (
-            self._history_formatter
-            and self._history_formatter.should_add_pending_placeholder(formatter_state)
-            and self._last_tool_call_id
+        if self._history_formatter and self._history_formatter.should_add_pending_placeholder(
+            formatter_state
         ):
             logger.warning(
                 'Found tool_call without corresponding tool response, adding placeholder'

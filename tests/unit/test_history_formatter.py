@@ -1,6 +1,7 @@
 """Unit tests for history formatter classes."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -61,8 +62,6 @@ class TestReActHistoryFormatter:
 
     def test_should_format_as_tool_call_with_none_action(self, formatter: ReActHistoryFormatter):
         """Test that messages with None action are not tool calls."""
-        from types import SimpleNamespace
-
         # Mocking a message that behaves like ChatMessage (no action)
         msg = SimpleNamespace(
             role='assistant', content='Thinking', model_dump=lambda: {'role': 'assistant'}
@@ -110,8 +109,6 @@ class TestReActHistoryFormatter:
     def test_format_tool_call_with_default_args(self, formatter: ReActHistoryFormatter):
         """Test format_tool_call with message that has no args attribute."""
         # ReActChatMessage requires args, so we use a simple object to simulate missing args
-        from types import SimpleNamespace
-
         msg = SimpleNamespace(
             role='assistant',
             thought='Thinking',
@@ -164,8 +161,6 @@ class TestCodeActHistoryFormatter:
 
     def test_should_format_as_tool_call_with_final_answer(self, formatter: CodeActHistoryFormatter):
         """Test that messages with final_answer are not tool calls."""
-        from types import SimpleNamespace
-
         msg = SimpleNamespace(
             role='assistant',
             thought='Done',
@@ -188,8 +183,6 @@ class TestCodeActHistoryFormatter:
 
     def test_should_format_as_tool_call_with_none_code(self, formatter: CodeActHistoryFormatter):
         """Test that messages with None code are not tool calls."""
-        from types import SimpleNamespace
-
         # Mocking a message that behaves like CodeActChatMessage (no code)
         msg = SimpleNamespace(
             role='assistant',

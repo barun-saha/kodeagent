@@ -79,7 +79,7 @@ class ReActHistoryFormatter(HistoryFormatter):
         d = msg.model_dump()
         return bool(
             d.get('role') == 'assistant'
-            and (hasattr(msg, 'action') and getattr(msg, 'action', None))
+            and getattr(msg, 'action', None)
             and not getattr(msg, 'final_answer', None)
         )
 
@@ -104,7 +104,7 @@ class ReActHistoryFormatter(HistoryFormatter):
                     'id': tool_call_id,
                     'type': 'function',
                     'function': {
-                        'name': getattr(msg, 'action'),
+                        'name': msg.action,
                         'arguments': getattr(msg, 'args', '{}'),
                     },
                 }
@@ -142,7 +142,7 @@ class CodeActHistoryFormatter(HistoryFormatter):
         d = msg.model_dump()
         return bool(
             d.get('role') == 'assistant'
-            and (hasattr(msg, 'code') and getattr(msg, 'code', None))
+            and getattr(msg, 'code', None)
             and not getattr(msg, 'final_answer', None)
         )
 
@@ -167,17 +167,17 @@ class CodeActHistoryFormatter(HistoryFormatter):
                     'type': 'function',
                     'function': {
                         'name': CODE_ACT_PSEUDO_TOOL_NAME,
-                        'arguments': json.dumps({'code': getattr(msg, 'code')}),
+                        'arguments': json.dumps({'code': msg.code}),
                     },
                 }
             ],
         }
 
-    def should_add_pending_placeholder(self, state: dict) -> bool:
+    def should_add_pending_placeholder(self, _state: dict) -> bool:
         """CodeAct does not use placeholders for interrupted code execution.
 
         Args:
-            state: State dict (unused).
+            _state: State dict (unused).
 
         Returns:
             Always False.
