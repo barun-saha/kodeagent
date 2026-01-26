@@ -5,7 +5,6 @@ from pathlib import Path
 from kodeagent import CodeActAgent, print_response
 from kodeagent.tools import download_file
 
-
 DATA_URL = 'https://data.cityofnewyork.us/resource/h9gi-nx95.csv?$limit=2000'
 
 PERSONA = """
