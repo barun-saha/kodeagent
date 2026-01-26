@@ -1,11 +1,10 @@
 """Tests for verifying persona propagation in ReAct and CodeAct agents."""
 
-import pytest
 from kodeagent.kodeagent import (
-    ReActAgent,
-    CodeActAgent,
-    REACT_SYSTEM_PROMPT,
     CODE_ACT_SYSTEM_PROMPT,
+    REACT_SYSTEM_PROMPT,
+    CodeActAgent,
+    ReActAgent,
 )
 
 
