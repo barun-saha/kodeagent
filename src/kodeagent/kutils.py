@@ -221,6 +221,10 @@ async def call_llm(
                     },
                 )
 
+                # Check for empty choices list
+                if not response.choices or len(response.choices) == 0:
+                    raise ValueError('LLM returned an empty choices list.')
+
                 # Check for empty content
                 response_content = response.choices[0].message.content
                 if not response_content or not response_content.strip():
