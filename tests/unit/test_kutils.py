@@ -249,6 +249,46 @@ async def test_call_llm_failure_after_all_retries(monkeypatch):
             await call_llm('model', {}, [{'role': 'user', 'content': 'hi'}])
 
 
+@pytest.mark.asyncio
+async def test_call_llm_empty_choices_raises_valuer_error(monkeypatch):
+    """Test that call_llm raises ValueError (triggering retry) when choices is empty."""
+
+    # Create a mock response with EMPTY choices
+    class DummyResponse:
+        choices = []
+        usage = {}
+        _hidden_params = {}
+
+    async def dummy_acompletion(**kwargs):
+        return DummyResponse()
+
+    monkeypatch.setattr('kodeagent.kutils.litellm.acompletion', dummy_acompletion)
+
+    with pytest.raises(RetryError):
+        await call_llm('model', {}, [{'role': 'user', 'content': 'hi'}], max_retries=2)
+
+
+@pytest.mark.asyncio
+async def test_call_llm_empty_choices_then_success(monkeypatch):
+    """Test that call_llm retries on empty choices and succeeds if next call returns data."""
+    call_count = [0]
+
+    async def dummy_acompletion(**kwargs):
+        call_count[0] += 1
+        if call_count[0] == 1:
+
+            class EmptyResponse:
+                choices = []
+
+            return EmptyResponse()
+        return LLMDummyResponse()
+
+    monkeypatch.setattr('kodeagent.kutils.litellm.acompletion', dummy_acompletion)
+    result = await call_llm('model', {}, [{'role': 'user', 'content': 'hi'}])
+    assert result == '{"name": "test"}'
+    assert call_count[0] == 2
+
+
 def test_is_it_url():
     """Test URL detection function."""
     # Test valid URLs

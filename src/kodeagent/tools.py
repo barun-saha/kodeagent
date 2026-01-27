@@ -1052,6 +1052,14 @@ def generate_image(prompt: str, model_name: str) -> str:
 
     try:
         response = litellm.image_generation(prompt=prompt, model=model_name)
+
+        # Check for empty data list
+        if not response.data or len(response.data) == 0:
+            return (
+                'Error: Image generation returned no data. The API may have rejected '
+                'the prompt or encountered an error.'
+            )
+
         image_data = response.data[0]
 
         # 1. If a URL is provided, return it
