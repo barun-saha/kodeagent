@@ -1470,6 +1470,36 @@ class TestGenerateImage:
         assert 'No image data' in result
 
     @patch('litellm.image_generation')
+    def test_generate_image_empty_data(self, mock_image_gen):
+        """Test image generation with empty data list."""
+        mock_response = Mock()
+        mock_response.data = []
+        mock_image_gen.return_value = mock_response
+
+        result = generate_image('test prompt', model_name='test-model')
+
+        assert 'Error: Image generation returned no data' in result
+
+    @patch('litellm.image_generation')
+    def test_generate_image_no_data_attribute(self, mock_image_gen):
+        """Test image generation handles response with no data attribute."""
+        mock_response = Mock()
+        # Mock objects usually have everything, so we explicitly delete it
+        with patch.object(mock_response, 'data', new_callable=None):
+            # However, Mock() object's attributes are created on access.
+            # A better way is to use a custom class or Spec
+            pass
+
+        # Let's just use a class that doesn't have 'data'
+        class NoDataResponse:
+            pass
+
+        mock_image_gen.return_value = NoDataResponse()
+
+        result = generate_image('test prompt', model_name='test-model')
+        assert 'Error: Image generation failed' in result
+
+    @patch('litellm.image_generation')
     def test_generate_image_exception(self, mock_image_gen):
         """Test image generation with exception."""
         mock_image_gen.side_effect = Exception('API Error')
