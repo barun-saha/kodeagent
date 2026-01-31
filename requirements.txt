@@ -1,25 +1,25 @@
-litellm~=1.80.11
+litellm~=1.81.5
 pydantic~=2.12.5
 python-dotenv~=1.2.1
 e2b-code-interpreter~=2.4.1
 requests~=2.32.5
-json_repair~=0.55.0
+json_repair~=0.55.1
 tenacity~=9.1.2
 aiohttp~=3.13.3
 protobuf~=6.33.2
 h11~=0.16.0
 
 # Dependency for colored display on terminals
-rich~=14.2.0
+rich~=14.3.1
 
 # Dependencies for the tools
 ddgs~=9.10.0
 beautifulsoup4~=4.14.3
 markitdown[pdf, docx, xlsx]~=0.1.4
-youtube-transcript-api~=1.2.3
+youtube-transcript-api~=1.2.4
 wikipedia~=1.4.0
 arxiv~=2.4.0
-urllib3~=2.6.2
+urllib3~=2.6.3
 
 # Observability
 langfuse>=2,<3
