@@ -6,7 +6,7 @@ requests~=2.32.5
 json_repair~=0.55.1
 tenacity~=9.1.2
 aiohttp~=3.13.3
-protobuf~=6.33.2
+protobuf~=6.33.5
 h11~=0.16.0
 
 # Dependency for colored display on terminals
