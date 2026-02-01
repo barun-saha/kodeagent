@@ -164,7 +164,8 @@ async def call_llm(
     max_retries: int = DEFAULT_MAX_LLM_RETRIES,
     usage_tracker: Any | None = None,
     component_name: str = 'unknown',
-) -> str | None:
+    return_full_message: bool = False,
+) -> str | Any | None:
     """Call the LLM with the given parameters and response format.
 
     Args:
@@ -176,9 +177,10 @@ async def call_llm(
         max_retries: Maximum number of retries for the LLM call.
         usage_tracker: Optional UsageTracker instance to record usage.
         component_name: Name of the component making the call (for tracking).
+        return_full_message: If True, returns the full message object instead of just content.
 
     Returns:
-        The LLM response as string.
+        The LLM response as string or full message object.
 
     Raises:
         RetryError: If the LLM call fails after maximum retries.
@@ -226,8 +228,15 @@ async def call_llm(
                     raise ValueError('LLM returned an empty choices list.')
 
                 # Check for empty content
-                response_content = response.choices[0].message.content
-                if not response_content or not response_content.strip():
+                message = response.choices[0].message
+                response_content = message.content
+                has_tool_calls = getattr(message, 'tool_calls', None)
+
+                if (
+                    not response_content
+                    or not isinstance(response_content, str)
+                    or not response_content.strip()
+                ) and not has_tool_calls:
                     raise ValueError('LLM returned an empty or invalid response body.')
 
                 token_usage = {
@@ -250,6 +259,9 @@ async def call_llm(
                         await usage_tracker.record_usage(component_name, metrics)
                     except Exception as e:
                         logger.warning('Failed to record usage: %s', str(e))
+
+                if return_full_message:
+                    return message
 
                 return response_content
 
@@ -433,3 +445,64 @@ def clean_json_string(json_str: str) -> str:
     json_str = json_str.replace("\\'", "'")  # Fix over-escaped single quotes
 
     return json_str.strip()
+
+
+def generate_function_schema(tool: Any) -> dict:
+    """Generate OpenAI-compatible function schema for a tool.
+
+    Args:
+        tool: The tool object. Must have `name`, `description`, and `args_schema`.
+
+    Returns:
+        The function schema dictionary.
+    """
+    parameters = {}
+    if tool.args_schema:
+        parameters = tool.args_schema.model_json_schema()
+
+    return {
+        'type': 'function',
+        'function': {
+            'name': tool.name,
+            'description': tool.description,
+            'parameters': parameters,
+        },
+    }
+
+
+def supports_function_calling(model_name: str) -> bool:
+    """Check if the model supports function calling.
+
+    Args:
+        model_name: The name of the model.
+
+    Returns:
+        True if the model supports function calling, False otherwise.
+    """
+    try:
+        return litellm.supports_function_calling(model=model_name)
+    except Exception as e:
+        logger.warning(
+            'Error checking function calling support for model %s: %s', model_name, str(e)
+        )
+        return False
+
+
+def supports_parallel_function_calling(model_name: str) -> bool:
+    """Check if the model supports parallel function calling.
+
+    Args:
+        model_name: The name of the model.
+
+    Returns:
+        True if the model supports parallel function calling, False otherwise.
+    """
+    try:
+        return litellm.supports_parallel_function_calling(model=model_name)
+    except Exception as e:
+        logger.warning(
+            'Error checking parallel function calling support for model %s: %s',
+            model_name,
+            str(e),
+        )
+        return False

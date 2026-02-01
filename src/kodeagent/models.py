@@ -111,6 +111,14 @@ class ChatMessage(pyd.BaseModel):
         description='Optional list of file paths or URLs associated with the message', default=None
     )
     """Optional list of file paths or URLs associated with the message."""
+    tool_call_id: str | None = pyd.Field(
+        description='ID of the tool call this message is a response to', default=None
+    )
+    """ID of the tool call this message is a response to."""
+    name: str | None = pyd.Field(
+        description='Name of the tool that generated this response', default=None
+    )
+    """Name of the tool that generated this response."""
 
     def __str__(self) -> str:
         """Return proper string representation of the message."""
@@ -307,6 +315,82 @@ class CodeActChatMessage(ChatMessage):
             parts.append(f'Thought: {self.thought}')
         if self.code:
             parts.append(f'Code:\n```python\n{self.code}\n```')
+
+        return '\n'.join(parts)
+
+
+class ToolCall(pyd.BaseModel):
+    """Represents a single tool call from function-calling LLMs."""
+
+    id: str = pyd.Field(description='Unique identifier for this tool call')
+    """Unique identifier for this tool call."""
+    name: str = pyd.Field(description='Name of the tool to call')
+    """Name of the tool to call."""
+    arguments: str = pyd.Field(description='JSON string of tool arguments')
+    """JSON string of tool arguments."""
+
+
+class FunctionCallingChatMessage(ChatMessage):
+    """Messages for FunctionCallingAgent with native function calling support.
+    Combines functionality of FunctionCallingAgentResponse and FunctionCallingChatMessage.
+    """
+
+    role: MESSAGE_ROLES = pyd.Field(description='Role of the message sender', default='assistant')
+    """Role of the message sender. Defaults to 'assistant'."""
+    content: str | None = pyd.Field(description='Optional content', default=None)
+    """Optional content/thought of the message."""
+    thought: str | None = pyd.Field(description='Optional reasoning', default=None)
+    """Optional reasoning."""
+    tool_calls: list[ToolCall] | None = pyd.Field(
+        description='List of tool calls to execute', default=None
+    )
+    """List of tool calls to execute."""
+    final_answer: str | None = pyd.Field(description='Final answer', default=None)
+    """Final answer for the task. Set only when task is complete."""
+    task_successful: bool = pyd.Field(description='Task success status', default=False)
+    """Task success status."""
+
+    @pyd.model_validator(mode='after')
+    def validate_mutual_exclusivity(self) -> 'FunctionCallingChatMessage':
+        """Ensure tool calls and final answer are mutually exclusive.
+
+        Raises:
+            ValueError: If validation fails.
+        """
+        has_tool_calls = self.tool_calls is not None and len(self.tool_calls) > 0
+        has_final_answer = self.final_answer is not None
+
+        if has_tool_calls and has_final_answer:
+            raise ValueError(
+                'Cannot have both tool_calls and final_answer. '
+                'Provide either tools to execute or final_answer to conclude.'
+            )
+
+        if has_tool_calls and self.task_successful:
+            raise ValueError(
+                'task_successful must be False when executing tools (intermediate step)'
+            )
+
+        return self
+
+    @property
+    def is_final(self) -> bool:
+        """Check if this is a final answer."""
+        return self.final_answer is not None
+
+    def __str__(self) -> str:
+        """Return a string representation of the message."""
+        if self.is_final:
+            return f'{self.final_answer}'
+
+        parts = []
+        if self.thought:
+            parts.append(f'Thought: {self.thought}')
+        if self.content and self.content != self.thought:
+            parts.append(f'Content: {self.content}')
+        if self.tool_calls:
+            for tc in self.tool_calls:
+                parts.append(f'Tool Call: {tc.name}({tc.arguments})')
 
         return '\n'.join(parts)
 

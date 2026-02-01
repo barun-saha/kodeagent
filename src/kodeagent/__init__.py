@@ -7,6 +7,7 @@ from .kodeagent import (
     CodeActAgent,
     CodeActChatMessage,
     CodeRunner,
+    FunctionCallingAgent,
     ReActAgent,
     ReActChatMessage,
     Task,
@@ -14,7 +15,13 @@ from .kodeagent import (
     print_response,
 )
 from .kutils import detect_file_type, is_image_file, is_it_url, make_user_message
-from .models import AgentPlan, ObserverResponse, PlanStep
+from .models import (
+    AgentPlan,
+    FunctionCallingChatMessage,
+    ObserverResponse,
+    PlanStep,
+    ToolCall,
+)
 from .orchestrator import Observer, Planner
 from .tools import (
     calculator,
@@ -38,6 +45,8 @@ __all__ = [
     'CodeActAgent',
     'CodeActChatMessage',
     'CodeRunner',
+    'FunctionCallingAgent',
+    'FunctionCallingChatMessage',
     'Observer',
     'ObserverResponse',
     'PlanStep',
@@ -60,7 +69,9 @@ __all__ = [
     'search_arxiv',
     'search_web',
     'search_wikipedia',
+    'search_wikipedia',
     'tool',
+    'ToolCall',
 ]
 
 

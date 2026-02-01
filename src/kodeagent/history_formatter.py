@@ -183,3 +183,66 @@ class CodeActHistoryFormatter(HistoryFormatter):
             Always False.
         """
         return False
+
+
+class FunctionCallingHistoryFormatter(HistoryFormatter):
+    """Formats history for agents with native function calling support.
+
+    Uses LLM's native `tool_calls` structure directly.
+    """
+
+    def should_format_as_tool_call(self, msg: ChatMessage) -> bool:
+        """Check if message has tool_calls field.
+
+        Args:
+            msg: The message to check.
+
+        Returns:
+            True if message is an assistant message with tool calls.
+        """
+        d = msg.model_dump()
+        return bool(d.get('role') == 'assistant' and getattr(msg, 'tool_calls', None))
+
+    def format_tool_call(self, msg: ChatMessage, state: dict) -> dict:
+        """Format native tool calls.
+
+        Args:
+            msg: Message containing tool_calls.
+            state: Mutable state dict to update.
+
+        Returns:
+            Formatted tool call dictionary.
+        """
+        tool_calls_data = []
+        if getattr(msg, 'tool_calls', None):
+            for tc in msg.tool_calls:
+                state['last_tool_call_id'] = tc.id  # Update last ID
+                tool_calls_data.append(
+                    {
+                        'id': tc.id,
+                        'type': 'function',
+                        'function': {
+                            'name': tc.name,
+                            'arguments': tc.arguments,
+                        },
+                    }
+                )
+
+        state['pending_tool_call'] = True
+
+        return {
+            'role': 'assistant',
+            'content': getattr(msg, 'content', None) or getattr(msg, 'thought', None),
+            'tool_calls': tool_calls_data,
+        }
+
+    def should_add_pending_placeholder(self, state: dict) -> bool:
+        """Check if placeholder needed for interrupted tool call.
+
+        Args:
+            state: State dict with pending_tool_call.
+
+        Returns:
+            True if there's a pending tool call without a response.
+        """
+        return bool(state.get('pending_tool_call', False))
