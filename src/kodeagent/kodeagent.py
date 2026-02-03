@@ -2246,6 +2246,40 @@ class FunctionCallingAgent(ReActAgent):
             act_span.end(output='no_tool_calls')
             return
 
+        # Check for repeated tool calls to break infinite loops (especially for smaller models)
+        if len(self.messages) >= 3:
+            # Look for the last assistant message that made tool calls
+            last_asst_tc_msg = None
+            for i in range(len(self.messages) - 2, -1, -1):
+                m = self.messages[i]
+                if m.role == 'assistant' and getattr(m, 'tool_calls', None):
+                    last_asst_tc_msg = m
+                    break
+
+            if last_asst_tc_msg:
+                # Compare first tool call for loop detection
+                curr_tc = tool_calls[0]
+                prev_tc = last_asst_tc_msg.tool_calls[0]
+
+                if curr_tc.name == prev_tc.name and curr_tc.arguments == prev_tc.arguments:
+                    logger.warning(
+                        f'Detected repeated tool call: {curr_tc.name}({curr_tc.arguments}). '
+                        'Forcing final answer.'
+                    )
+                    self.add_to_history(
+                        ChatMessage(
+                            role='user',
+                            content=(
+                                f'You have already called "{curr_tc.name}" with these arguments '
+                                'and received a result. Please analyze the results in the '
+                                'history and provide your FINAL ANSWER now. '
+                                'Do NOT call any more tools.'
+                            ),
+                        )
+                    )
+                    act_span.end(output='repeated_tool_call_blocked')
+                    return
+
         for tc in tool_calls:
             tool_name = tc.name
             tool_args_str = tc.arguments
@@ -2328,15 +2362,6 @@ class FunctionCallingAgent(ReActAgent):
                         metadata={'is_error': True},
                     )
 
-        # Gemini Fix: Ensure history ends with a user role to avoid "single turn requests
-        # end with a user role" error.
-        self.add_to_history(
-            ChatMessage(
-                role='user',
-                content='Please continue based on the above tool results.',
-            )
-        )
-
         act_span.update(status='success', tools_executed=len(tool_calls))
         act_span.end(output='tools_completed')
 
@@ -2393,19 +2418,20 @@ async def main():
         max_iterations=5,
         litellm_params=litellm_params,
     )
-    # litellm_params = {'temperature': 0, 'timeout': 90}
-    # agent = FunctionCallingAgent(
-    #     name='Simple agent',
-    #     model_name=model_name,
-    #     tools=[
-    #         dtools.calculator,
-    #         dtools.search_web,
-    #         dtools.read_webpage,
-    #         dtools.extract_as_markdown,
-    #     ],
-    #     max_iterations=5,
-    #     litellm_params=litellm_params,
-    # )
+    litellm_params = {'temperature': 2, 'timeout': 90}
+    # model_name = 'together_ai/Meta-Llama-3.1-8B-Instruct'
+    agent = FunctionCallingAgent(
+        name='Simple agent',
+        model_name=model_name,
+        tools=[
+            dtools.calculator,
+            dtools.search_web,
+            dtools.read_webpage,
+            dtools.extract_as_markdown,
+        ],
+        max_iterations=5,
+        litellm_params=litellm_params,
+    )
     # agent = CodeActAgent(
     #     name='Simple agent',
     #     model_name=model_name,
@@ -2458,7 +2484,7 @@ async def main():
 
     print(f'{agent.__class__.__name__} demo\n')
 
-    for task, img_urls in the_tasks:
+    for task, img_urls in the_tasks[:1]:
         rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
         async for response in agent.run(task, files=img_urls):
             print_response(response, only_final=True)
