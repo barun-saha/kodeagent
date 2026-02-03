@@ -2086,6 +2086,19 @@ class FunctionCallingAgent(ReActAgent):
     ) -> FunctionCallingChatMessage | None:
         """Chat with the LLM using function calling."""
         messages = self.formatted_history_for_llm()
+
+        # IMP: Gemini Fix (Transient)
+        # If the last message is a tool response, we MUST append a user message
+        # to satisfy the API requirement. We do this here (transiently) instead
+        # of in _act (persistently) to avoid infinite loops where the model
+        # feels compelled to continue.
+        if messages and messages[-1].get('role') == 'tool':
+            messages.append(
+                {
+                    'role': 'user',
+                    'content': 'Please continue based on the above tool results.',
+                }
+            )
         tools_schemas = self._generate_tool_schemas()
 
         params = self.litellm_params.copy()
