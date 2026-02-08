@@ -232,7 +232,7 @@ class FunctionCallingHistoryFormatter(HistoryFormatter):
 
         return {
             'role': 'assistant',
-            'content': getattr(msg, 'content', None) or getattr(msg, 'thought', None),
+            'content': getattr(msg, 'content', None),
             'tool_calls': tool_calls_data,
         }
 

@@ -339,8 +339,6 @@ class FunctionCallingChatMessage(ChatMessage):
     """Role of the message sender. Defaults to 'assistant'."""
     content: str | None = pyd.Field(description='Optional content', default=None)
     """Optional content/thought of the message."""
-    thought: str | None = pyd.Field(description='Optional reasoning', default=None)
-    """Optional reasoning."""
     tool_calls: list[ToolCall] | None = pyd.Field(
         description='List of tool calls to execute', default=None
     )
@@ -384,9 +382,7 @@ class FunctionCallingChatMessage(ChatMessage):
             return f'{self.final_answer}'
 
         parts = []
-        if self.thought:
-            parts.append(f'Thought: {self.thought}')
-        if self.content and self.content != self.thought:
+        if self.content:
             parts.append(f'Content: {self.content}')
         if self.tool_calls:
             for tc in self.tool_calls:

@@ -691,9 +691,9 @@ class ReActAgent(Agent):
                 else:
                     observations.append(content)
 
-            # Look for assistant thought
-            if msg.role == 'assistant':
-                thought = getattr(msg, 'thought', None)
+            # Look for assistant thought (handle both assistant and model roles)
+            if msg.role in ['assistant', 'model']:
+                thought = getattr(msg, 'thought', None) or getattr(msg, 'content', None)
                 if thought:
                     last_thought = thought
 
@@ -2140,16 +2140,14 @@ class FunctionCallingAgent(ReActAgent):
                 for tc in tool_calls:
                     logger.debug(f'  Tool Call: {tc.name}({tc.arguments})')
 
-            thought = content
-            if not thought and tool_calls:
-                # Fallback thought if model only provides tool calls
+            if not content and tool_calls:
+                # Fallback content if model only provides tool calls
                 tool_names = ', '.join([tc.name for tc in tool_calls])
-                thought = f'I will use tools: {tool_names}'
+                content = f'I will use tools: {tool_names}'
 
             return FunctionCallingChatMessage(
-                role=getattr(response_message, 'role', 'assistant'),
+                role='assistant',  # Always normalize to assistant in internal history
                 content=content,
-                thought=thought,
                 tool_calls=tool_calls if tool_calls else None,
                 final_answer=final_answer,
                 task_successful=True if final_answer else False,
@@ -2175,13 +2173,13 @@ class FunctionCallingAgent(ReActAgent):
 
             gen_span.update(
                 status='success',
-                has_thought=bool(thought_msg.thought),
+                has_thought=bool(thought_msg.content),
                 has_tool_calls=bool(thought_msg.tool_calls),
                 has_final_answer=bool(thought_msg.final_answer),
             )
             gen_span.end(
                 output={
-                    'thought': thought_msg.thought,
+                    'thought': thought_msg.content,
                     'tool_calls': [tc.name for tc in thought_msg.tool_calls]
                     if thought_msg.tool_calls
                     else None,
@@ -2214,7 +2212,7 @@ class FunctionCallingAgent(ReActAgent):
         act_span = self.tracer_manager.start_span(
             parent=self.current_trace,
             name='act',
-            input_data={'thought': getattr(prev_msg, 'thought', None)},
+            input_data={'thought': getattr(prev_msg, 'content', None)},
         )
 
         # Robust type check - accept anything with tool_calls or correct class
@@ -2252,7 +2250,7 @@ class FunctionCallingAgent(ReActAgent):
             last_asst_tc_msg = None
             for i in range(len(self.messages) - 2, -1, -1):
                 m = self.messages[i]
-                if m.role == 'assistant' and getattr(m, 'tool_calls', None):
+                if m.role in ['assistant', 'model'] and getattr(m, 'tool_calls', None):
                     last_asst_tc_msg = m
                     break
 
@@ -2263,20 +2261,24 @@ class FunctionCallingAgent(ReActAgent):
 
                 if curr_tc.name == prev_tc.name and curr_tc.arguments == prev_tc.arguments:
                     logger.warning(
-                        f'Detected repeated tool call: {curr_tc.name}({curr_tc.arguments}). '
-                        'Forcing final answer.'
+                        'Detected repeated tool call: %s(%s). Forcing final answer.',
+                        curr_tc.name,
+                        curr_tc.arguments,
                     )
-                    self.add_to_history(
-                        ChatMessage(
-                            role='user',
-                            content=(
-                                f'You have already called "{curr_tc.name}" with these arguments '
-                                'and received a result. Please analyze the results in the '
-                                'history and provide your FINAL ANSWER now. '
-                                'Do NOT call any more tools.'
-                            ),
+                    for tc in tool_calls:
+                        self.add_to_history(
+                            ChatMessage(
+                                role='tool',
+                                content=(
+                                    f'Error: You have already called "{tc.name}" with these'
+                                    ' arguments and received a result. You must analyze the'
+                                    ' previous results in the history and provide your FINAL'
+                                    ' ANSWER now. Do NOT call this tool again with these arguments.'
+                                ),
+                                tool_call_id=tc.id,
+                                name=tc.name,
+                            )
                         )
-                    )
                     act_span.end(output='repeated_tool_call_blocked')
                     return
 
@@ -2314,11 +2316,7 @@ class FunctionCallingAgent(ReActAgent):
                 )
             else:
                 try:
-                    logger.debug(
-                        '🛠 Running tool: %s with args: %s',
-                        tool_name,
-                        tool_args,
-                    )
+                    logger.debug('🛠 Running tool: %s with args: %s', tool_name, tool_args)
                     with OutputInterceptor() as interceptor:
                         result = self.tool_name_to_func[tool_name](**tool_args)
                         generated_files = interceptor.get_manifest()

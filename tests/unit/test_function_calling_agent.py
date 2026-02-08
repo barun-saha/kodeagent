@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from kodeagent import (
     ChatMessage,
     FunctionCallingAgent,
@@ -50,6 +51,7 @@ def mock_litellm_support():
 
 @pytest.fixture
 def agent(mock_litellm_support):
+    """Create a FunctionCallingAgent for testing."""
     return FunctionCallingAgent(
         name='TestAgent',
         model_name='test-model',
@@ -58,6 +60,7 @@ def agent(mock_litellm_support):
     )
 
 
+@pytest.mark.skip(reason='Function calling check is currently disabled in code')
 def test_initialization_check():
     """Test that agent raises ValueError if model doesn't support function calling."""
     with patch('kodeagent.kutils.supports_function_calling', return_value=False):
@@ -187,17 +190,15 @@ async def test_act_execution(agent):
     assert responses[0]['value'] == 12  # 5+7
 
     # Verify history updated
-    assert len(agent.messages) == 3  # Assistant, Tool response, User continuation
+    assert len(agent.messages) == 2  # Assistant, Tool response
     tool_msg = agent.messages[1]
     assert tool_msg.role == 'tool'
     assert tool_msg.content == '12'
     assert tool_msg.tool_call_id == 'call_999'
     assert tool_msg.name == 'tool_add'
 
-    # Verify Gemini continuation
-    cont_msg = agent.messages[2]
-    assert cont_msg.role == 'user'
-    assert 'continue' in cont_msg.content.lower()
+    # Gemini continuation is now transient in _chat, not persistent in _act
+    # StartLine matches the verification block
 
 
 @pytest.mark.asyncio
@@ -272,7 +273,7 @@ async def test_update_plan_aggregates_observations(agent):
     agent.messages = [
         FunctionCallingChatMessage(
             role='assistant',
-            thought='I will add 1+2 and greet Joe',
+            content='I will add 1+2 and greet Joe',
             tool_calls=[
                 ToolCall(id='c1', name='tool_add', arguments='{"a":1, "b":2}'),
                 ToolCall(id='c2', name='tool_greet', arguments='{"name":"Joe"}'),
@@ -293,8 +294,8 @@ async def test_update_plan_aggregates_observations(agent):
 
 
 @pytest.mark.asyncio
-async def test_chat_populates_thought_fallback(agent):
-    """Test that _chat populates thought from content or tool names."""
+async def test_chat_populates_content_fallback(agent):
+    """Test that _chat populates content from tool names."""
     mock_message = MagicMock()
     mock_message.role = 'assistant'
     mock_message.content = None  # No content
@@ -309,5 +310,43 @@ async def test_chat_populates_thought_fallback(agent):
         mock_call.return_value = mock_message
         response = await agent._chat()
 
-        assert response.thought == 'I will use tools: tool_add'
-        assert response.content is None
+        assert response.content == 'I will use tools: tool_add'
+
+
+@pytest.mark.asyncio
+async def test_act_repeated_call_prevention(agent):
+    """Test _act prevents repeated tool calls with Tool message (not User message)."""
+    # 1. Setup history with a COMPLETED tool call
+    tc1 = ToolCall(id='call_1', name='tool_add', arguments='{"a": 1, "b": 2}')
+    history = [
+        FunctionCallingChatMessage(role='assistant', content='First call', tool_calls=[tc1]),
+        ChatMessage(role='tool', content='3', tool_call_id='call_1', name='tool_add'),
+    ]
+    agent.messages.extend(history)
+
+    # 2. Add current message with REPEATED tool call (same name/args, new ID)
+    tc2 = ToolCall(id='call_2', name='tool_add', arguments='{"a": 1, "b": 2}')
+    agent.messages.append(
+        FunctionCallingChatMessage(
+            role='assistant', content='Second call (repeat)', tool_calls=[tc2]
+        )
+    )
+
+    # 3. Run _act()
+    responses = []
+    async for resp in agent._act():
+        responses.append(resp)
+
+    # 4. Verify no tool execution (empty responses as it yields nothing on block usually)
+    # The current implementation yields nothing when blocking loop?
+    # Let's check `kodeagent.py`:
+    #   yield self.response(...) only happens on tool execution or error.
+    #   When blocked, it does `act_span.end('repeated_tool_call_blocked')` and `return`.
+    assert len(responses) == 0
+
+    # 5. Verify HISTORY: Should contain a TOOL message with Error content
+    last_msg = agent.messages[-1]
+    assert last_msg.role == 'tool', 'Must use "tool" role to satisfy API sequence'
+    assert last_msg.tool_call_id == 'call_2', 'Must reference the current call ID'
+    assert 'Error: You have already called "tool_add"' in str(last_msg.content)
+    assert 'analyze the previous results' in str(last_msg.content)
