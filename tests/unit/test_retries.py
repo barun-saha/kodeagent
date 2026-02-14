@@ -111,10 +111,10 @@ async def test_graceful_exit_on_rate_limit_during_plan():
         assert 'initial plan' in final_response['value']
 
         # Verify history contains the error message
-        assert any('Rate limit exceeded' in str(msg) for msg in agent.messages), (
+        assert any('Rate limit exceeded' in str(msg) for msg in agent.chat_history), (
             'Error message not found in history'
         )
-        assert len(agent.messages) > 0, 'History is empty'
+        assert len(agent.chat_history) > 0, 'History is empty'
 
 
 @pytest.mark.asyncio
@@ -153,7 +153,7 @@ async def test_graceful_exit_on_rate_limit_during_execution():
         assert 'Rate limit exceeded' in final_response['value']
 
         # Verify history contains the error message
-        assert any('Rate limit exceeded' in str(msg) for msg in agent.messages), (
+        assert any('Rate limit exceeded' in str(msg) for msg in agent.chat_history), (
             'Error message not found in history'
         )
 
@@ -191,7 +191,7 @@ async def test_graceful_exit_on_exhaustion():
         assert 'Rate limit exceeded' in final_response['value']
 
         # Verify history contains the error message
-        assert any('Rate limit exceeded' in str(msg) for msg in agent.messages)
+        assert any('Rate limit exceeded' in str(msg) for msg in agent.chat_history)
 
 
 @pytest.mark.asyncio

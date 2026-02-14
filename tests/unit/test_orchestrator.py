@@ -358,7 +358,7 @@ async def test_observer_yields_correction_message():
     assert 'Please adjust step 1' in observer_response['value']
 
     # Verify history contains the observation message
-    assert any('Observation: Please adjust step 1' in str(msg) for msg in agent.messages)
+    assert any('Observation: Please adjust step 1' in str(msg) for msg in agent.chat_history)
 
 
 @pytest.mark.asyncio

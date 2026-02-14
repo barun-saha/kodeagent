@@ -143,6 +143,55 @@ class TestReActHistoryFormatter:
         state = {}
         assert formatter.should_add_pending_placeholder(state) is False
 
+    def test_pydantic_to_dict_tool_call(self, formatter: ReActHistoryFormatter):
+        """Test pydantic_to_dict for tool call message."""
+        msg = ReActChatMessage(
+            role='assistant',
+            thought='I will search',
+            action='search_web',
+            args='{"query": "test"}',
+        )
+
+        result = formatter.pydantic_to_dict(msg)
+
+        assert result['role'] == 'assistant'
+        assert result['content'] is None
+        assert 'tool_calls' in result
+        assert len(result['tool_calls']) == 1
+        assert result['tool_calls'][0]['function']['name'] == 'search_web'
+        assert result['_thought'] == 'I will search'
+        assert result['_action'] == 'search_web'
+        assert result['_args'] == '{"query": "test"}'
+
+    def test_pydantic_to_dict_final_answer(self, formatter: ReActHistoryFormatter):
+        """Test pydantic_to_dict for final answer."""
+        msg = ReActChatMessage(
+            role='assistant',
+            thought='Done',
+            action='FINISH',
+            args=None,
+            final_answer='The answer is 42',
+            task_successful=True,
+        )
+
+        result = formatter.pydantic_to_dict(msg)
+
+        assert result['role'] == 'assistant'
+        assert result['content'] == 'The answer is 42'
+        assert 'tool_calls' not in result
+        assert result['_thought'] == 'Done'
+        assert result['_task_successful'] is True
+
+    def test_pydantic_to_dict_generic(self, formatter: ReActHistoryFormatter):
+        """Test pydantic_to_dict for generic message."""
+        # Generic message doesn't have ReAct specific fields usually, but we check basic preservation
+        msg = ChatMessage(role='user', content='Hello')
+        result = formatter.pydantic_to_dict(msg)
+
+        assert result['role'] == 'user'
+        assert result['content'] == 'Hello'
+        assert result['_thought'] is None
+
 
 class TestCodeActHistoryFormatter:
     """Test CodeActHistoryFormatter implementation."""
@@ -257,3 +306,37 @@ class TestCodeActHistoryFormatter:
         # Empty state
         state = {}
         assert formatter.should_add_pending_placeholder(state) is False
+
+    def test_pydantic_to_dict_code(self, formatter: CodeActHistoryFormatter):
+        """Test pydantic_to_dict for code execution message."""
+        msg = CodeActChatMessage(
+            role='assistant',
+            thought='I will calculate',
+            code='print(2+2)',
+        )
+
+        result = formatter.pydantic_to_dict(msg)
+
+        assert result['role'] == 'assistant'
+        assert 'tool_calls' in result
+        assert result['tool_calls'][0]['function']['name'] == CODE_ACT_PSEUDO_TOOL_NAME
+        assert result['_thought'] == 'I will calculate'
+        assert result['_code'] == 'print(2+2)'
+
+    def test_pydantic_to_dict_final_answer(self, formatter: CodeActHistoryFormatter):
+        """Test pydantic_to_dict for final answer."""
+        msg = CodeActChatMessage(
+            role='assistant',
+            thought='Done',
+            final_answer='4',
+            task_successful=True,
+            code=None,
+        )
+
+        result = formatter.pydantic_to_dict(msg)
+
+        assert result['role'] == 'assistant'
+        assert result['content'] == '4'
+        assert 'tool_calls' not in result
+        assert result['_thought'] == 'Done'
+        assert result['_task_successful'] is True

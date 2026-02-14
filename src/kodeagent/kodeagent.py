@@ -131,13 +131,10 @@ class Agent(ABC):
         self.tool_name_to_func = {t.name: t for t in tools} if tools else {}
 
         self.task: Task | None = None
-        self.messages: list[ChatMessage] = []
-
-        # State variables for incremental history formatting
-        self._formatted_history_cache: list[dict] = []
-        self._history_processed_idx: int = -1
-        self._last_tool_call_id: str | None = None
-        self._pending_tool_call: bool = False
+        self.chat_history: list[dict] = []
+        # Cache for observer history (accumulated string)
+        self._observer_history_str: str = ''
+        self._observer_history_idx: int = -1
 
         # Cache for observer history (accumulated string)
         self._observer_history_str: str = ''
@@ -420,9 +417,73 @@ class Agent(ABC):
 
         return {'type': rtype, 'channel': channel, 'value': value, 'metadata': metadata}
 
-    @abstractmethod
     def formatted_history_for_llm(self) -> list[dict]:
-        """Generate a formatted list of chat history messages to send to an LLM."""
+        """Return the history formatted for the LLM.
+
+        Returns:
+            A list of dictionary messages compliant with OpenAPI/LLM specs.
+        """
+        # Filter out internal metadata fields (starting with _)
+        clean_history = []
+        for msg in self.chat_history:
+            clean_msg = {k: v for k, v in msg.items() if not k.startswith('_')}
+            clean_history.append(clean_msg)
+
+        # Check if the last assistant message has tool calls that haven't been responded to
+        # This is primarily for ReActAgent resume/interruption scenarios
+        if (
+            clean_history
+            and clean_history[-1].get('role') == 'assistant'
+            and clean_history[-1].get('tool_calls')
+        ):
+            # Check if there are tool responses for each tool call
+            # For simplicity, if the last message is assistant with tool_calls,
+            # we assume we need to add placeholders if we are returning this history
+            # (which usually means we're about to call the LLM again)
+            for tool_call in clean_history[-1].get('tool_calls', []):
+                clean_history.append(
+                    {
+                        'role': 'tool',
+                        'content': 'Error: Tool execution was interrupted.',
+                        'tool_call_id': tool_call.get('id'),
+                    }
+                )
+
+        return clean_history
+
+    def _message_to_string(self, msg: dict) -> str:
+        """Reconstruct string representation from dict for Observer/History.
+
+        Args:
+            msg: The message dictionary.
+
+        Returns:
+            String representation of the message content/logic.
+        """
+        role = msg.get('role')
+        content = msg.get('content')
+
+        if role == 'assistant':
+            # ReAct style reconstruction
+            action = msg.get('_action')
+            if action and action != 'FINISH':
+                parts = []
+                if msg.get('_thought'):
+                    parts.append(f'Thought: {msg["_thought"]}')
+                parts.append(f'Action: {action}')
+                if msg.get('_args'):
+                    parts.append(f'Args: {msg["_args"]}')
+                return '\n'.join(parts)
+
+            # CodeAct style reconstruction
+            if msg.get('_code'):
+                parts = []
+                if msg.get('_thought'):
+                    parts.append(f'Thought: {msg["_thought"]}')
+                parts.append(f'Code:\n```python\n{msg["_code"]}\n```')
+                return '\n'.join(parts)
+
+        return str(content) if content else ''
 
     async def _chat(self, response_format: type[pyd.BaseModel] | None = None) -> str | None:
         """Interact with the LLM using the agent's message history.
@@ -477,9 +538,18 @@ class Agent(ABC):
                 else:
                     raise
 
-    def add_to_history(self, message: ChatMessage):
+    def add_to_history(self, message: ChatMessage | dict):
         """Add a chat message to the agent's message history."""
-        self.messages.append(message)
+        if isinstance(message, ChatMessage):
+            # Use formatter if available
+            if self._history_formatter:
+                message_dict = self._history_formatter.pydantic_to_dict(message)
+            else:
+                # Default fallback for simple agents
+                message_dict = message.model_dump()
+            self.chat_history.append(message_dict)
+        else:
+            self.chat_history.append(message)
 
     def get_tools_description(self, tools: list[Any] | None = None) -> str:
         """Generate a description of all the tools available to the agent. Required args are marked.
@@ -545,22 +615,22 @@ class Agent(ABC):
         start_idx = self._observer_history_idx + 1
 
         # If there are new messages, process them
-        if start_idx < len(self.messages):
-            new_msgs = self.messages[start_idx:]
+        if start_idx < len(self.chat_history):
+            new_msgs = self.chat_history[start_idx:]
             new_segments = []
 
             for msg in new_msgs:
                 # Skip system messages
-                if msg.role == 'system':
+                if msg.get('role') == 'system':
                     continue
 
-                content = str(msg)
+                content = self._message_to_string(msg)
 
                 # Truncate any message content exceeding 1000 chars
                 if len(content) > 1000:
                     content = content[:1000] + '... [TRUNCATED]'
 
-                new_segments.append(f'[{msg.role}]: {content}')
+                new_segments.append(f'[{msg.get("role")}]: {content}')
 
             if new_segments:
                 new_block = '\n'.join(new_segments)
@@ -569,7 +639,7 @@ class Agent(ABC):
                 else:
                     self._observer_history_str = new_block
 
-            self._observer_history_idx = len(self.messages) - 1
+            self._observer_history_idx = len(self.chat_history) - 1
 
         return self._observer_history_str
 
@@ -581,20 +651,21 @@ class Agent(ABC):
             truncate_text: If True, truncate message content to 100 chars.
         """
         messages = []
-        for msg in self.messages[start_idx:]:
-            content = str(msg)
+        for msg in self.chat_history[start_idx:]:
+            content = self._message_to_string(msg)
             if truncate_text and len(content) > 100:
                 content = content[:100] + '...'
-            messages.append(f'[{msg.role}]: {content}')
+            messages.append(f'[{msg.get("role")}]: {content}')
         return '\n'.join(messages)
 
     def clear_history(self):
         """Clear the agent's message history."""
-        self.messages = []
-        self._formatted_history_cache = []
-        self._history_processed_idx = -1
-        self._last_tool_call_id = None
-        self._pending_tool_call = False
+        self.chat_history = []
+        self._observer_history_str = ''
+        self._observer_history_idx = -1
+        if self._history_formatter:
+            # We don't have formatter state anymore in agent, but good to check expectations
+            pass
 
     def init_history(self):
         """Initialize the agent's message history, e.g., with a system prompt."""
@@ -673,25 +744,27 @@ class ReActAgent(Agent):
         last_observation = None
 
         # Traverse backwards to find the most recent thought and observation
-        for msg in reversed(self.messages):
+        for msg in reversed(self.chat_history):
             # Look for observation (Tool response)
-            if last_observation is None and msg.role == 'tool':
-                last_observation = msg.content
+            if last_observation is None and msg.get('role') == 'tool':
+                last_observation = msg.get('content')
 
             # Look for thought (Assistant response with a 'thought' field)
             # We use distinct checks for role and attribute to be robust to custom message types
-            if last_thought is None and msg.role == 'assistant':
-                # Use getattr for loose coupling - accepts any message object with a 'thought'
-                thought = getattr(msg, 'thought', None)
+            if last_thought is None and msg.get('role') == 'assistant':
+                # Use get for loose coupling - accepts any message object with a '_thought'
+                thought = msg.get('_thought')
                 if thought:
                     last_thought = thought
 
                 # If the message contains a final answer, treat it as the observation
                 # This ensures the Planner sees the final result, allowing it to mark "Output..."
                 # steps as done
-                final_answer = getattr(msg, 'final_answer', None)
-                if final_answer:
-                    last_observation = f'Final Answer: {final_answer}'
+                # Final answer messages have content but no tool calls
+                if not msg.get('tool_calls'):
+                    final_answer = msg.get('content')
+                    if final_answer:
+                        last_observation = f'Final Answer: {final_answer}'
 
             if last_thought and last_observation:
                 break
@@ -714,18 +787,11 @@ class ReActAgent(Agent):
 
     def init_history(self):
         """Initialize the agent's message history with the system prompt."""
-        self.messages = [
-            ChatMessage(
-                role='system',
-                content=self.system_prompt.format(
-                    persona=self.persona or '', tools=self.get_tools_description()
-                ),
-            )
-        ]
-        self._formatted_history_cache = []
-        self._history_processed_idx = -1
-        self._last_tool_call_id = None
-        self._pending_tool_call = False
+        content = self.system_prompt.format(
+            persona=self.persona or '', tools=self.get_tools_description()
+        )
+        self.chat_history = [{'role': 'system', 'content': content}]
+        self.final_answer_found = False
 
     async def _create_initial_plan(self):
         """Helper method to create the initial plan.
@@ -1012,7 +1078,7 @@ class ReActAgent(Agent):
             name='think',
             input_data={
                 'model': self.model_name,
-                'messages_count': len(self.messages),
+                'messages_count': len(self.chat_history),
             },
         )
 
@@ -1173,17 +1239,27 @@ class ReActAgent(Agent):
         Now handles explicit FINISH action with proper error handling and
         hierarchical tracing of the act operation, tool execution, and errors.
         """
-        prev_msg: ReActChatMessage = self.messages[-1]  # type: ignore
+        prev_msg_dict = self.chat_history[-1]
+
+        # Extract fields directly from dictionary to avoid strict Pydantic validation failures
+        # on malformed or incomplete messages
+        thought = prev_msg_dict.get('_thought')
+        action = prev_msg_dict.get('_action')
+        args = prev_msg_dict.get('_args')
+        task_successful = prev_msg_dict.get('_task_successful', True)
+
+        # Determine final answer based on action or content presence
+        final_answer = prev_msg_dict.get('content') if action == 'FINISH' else None
 
         # Start root span for the entire act operation
         act_span = self.tracer_manager.start_span(
             parent=self.current_trace,
             name='act',
-            input_data={'thought': getattr(prev_msg, 'thought', None)},
+            input_data={'thought': thought},
         )
 
         # Check for malformed response
-        if not hasattr(prev_msg, 'thought') or not prev_msg.thought:
+        if not thought:
             act_span.update(status='error', error='Missing or empty thought field')
             self.add_to_history(
                 ChatMessage(
@@ -1198,31 +1274,31 @@ class ReActAgent(Agent):
             return
 
         # Check if this is a final answer
-        if hasattr(prev_msg, 'final_answer') and prev_msg.final_answer:
+        if final_answer:
             self.final_answer_found = True
             self.task.is_finished = True
-            self.task.is_error = not prev_msg.task_successful
+            self.task.is_error = not task_successful
 
             act_span.update(
                 status='success',
                 operation='final_answer',
-                task_successful=prev_msg.task_successful,
+                task_successful=task_successful,
             )
             act_span.end(
-                output=prev_msg.final_answer,
-                metadata={'task_successful': prev_msg.task_successful},
+                output=final_answer,
+                metadata={'task_successful': task_successful},
             )
 
             yield self.response(
                 rtype='final',
-                value=prev_msg.final_answer,
+                value=final_answer,
                 channel='_act',
-                metadata={'final_answer_found': prev_msg.task_successful},
+                metadata={'final_answer_found': task_successful},
             )
         else:
             # Tool execution
-            tool_name = prev_msg.action
-            tool_args = prev_msg.args
+            tool_name = action
+            tool_args = args
             tool_args_dict = {}
 
             # Validate tool call has required fields
@@ -1248,15 +1324,23 @@ class ReActAgent(Agent):
             try:
                 # CRITICAL: Parse the JSON string into a dictionary
                 # The args field is a JSON string, not a dict
-                tool_args = tool_args.strip().strip('`').strip()
-                if tool_args.startswith('json'):
-                    tool_args = tool_args[4:].strip()
+                if isinstance(tool_args, str):
+                    tool_args = tool_args.strip().strip('`').strip()
+                    if tool_args.startswith('json'):
+                        tool_args = tool_args[4:].strip()
 
-                try:
-                    tool_args_dict = json.loads(tool_args)
-                except JSONDecodeError:
-                    logger.warning('JSON decode failed, attempting repair...')
-                    tool_args_dict = json_repair.loads(tool_args)
+                    try:
+                        tool_args_dict = json.loads(tool_args)
+                    except JSONDecodeError:
+                        logger.warning('JSON decode failed, attempting repair...')
+                        tool_args_dict = json_repair.loads(tool_args)
+                elif isinstance(tool_args, dict):
+                    # Handle case where args might already be a dict (defensive)
+                    tool_args_dict = tool_args
+                else:
+                    # Attempt to cast to str and parse if it's some other type?
+                    # Or force error.
+                    pass  # Will fail isinstance check below if not dict
 
                 # Validate it's actually a dictionary
                 if not isinstance(tool_args_dict, dict):
@@ -1308,8 +1392,15 @@ class ReActAgent(Agent):
                         generated_files=generated_files,
                     )
 
+                    # Get tool call ID for correct pairing in history
+                    prev_msg_dict = self.chat_history[-1]
+                    tool_calls = prev_msg_dict.get('tool_calls', [])
+                    tool_call_id = tool_calls[0].get('id') if tool_calls else None
+
                     # Always use role='tool' for tool results
-                    self.add_to_history(ChatMessage(role='tool', content=str(result)))
+                    self.add_to_history(
+                        {'role': 'tool', 'content': str(result), 'tool_call_id': tool_call_id}
+                    )
 
                     act_span.update(
                         status='success',
@@ -1347,8 +1438,15 @@ class ReActAgent(Agent):
                         tool=tool_name,
                         error=result,
                     )
+                    # Get tool call ID for correct pairing in history
+                    prev_msg_dict = self.chat_history[-1]
+                    tool_calls = prev_msg_dict.get('tool_calls', [])
+                    tool_call_id = tool_calls[0].get('id') if tool_calls else None
+
                     # Use role='tool' for tool errors too
-                    self.add_to_history(ChatMessage(role='tool', content=result))
+                    self.add_to_history(
+                        {'role': 'tool', 'content': result, 'tool_call_id': tool_call_id}
+                    )
                     act_span.end(output='tool_not_found', is_error=True)
                     yield self.response(
                         rtype='step',
@@ -1479,130 +1577,6 @@ class ReActAgent(Agent):
         raise ValueError(
             f'Could not extract valid Action or Answer from response. Text: {text[:300]}...'
         )
-
-    def formatted_history_for_llm(self) -> list[dict]:
-        """Format message history for LLM with proper tool call structure.
-        Uses incremental caching to avoid O(n^2) behavior in the course of solving a task.
-
-        Returns:
-            list[dict]: Formatted message history for LLM.
-        """
-        # Start from the next index
-        start_idx = self._history_processed_idx + 1
-
-        # If there are no new messages and we have a cache, just return it (with safety check)
-        if start_idx >= len(self.messages) and self._formatted_history_cache:
-            # handle pending tool call placeholder logic at end
-            pass
-        else:
-            # Process new messages
-            new_msgs = self.messages[start_idx:]
-
-            # Temporary list for new formatted segments
-            # We don't append directly to cache to handle user message combination logic safely
-            new_formatted_segments = []
-
-            # State for history formatter
-            formatter_state = {
-                'last_tool_call_id': self._last_tool_call_id,
-                'pending_tool_call': self._pending_tool_call,
-            }
-
-            for msg in new_msgs:
-                d = msg.model_dump()
-                role = d.get('role')
-
-                # Handle assistant tool call using strategy pattern if formatter is available
-                if self._history_formatter and self._history_formatter.should_format_as_tool_call(
-                    msg
-                ):
-                    formatted_msg = self._history_formatter.format_tool_call(msg, formatter_state)
-                    new_formatted_segments.append(formatted_msg)
-
-                elif role == 'tool':
-                    tool_msg = {'role': 'tool', 'content': str(d.get('content', ''))}
-                    if formatter_state['last_tool_call_id']:
-                        tool_msg['tool_call_id'] = formatter_state['last_tool_call_id']
-                        # NOTE: We keep last_tool_call_id until we are sure?
-                        # In original code (direct from list): last_tool_call_id = None after usage
-                        formatter_state['last_tool_call_id'] = None
-                        formatter_state['pending_tool_call'] = False
-                    new_formatted_segments.append(tool_msg)
-
-                elif role == 'assistant':
-                    if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
-                        new_formatted_segments.append(
-                            {'role': 'assistant', 'content': getattr(msg, 'final_answer')}
-                        )
-                    else:
-                        new_formatted_segments.append(
-                            {'role': 'assistant', 'content': d.get('content', '')}
-                        )
-
-                elif role == 'user':
-                    usr_msgs = ku.make_user_message(
-                        text_content=d.get('content', ''), files=d.get('files', None)
-                    )
-                    new_formatted_segments.extend(usr_msgs)
-
-                else:
-                    # system
-                    new_formatted_segments.append({'role': role, 'content': d.get('content', '')})
-
-            # Sync state back to agent
-            self._last_tool_call_id = formatter_state['last_tool_call_id']
-            self._pending_tool_call = formatter_state['pending_tool_call']
-
-            # Incremental merge with cache
-            for seg in new_formatted_segments:
-                if (
-                    self._formatted_history_cache
-                    and self._formatted_history_cache[-1].get('role') == 'user'
-                    and seg.get('role') == 'user'
-                ):
-                    # Merge content
-                    prev = self._formatted_history_cache[-1]
-                    prev_content = prev['content']
-                    curr_content = seg['content']
-
-                    if not isinstance(prev_content, list):
-                        prev_content = [prev_content]
-                    if not isinstance(curr_content, list):
-                        curr_content = [curr_content]
-
-                    # Update in place
-                    prev['content'] = prev_content + curr_content
-                else:
-                    self._formatted_history_cache.append(seg)
-
-            # Update index
-            self._history_processed_idx = len(self.messages) - 1
-
-        # Prepare final result (copy to avoid mutation issues if caller modifies)
-        result = list(self._formatted_history_cache)
-
-        # Safety check: if we have a pending tool call without response, add a placeholder
-        # This is NOT cached, as it's a transient state
-        # Delegate check to formatter
-        formatter_state = {
-            'last_tool_call_id': self._last_tool_call_id,
-            'pending_tool_call': self._pending_tool_call,
-        }
-        if self._history_formatter and self._history_formatter.should_add_pending_placeholder(
-            formatter_state
-        ):
-            logger.warning(
-                'Found tool_call without corresponding tool response, adding placeholder'
-            )
-            result.append(
-                {
-                    'role': 'tool',
-                    'tool_call_id': self._last_tool_call_id,
-                    'content': 'Error: Tool execution was interrupted',
-                }
-            )
-
-        return result
 
 
 class CodeActAgent(ReActAgent):
@@ -1744,20 +1718,13 @@ class CodeActAgent(ReActAgent):
 
     def init_history(self):
         """Initialize message history with system prompt for CodeAct agent."""
-        self.messages = [
-            ChatMessage(
-                role='system',
-                content=self.system_prompt.format(
-                    persona=self.persona or '',
-                    tools=self.get_tools_description(),
-                    authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports]),
-                ),
-            )
-        ]
-        self._formatted_history_cache = []
-        self._history_processed_idx = -1
-        self._last_tool_call_id = None
-        self._pending_tool_call = False
+        content = self.system_prompt.format(
+            persona=self.persona or '',
+            tools=self.get_tools_description(),
+            authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports]),
+        )
+        self.chat_history = [{'role': 'system', 'content': content}]
+        self.final_answer_found = False
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think step for CodeAct agent.
@@ -1771,32 +1738,33 @@ class CodeActAgent(ReActAgent):
             name='think_code',
             input_data={
                 'model': self.model_name,
-                'messages_count': len(self.messages),
+                'messages_count': len(self.chat_history),
             },
         )
 
         msg = await self._record_thought(CodeActChatMessage)
+        msg_dict = self.chat_history[-1] if (msg and self.chat_history) else None
 
-        if msg:
+        if msg_dict:
             gen_span.update(
                 status='success',
-                has_thought=bool(msg.thought),
-                has_code=bool(getattr(msg, 'code', None)),
-                has_final_answer=bool(getattr(msg, 'final_answer', None)),
+                has_thought=bool(msg_dict.get('_thought')),
+                has_code=bool(msg_dict.get('_code')),
+                has_final_answer=bool(msg_dict.get('content'))
+                if not msg_dict.get('_code')
+                else False,
             )
             gen_span.end(
                 output={
-                    'thought': msg.thought,
-                    'code': getattr(msg, 'code', None)[:100]
-                    if getattr(msg, 'code', None)
-                    else None,
+                    'thought': msg_dict.get('_thought'),
+                    'code': msg_dict.get('_code')[:100] if msg_dict.get('_code') else None,
                 },
             )
         else:
             gen_span.update(status='error', error='Failed to parse response')
             gen_span.end(output='parse_failure', is_error=True)
 
-        yield self.response(rtype='step', value=msg, channel='_think')
+        yield self.response(rtype='step', value=msg_dict, channel='_think')
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
         """Execute code based on CodeActAgent's previous thought.
@@ -1804,16 +1772,24 @@ class CodeActAgent(ReActAgent):
         Creates hierarchical spans for code execution with full tracing of
         stdout, stderr, exit status, and generated files.
         """
-        prev_msg: CodeActChatMessage = self.messages[-1]  # type: ignore
+        prev_msg_dict = self.chat_history[-1]
+
+        # Extract fields directly from dictionary
+        thought = prev_msg_dict.get('_thought')
+        code = prev_msg_dict.get('_code')
+        task_successful = prev_msg_dict.get('_task_successful', True)
+
+        # Final answer is content if no code block
+        final_answer = prev_msg_dict.get('content') if not code else None
 
         # Start root span for the entire act operation
         act_span = self.tracer_manager.start_span(
             parent=self.current_trace,
             name='act',
-            input_data={'thought': getattr(prev_msg, 'thought', None)},
+            input_data={'thought': thought},
         )
 
-        if not hasattr(prev_msg, 'thought') or not prev_msg.thought:
+        if not thought:
             act_span.update(status='error', error='Missing or empty thought field')
             self.add_to_history(
                 ChatMessage(
@@ -1827,45 +1803,47 @@ class CodeActAgent(ReActAgent):
             act_span.end(output='malformed_response')
             return
 
-        if hasattr(prev_msg, 'final_answer') and prev_msg.final_answer:
+        if final_answer:
             self.final_answer_found = True
             self.task.is_finished = True
-            self.task.is_error = not prev_msg.task_successful
+            self.task.is_error = not task_successful
 
             act_span.update(
                 status='success',
                 operation='final_answer',
-                task_successful=prev_msg.task_successful,
+                task_successful=task_successful,
             )
             act_span.end(
-                output=prev_msg.final_answer,
-                metadata={'task_successful': prev_msg.task_successful},
+                output=final_answer,
+                metadata={'task_successful': task_successful},
             )
 
             yield self.response(
                 rtype='final',
-                value=prev_msg.final_answer,
+                value=final_answer,
                 channel='_act',
-                metadata={'final_answer_found': prev_msg.task_successful},
+                metadata={'final_answer_found': task_successful},
             )
         else:
             try:
-                code = prev_msg.code.strip()
-                code = code.replace('```py', '')
-                code = code.replace('```python', '')
-                code = code.replace('```', '').strip()
+                code_to_run = code.strip() if code else ''
+                code_to_run = code_to_run.replace('```py', '')
+                code_to_run = code_to_run.replace('```python', '')
+                code_to_run = code_to_run.replace('```', '').strip()
 
-                logger.debug('🛠 Running code [truncated]: ... %s', code[-100:])
+                logger.debug(
+                    '🛠 Running code [truncated]: ... %s', code_to_run[-100:] if code_to_run else ''
+                )
 
                 # Create nested span for code execution
                 code_span = self.tracer_manager.start_span(
                     parent=act_span,
                     name='code_execution',
-                    input_data={'code_length': len(code)},
+                    input_data={'code_length': len(code_to_run)},
                 )
 
                 stdout, stderr, exit_status, generated_files = await self.code_runner.run(
-                    self.tools_source_code, code, self.task.id
+                    self.tools_source_code, code_to_run, self.task.id
                 )
 
                 # Download files from remote environment if necessary
@@ -1892,7 +1870,13 @@ class CodeActAgent(ReActAgent):
                 )
 
                 observation = f'{stdout}\n{stderr}'.strip()
-                msg = ChatMessage(role='tool', content=observation)
+
+                # Get tool call ID for correct pairing in history
+                prev_msg_dict = self.chat_history[-1]
+                tool_calls = prev_msg_dict.get('tool_calls', [])
+                tool_call_id = tool_calls[0].get('id') if tool_calls else None
+
+                msg = {'role': 'tool', 'content': observation, 'tool_call_id': tool_call_id}
                 self.add_to_history(msg)
 
                 act_span.update(
@@ -1930,7 +1914,12 @@ class CodeActAgent(ReActAgent):
                     error_message=str(ex),
                 )
                 # Respond as the pseudo "tool"
-                tool_msg = ChatMessage(role='tool', content=error_msg)
+                # Get tool call ID for correct pairing in history
+                prev_msg_dict = self.chat_history[-1]
+                tool_calls = prev_msg_dict.get('tool_calls', [])
+                tool_call_id = tool_calls[0].get('id') if tool_calls else None
+
+                tool_msg = {'role': 'tool', 'content': error_msg, 'tool_call_id': tool_call_id}
                 self.add_to_history(tool_msg)
 
                 act_span.end(
@@ -1999,36 +1988,36 @@ async def main():
         max_iterations=5,
         litellm_params=litellm_params,
     )
-    # agent = CodeActAgent(
-    #     name='Simple agent',
-    #     model_name=model_name,
-    #     tools=[
-    #         dtools.calculator,
-    #         dtools.search_web,
-    #         dtools.read_webpage,
-    #         dtools.extract_as_markdown,
-    #     ],
-    #     max_iterations=7,
-    #     litellm_params=litellm_params,
-    #     run_env='host',
-    #     allowed_imports=[
-    #         'math',
-    #         'datetime',
-    #         'time',
-    #         're',
-    #         'typing',
-    #         'mimetypes',
-    #         'random',
-    #         'ddgs',
-    #         'bs4',
-    #         'urllib.parse',
-    #         'requests',
-    #         'markitdown',
-    #         'pathlib',
-    #     ],
-    #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
-    #     work_dir='./agent_workspace',
-    # )
+    agent = CodeActAgent(
+        name='Simple agent',
+        model_name=model_name,
+        tools=[
+            dtools.calculator,
+            dtools.search_web,
+            dtools.read_webpage,
+            dtools.extract_as_markdown,
+        ],
+        max_iterations=7,
+        litellm_params=litellm_params,
+        run_env='host',
+        allowed_imports=[
+            'math',
+            'datetime',
+            'time',
+            're',
+            'typing',
+            'mimetypes',
+            'random',
+            'ddgs',
+            'bs4',
+            'urllib.parse',
+            'requests',
+            'markitdown',
+            'pathlib',
+        ],
+        pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
+        work_dir='./agent_workspace',
+    )
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),

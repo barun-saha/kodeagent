@@ -47,16 +47,15 @@ class HistoryFormatter(ABC):
         """
 
     @abstractmethod
-    def should_add_pending_placeholder(self, state: dict) -> bool:
-        """Determine if a placeholder should be added for pending tool calls.
+    def pydantic_to_dict(self, msg: ChatMessage) -> dict:
+        """Convert Pydantic message to dict with proper formatting and metadata.
 
         Args:
-            state: State dict with keys:
-                - last_tool_call_id: The most recent tool call ID
-                - pending_tool_call: Whether a tool call is awaiting response
+            msg: The Pydantic ChatMessage (ReActChatMessage or CodeActChatMessage).
 
         Returns:
-            True if a placeholder should be added.
+            A dictionary representation compliant with OpenAPI/LLM specs,
+            including metadata fields prefixed with '_'.
         """
 
 
@@ -122,6 +121,58 @@ class ReActHistoryFormatter(HistoryFormatter):
         """
         return bool(state.get('pending_tool_call', False) and state.get('last_tool_call_id'))
 
+    def pydantic_to_dict(self, msg: ChatMessage) -> dict:
+        """Convert ReActChatMessage to dict."""
+        d = msg.model_dump()
+
+        # Tool call request (Assistant -> Tool)
+        if self.should_format_as_tool_call(msg):
+            tool_call_id = f'call_{uuid.uuid4().hex[:8]}'
+            return {
+                'role': 'assistant',
+                'content': None,
+                'tool_calls': [
+                    {
+                        'id': tool_call_id,
+                        'type': 'function',
+                        'function': {
+                            'name': msg.action,
+                            'arguments': getattr(msg, 'args', '{}'),
+                        },
+                    }
+                ],
+                # Metadata for internal use
+                '_thought': getattr(msg, 'thought', None),
+                '_action': msg.action,
+                '_args': getattr(msg, 'args', None),
+                '_task_successful': getattr(msg, 'task_successful', True),
+            }
+
+        # Final answer (Assistant -> User)
+        if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
+            return {
+                'role': 'assistant',
+                'content': getattr(msg, 'final_answer'),
+                '_thought': getattr(msg, 'thought', None),
+                '_code': getattr(msg, 'code', None),
+                '_task_successful': getattr(msg, 'task_successful', True),
+                '_action': getattr(
+                    msg, 'action', 'FINISH' if not getattr(msg, 'code', None) else None
+                ),
+            }
+
+        # Generic assistant/user/system message
+        return {
+            'role': d.get('role'),
+            'content': d.get('content', ''),
+            '_thought': getattr(msg, 'thought', None),
+            # Preserve other potential metadata if present (for cross-agent history compatibility)
+            '_action': getattr(msg, 'action', None),
+            '_code': getattr(msg, 'code', None),
+            '_args': getattr(msg, 'args', None),
+            '_task_successful': getattr(msg, 'task_successful', True),
+        }
+
 
 class CodeActHistoryFormatter(HistoryFormatter):
     """Formats CodeAct agent history with code-based pseudo tool calls.
@@ -183,3 +234,50 @@ class CodeActHistoryFormatter(HistoryFormatter):
             Always False.
         """
         return False
+
+    def pydantic_to_dict(self, msg: ChatMessage) -> dict:
+        """Convert CodeActChatMessage to dict."""
+        d = msg.model_dump()
+
+        # Code execution request (Assistant -> Pseudo-Tool)
+        if self.should_format_as_tool_call(msg):
+            tool_call_id = f'call_{uuid.uuid4().hex[:8]}'
+            return {
+                'role': 'assistant',
+                'content': None,
+                'tool_calls': [
+                    {
+                        'id': tool_call_id,
+                        'type': 'function',
+                        'function': {
+                            'name': CODE_ACT_PSEUDO_TOOL_NAME,
+                            'arguments': json.dumps({'code': msg.code}),
+                        },
+                    }
+                ],
+                # Metadata
+                '_thought': getattr(msg, 'thought', None),
+                '_code': msg.code,
+                '_task_successful': getattr(msg, 'task_successful', True),
+            }
+
+        # Final answer
+        if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
+            return {
+                'role': 'assistant',
+                'content': getattr(msg, 'final_answer'),
+                '_thought': getattr(msg, 'thought', None),
+                '_task_successful': getattr(msg, 'task_successful', True),
+            }
+
+        # Generic
+        return {
+            'role': d.get('role'),
+            'content': d.get('content', ''),
+            '_thought': getattr(msg, 'thought', None),
+            # Preserve other potential metadata if present
+            '_action': getattr(msg, 'action', None),
+            '_code': getattr(msg, 'code', None),
+            '_args': getattr(msg, 'args', None),
+            '_task_successful': getattr(msg, 'task_successful', True),
+        }

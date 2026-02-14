@@ -26,7 +26,7 @@ class TestObserverOptimization:
         agent.init_history()
 
         # Verify system prompt is in main messages
-        assert agent.messages[0].role == 'system'
+        assert agent.chat_history[0]['role'] == 'system'
 
         # Get observer history
         history = agent._get_observer_history()
@@ -94,4 +94,4 @@ class TestObserverOptimization:
         assert history == expected
 
         # Verify formatting matches standard string
-        assert str(agent.messages[1]) in history
+        assert agent._message_to_string(agent.chat_history[1]) in history

@@ -17,8 +17,8 @@ def test_react_agent_persona_provided():
     expected_prompt = REACT_SYSTEM_PROMPT.format(
         persona=persona, tools=agent.get_tools_description()
     )
-    assert agent.messages[0].role == 'system'
-    assert agent.messages[0].content == expected_prompt
+    assert agent.chat_history[0]['role'] == 'system'
+    assert agent.chat_history[0]['content'] == expected_prompt
 
 
 def test_react_agent_persona_none():
@@ -27,8 +27,8 @@ def test_react_agent_persona_none():
     agent.init_history()
 
     expected_prompt = REACT_SYSTEM_PROMPT.format(persona='', tools=agent.get_tools_description())
-    assert agent.messages[0].role == 'system'
-    assert agent.messages[0].content == expected_prompt
+    assert agent.chat_history[0]['role'] == 'system'
+    assert agent.chat_history[0]['content'] == expected_prompt
 
 
 def test_codeact_agent_persona_provided():
@@ -44,8 +44,8 @@ def test_codeact_agent_persona_provided():
         tools=agent.get_tools_description(),
         authorized_imports='\n'.join([f'- {imp}' for imp in agent.allowed_imports]),
     )
-    assert agent.messages[0].role == 'system'
-    assert agent.messages[0].content == expected_prompt
+    assert agent.chat_history[0]['role'] == 'system'
+    assert agent.chat_history[0]['content'] == expected_prompt
 
 
 def test_codeact_agent_persona_none():
@@ -58,5 +58,5 @@ def test_codeact_agent_persona_none():
         tools=agent.get_tools_description(),
         authorized_imports='\n'.join([f'- {imp}' for imp in agent.allowed_imports]),
     )
-    assert agent.messages[0].role == 'system'
-    assert agent.messages[0].content == expected_prompt
+    assert agent.chat_history[0]['role'] == 'system'
+    assert agent.chat_history[0]['content'] == expected_prompt
