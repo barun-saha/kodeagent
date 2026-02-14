@@ -1,5 +1,7 @@
 """Planner and Observer for Agent orchestration."""
 
+import json
+import re
 from typing import Literal
 
 from . import kutils as ku
@@ -292,6 +294,7 @@ class Observer:
             )
             observation = ObserverResponse.model_validate_json(observation_response)
 
+            # Validate tool suggestions before issuing correction
             if not observation.is_progressing or observation.is_in_loop:
                 self.last_correction_iteration = iteration
                 msg = (
@@ -299,6 +302,16 @@ class Observer:
                     or observation.reasoning
                     or 'Adjust your approach based on the plan and history.'
                 )
+
+                # Strip non-existent tool suggestions
+                suggested_tools = re.findall(r'(\w+)\(', msg)
+                invalid_tools = [t for t in suggested_tools if t not in self.tool_names]
+                if invalid_tools:
+                    logger.warning(
+                        'Observer suggested invalid tools: %s. Using fallback.', invalid_tools
+                    )
+                    msg = 'Review the available tools and try a different approach.'
+
                 correction = f'!!!CRITICAL FOR COURSE CORRECTION: {msg}\n'
 
                 if self.tool_names:
@@ -338,3 +351,71 @@ class Observer:
     def reset(self):
         """Reset the observer state."""
         self.last_correction_iteration = 0
+
+
+class LocalLoopDetector:
+    """Detects tool call loops without LLM calls using hashing and pattern matching."""
+
+    def __init__(
+        self,
+        window_size: int = 3,
+        exact_match_threshold: int = 2,
+        multi_call_allowed: set[str] | None = None,
+    ):
+        """Initialize local loop detector.
+
+        Args:
+            window_size: Look-back window for consecutive tool calls.
+            exact_match_threshold: Threshold for identical (tool+args) repetition.
+            multi_call_allowed: Set of tools allowed to be called multiple times.
+        """
+        self.window_size = window_size
+        self.exact_match_threshold = exact_match_threshold
+        # Common whitelisted tools for multiple calls
+        self.multi_call_allowed = multi_call_allowed or {'search_web', 'read_webpage', 'calculator'}
+        self.history: list[tuple[str, int]] = []  # (tool_name, args_hash)
+
+    def add_tool_call(self, tool_name: str, args: dict) -> str | None:
+        """Add a tool call and check for loops.
+
+        Returns:
+            Error message if loop detected, None otherwise.
+        """
+        # Create hash of arguments for exact match detection
+        try:
+            args_str = json.dumps(args, sort_keys=True)
+            args_hash = hash(args_str)
+        except Exception:
+            args_hash = hash(str(args))
+
+        self.history.append((tool_name, args_hash))
+
+        # Keep only recent history to avoid memory bloat
+        if len(self.history) > self.window_size * 2:
+            self.history = self.history[-self.window_size * 2 :]
+
+        # Check 1: Exact repetition (same tool + same args)
+        if len(self.history) >= self.exact_match_threshold:
+            recent = self.history[-self.exact_match_threshold :]
+            if len(set(recent)) == 1:
+                return (
+                    f'Loop detected: {tool_name} called {self.exact_match_threshold} '
+                    'times with identical arguments. Try a different approach or tool.'
+                )
+
+        # Check 2: Same tool, different args (potential stall)
+        if len(self.history) >= self.window_size:
+            recent_tools = [t[0] for t in self.history[-self.window_size :]]
+            if len(set(recent_tools)) == 1:
+                tool = recent_tools[0]
+                if tool not in self.multi_call_allowed:
+                    return (
+                        f'Potential loop: {tool} called {self.window_size} times '
+                        'consecutively. Consider using a different tool.'
+                    )
+
+        return None
+
+    def reset(self):
+        """Reset the detector state."""
+        self.history = []

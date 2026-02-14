@@ -43,7 +43,11 @@ from .models import (
     ReActChatMessage,
     Task,
 )
-from .orchestrator import Observer, Planner
+from .orchestrator import (
+    LocalLoopDetector,
+    Observer,
+    Planner
+)
 from .tracer import TRACING_TYPES, create_tracer_manager
 from .usage_tracker import UsageTracker
 
@@ -2006,6 +2010,13 @@ class FunctionCallingAgent(Agent):
 
         self._history_formatter = FunctionCallingHistoryFormatter()
 
+        # SLM optimizations: Disable redundant orchestration and enable local loop detection
+        self.local_loop_detector = LocalLoopDetector()
+        self.observer = None  # Disabled for SLMs to prevent hallucinations and save tokens
+        logger.info(
+            'SLM optimizations enabled for %s: Observer disabled, Planner updates disabled.', name
+        )
+
     def init_history(self):
         """Initialize the agent's message history with the system prompt."""
         self.messages = [
@@ -2346,53 +2357,6 @@ class FunctionCallingAgent(Agent):
                 if self.final_answer_found:
                     break
 
-                # Update plan
-                plan_before_update = None
-                if self.planner.plan:
-                    plan_before_update = self.current_plan
-                    try:
-                        await self._update_plan()
-                    except RetryError:
-                        logger.warning('Max retries reached during plan update.')
-                        error_msg = 'Rate limit exceeded during plan update. Unable to proceed.'
-                        self.add_to_history(ChatMessage(role='assistant', content=error_msg))
-                        yield self.response(
-                            rtype='final',
-                            value=error_msg,
-                            channel='run',
-                            metadata={'final_answer_found': False, 'is_error': True},
-                        )
-                        return
-
-                    self.add_to_history(
-                        ChatMessage(
-                            role='user',
-                            content=(f'Plan progress:\n{self.planner.get_formatted_plan()}'),
-                        )
-                    )
-
-                # Observer check
-                try:
-                    correction_msg = await self.observer.observe(
-                        task=self.task,
-                        history=self._get_observer_history(),
-                        plan_before=plan_before_update,
-                        plan_after=self.current_plan,
-                        iteration=idx + 1,
-                        parent_trace=self.current_trace,
-                    )
-                except RetryError:
-                    logger.warning('Observer failed due to rate limit. Skipping observation.')
-                    correction_msg = None
-
-                if correction_msg:
-                    self.add_to_history(ChatMessage(role='user', content=correction_msg))
-                    yield self.response(
-                        rtype='log',
-                        value=f'Observer correction: {correction_msg}',
-                        channel='run',
-                    )
-
             # Max iterations reached
             self.task.steps_taken = steps_taken
             if not self.final_answer_found:
@@ -2592,6 +2556,22 @@ class FunctionCallingAgent(Agent):
             try:
                 # Parse arguments
                 tool_args_dict = json.loads(tool_args_str)
+
+                # Local loop detection
+                loop_error = self.local_loop_detector.add_tool_call(tool_name, tool_args_dict)
+                if loop_error:
+                    logger.warning('Local loop detected: %s', loop_error)
+                    tool_response = ChatMessage(role='tool', content=loop_error)
+                    tool_response.tool_call_id = tool_call_id
+                    self.add_to_history(tool_response)
+
+                    yield self.response(
+                        rtype='step',
+                        value=loop_error,
+                        channel='_act',
+                        metadata={'is_error': True, 'loop_detected': True},
+                    )
+                    continue
 
                 # Execute tool
                 if tool_name in self.tool_names:
