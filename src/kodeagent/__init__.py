@@ -7,12 +7,15 @@ from .kodeagent import (
     CodeActAgent,
     CodeActChatMessage,
     CodeRunner,
+    FunctionCallingAgent,
+    FunctionCallingChatMessage,
     ReActAgent,
     ReActChatMessage,
     Task,
     llm_vision_support,
     print_response,
 )
+
 from .kutils import detect_file_type, is_image_file, is_it_url, make_user_message
 from .models import AgentPlan, ObserverResponse, PlanStep
 from .orchestrator import Observer, Planner
@@ -38,6 +41,8 @@ __all__ = [
     'CodeActAgent',
     'CodeActChatMessage',
     'CodeRunner',
+    'FunctionCallingAgent',
+    'FunctionCallingChatMessage',
     'Observer',
     'ObserverResponse',
     'PlanStep',

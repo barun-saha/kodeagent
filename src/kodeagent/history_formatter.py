@@ -183,3 +183,52 @@ class CodeActHistoryFormatter(HistoryFormatter):
             Always False.
         """
         return False
+
+
+class FunctionCallingHistoryFormatter(HistoryFormatter):
+    """Formats FunctionCallingAgent history with native tool calls.
+
+    FunctionCallingAgent uses the LLM's native tool calling format, so tool_calls
+    are already present in the message. This formatter simply passes them through.
+    """
+
+    def should_format_as_tool_call(self, msg: ChatMessage) -> bool:
+        """Check if message has native tool_calls.
+
+        Args:
+            msg: The message to check.
+
+        Returns:
+            True if message has tool_calls array.
+        """
+        return bool(getattr(msg, 'role', None) == 'assistant' and getattr(msg, 'tool_calls', None))
+
+    def format_tool_call(self, msg: ChatMessage, state: dict) -> dict:
+        """Format message with native tool calls.
+
+        Args:
+            msg: Message containing tool_calls.
+            state: Mutable state dict (not used for FC agent).
+
+        Returns:
+            Formatted tool call dictionary.
+        """
+        tool_calls = getattr(msg, 'tool_calls', [])
+        content = getattr(msg, 'content', None)
+
+        return {
+            'role': 'assistant',
+            'content': content,
+            'tool_calls': tool_calls,
+        }
+
+    def should_add_pending_placeholder(self, _state: dict) -> bool:
+        """FunctionCallingAgent does not use placeholders.
+
+        Args:
+            _state: State dict (unused).
+
+        Returns:
+            Always False.
+        """
+        return False

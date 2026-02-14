@@ -30,6 +30,7 @@ from .code_runner import CODE_ENV_NAMES, CodeRunner
 from .file_tracker import OutputInterceptor, install_interceptor
 from .history_formatter import (
     CodeActHistoryFormatter,
+    FunctionCallingHistoryFormatter,
     HistoryFormatter,
     ReActHistoryFormatter,
 )
@@ -38,6 +39,7 @@ from .models import (
     AgentResponse,
     ChatMessage,
     CodeActChatMessage,
+    FunctionCallingChatMessage,
     ReActChatMessage,
     Task,
 )
@@ -57,6 +59,7 @@ logger = ku.get_logger()
 
 REACT_SYSTEM_PROMPT = ku.read_prompt('system/react.txt')
 CODE_ACT_SYSTEM_PROMPT = ku.read_prompt('system/codeact.txt')
+FUNCTION_CALLING_SYSTEM_PROMPT = ku.read_prompt('system/function_calling.txt')
 SALVAGE_RESPONSE_PROMPT = ku.read_prompt('salvage_response.txt')
 RELEVANT_TOOLS_PROMPT = ku.read_prompt('relevant_tools.txt')
 
@@ -1947,6 +1950,813 @@ class CodeActAgent(ReActAgent):
                 )
 
 
+class FunctionCallingAgent(Agent):
+    """Agent using native function calling capabilities of LLMs."""
+
+    response_format_class: ClassVar[type[pyd.BaseModel]] = FunctionCallingChatMessage
+
+    def __init__(
+        self,
+        name: str,
+        model_name: str,
+        tools: list,
+        description: str | None = None,
+        litellm_params: dict | None = None,
+        persona: str | None = None,
+        system_prompt: str | None = None,
+        max_iterations: int = 20,
+        filter_tools_for_task: bool = False,
+        max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
+        work_dir: str | None = None,
+        tracing_type: TRACING_TYPES | None = None,
+    ):
+        """Create a FunctionCallingAgent.
+
+        Args:
+            name: The name of the agent.
+            model_name: The (LiteLLM) model name to use.
+            tools: List of tools available to the agent.
+            description: Optional brief description about the agent.
+            litellm_params: Optional parameters for LiteLLM.
+            persona: Optional persona for the agent.
+            system_prompt: Optional custom system prompt.
+            max_iterations: Maximum number of iterations for task execution.
+            filter_tools_for_task: Whether to filter tools for each task.
+            max_retries: Maximum number of retries for LLM calls.
+            work_dir: Optional working directory.
+            tracing_type: Optional tracing type (langfuse, langsmith, or None).
+        """
+        super().__init__(
+            name=name,
+            model_name=model_name,
+            tools=tools,
+            litellm_params=litellm_params,
+            description=description,
+            persona=persona,
+            system_prompt=system_prompt or FUNCTION_CALLING_SYSTEM_PROMPT,
+            max_iterations=max_iterations,
+            filter_tools_for_task=filter_tools_for_task,
+            max_retries=max_retries,
+            work_dir=work_dir,
+            tracing_type=tracing_type,
+        )
+
+        if tools:
+            logger.info('Created FC agent: %s; tools: %s', name, [t.name for t in tools])
+
+        self._history_formatter = FunctionCallingHistoryFormatter()
+
+    def init_history(self):
+        """Initialize the agent's message history with the system prompt."""
+        self.messages = [
+            ChatMessage(
+                role='system',
+                content=self.system_prompt.format(
+                    persona=self.persona or '',
+                ),
+            )
+        ]
+        self._formatted_history_cache = []
+        self._history_processed_idx = -1
+        self._last_tool_call_id = None
+        self._pending_tool_call = False
+
+    async def pre_run(self) -> AsyncIterator[AgentResponse]:
+        """Perform setup before the main run loop.
+
+        - Initialize task and history.
+        - Create initial plan.
+
+        Returns:
+            AsyncIterator[AgentResponse]: Iterator of agent responses.
+        """
+        # Initialize history
+        self.init_history()
+
+        # Create initial plan
+        try:
+            await self._create_initial_plan()
+        except RetryError:
+            logger.error('Failed to create initial plan due to rate limit')
+            yield self.response(
+                rtype='final',
+                value='Failed to create initial plan due to rate limit.',
+                channel='pre_run',
+                metadata={'final_answer_found': False, 'is_error': True},
+            )
+            return
+        except Exception as e:
+            logger.error('Failed to create initial plan: %s', e)
+            yield self.response(
+                rtype='final',
+                value=f'Failed to create initial plan: {e}',
+                channel='pre_run',
+                metadata={'final_answer_found': False, 'is_error': True},
+            )
+            return
+
+        yield self.response(
+            rtype='log',
+            value=f'Plan created:\n{self.planner.get_formatted_plan()}',
+            channel='pre_run',
+        )
+
+        # Add initial task and plan to history
+        self.add_to_history(
+            ChatMessage(
+                role='user', content=f'New Task:\n{self.task.description}', files=self.task.files
+            )
+        )
+        self.add_to_history(
+            ChatMessage(role='user', content=f'Plan:\n{self.planner.get_formatted_plan()}')
+        )
+
+    async def _create_initial_plan(self):
+        """Helper method to create the initial plan.
+
+        Raises:
+            RuntimeError: If plan creation fails.
+        """
+        await self.planner.create_plan(
+            task=self.task,
+            agent_type=self.__class__.__name__,
+            parent_trace=self.current_trace,
+        )
+
+        if not self.planner.plan:
+            raise RuntimeError('Failed to create initial plan')
+
+        logger.debug('Initial plan created: %s', self.planner.plan)
+
+    def formatted_history_for_llm(self) -> list[dict]:
+        """Format message history for LLM with proper tool call structure.
+        Uses incremental caching to avoid O(n^2) behavior in the course of solving a task.
+
+        Returns:
+            list[dict]: Formatted message history for LLM.
+        """
+        # Start from the next index
+        start_idx = self._history_processed_idx + 1
+
+        # If there are no new messages and we have a cache, just return it (with safety check)
+        if start_idx >= len(self.messages) and self._formatted_history_cache:
+            # handle pending tool call placeholder logic at end
+            pass
+        else:
+            # Process new messages
+            new_msgs = self.messages[start_idx:]
+
+            # Temporary list for new formatted segments
+            new_formatted_segments = []
+
+            # State for history formatter
+            formatter_state = {
+                'last_tool_call_id': self._last_tool_call_id,
+                'pending_tool_call': self._pending_tool_call,
+            }
+
+            for msg in new_msgs:
+                d = msg.model_dump()
+                role = d.get('role')
+
+                # Handle assistant tool call using strategy pattern
+                if self._history_formatter and self._history_formatter.should_format_as_tool_call(
+                    msg
+                ):
+                    formatted_msg = self._history_formatter.format_tool_call(msg, formatter_state)
+                    new_formatted_segments.append(formatted_msg)
+
+                elif role == 'tool':
+                    tool_msg = {'role': 'tool', 'content': str(d.get('content', ''))}
+                    # We injected tool_call_id into ChatMessage earlier
+                    if getattr(msg, 'tool_call_id', None):
+                        tool_msg['tool_call_id'] = getattr(msg, 'tool_call_id')
+                    elif formatter_state['last_tool_call_id']:
+                        # Fallback for older code if tool_call_id wasn't set
+                        tool_msg['tool_call_id'] = formatter_state['last_tool_call_id']
+
+                    # Reset state
+                    formatter_state['last_tool_call_id'] = None
+                    formatter_state['pending_tool_call'] = False
+                    new_formatted_segments.append(tool_msg)
+
+                elif role == 'assistant':
+                    # For FC agent, assistant messages might have content (thoughts/final answer)
+                    # and tool_calls. Handled by tool_call check above, but here we handle
+                    # messages WITHOUT tool_calls.
+                    new_formatted_segments.append(
+                        {'role': 'assistant', 'content': d.get('content', '')}
+                    )
+
+                elif role == 'user':
+                    usr_msgs = ku.make_user_message(
+                        text_content=d.get('content', ''), files=d.get('files', None)
+                    )
+                    new_formatted_segments.extend(usr_msgs)
+
+                else:
+                    # system
+                    new_formatted_segments.append({'role': role, 'content': d.get('content', '')})
+
+            # Sync state back to agent
+            self._last_tool_call_id = formatter_state['last_tool_call_id']
+            self._pending_tool_call = formatter_state['pending_tool_call']
+
+            # Incremental merge with cache
+            for seg in new_formatted_segments:
+                if (
+                    self._formatted_history_cache
+                    and self._formatted_history_cache[-1].get('role') == 'user'
+                    and seg.get('role') == 'user'
+                ):
+                    # Merge content
+                    prev = self._formatted_history_cache[-1]
+                    prev_content = prev['content']
+                    curr_content = seg['content']
+
+                    if not isinstance(prev_content, list):
+                        prev_content = [prev_content]
+                    if not isinstance(curr_content, list):
+                        curr_content = [curr_content]
+
+                    # Update in place
+                    prev['content'] = prev_content + curr_content
+                else:
+                    self._formatted_history_cache.append(seg)
+
+            # Update index
+            self._history_processed_idx = len(self.messages) - 1
+
+        # Prepare final result
+        result = list(self._formatted_history_cache)
+
+        # Safety check: if we have a pending tool call without response, add a placeholder
+        formatter_state = {
+            'last_tool_call_id': self._last_tool_call_id,
+            'pending_tool_call': self._pending_tool_call,
+        }
+        if self._history_formatter and self._history_formatter.should_add_pending_placeholder(
+            formatter_state
+        ):
+            result.append(
+                {
+                    'role': 'tool',
+                    'tool_call_id': self._last_tool_call_id,
+                    'content': 'Error: Tool execution was interrupted',
+                }
+            )
+
+        return result
+
+    def parse_text_response(self, text: str) -> FunctionCallingChatMessage:
+        """Parse text-based response when structured output fails.
+
+        For FunctionCallingAgent, we treat the entire text as content (thought/answer).
+
+        Args:
+            text: The raw text response from the LLM.
+
+        Returns:
+            FunctionCallingChatMessage: Parsed structured response.
+        """
+        return FunctionCallingChatMessage(role='assistant', content=text.strip())
+
+    async def post_run(self) -> AsyncIterator[AgentResponse]:
+        """Perform cleanup after the main run loop.
+
+        - Calculate and log usage metrics.
+        - End current trace/span.
+        - Flush tracer.
+
+        Returns:
+            AsyncIterator[AgentResponse]: Iterator of agent responses.
+        """
+        # Calculate usage metrics
+        usage_data = self.get_usage_metrics()
+        self.task.total_llm_calls = usage_data['total']['call_count']
+        self.task.total_prompt_tokens = usage_data['total']['total_prompt_tokens']
+        self.task.total_completion_tokens = usage_data['total']['total_completion_tokens']
+        self.task.total_tokens = usage_data['total']['total_tokens']
+        self.task.total_cost = usage_data['total']['total_cost']
+        self.task.usage_by_component = usage_data['by_component']
+
+        # End trace
+        if self.current_trace:
+            self.current_trace.end(
+                result={
+                    'task_id': self.task.id,
+                    'is_finished': self.task.is_finished,
+                    'is_error': self.task.is_error,
+                    'final_answer': self.task.result,
+                }
+            )
+
+        # Flush tracer
+        self.tracer_manager.flush()
+
+        yield self.response(
+            rtype='log',
+            value='Task execution completed',
+            channel='post_run',
+        )
+
+    async def run(
+        self,
+        task: str,
+        files: list[str] | None = None,
+        task_id: str | None = None,
+        max_iterations: int | None = None,
+        recurrent_mode: bool = False,
+        summarize_progress_on_failure: bool = True,
+    ) -> AsyncIterator[AgentResponse]:
+        """Solve a task using native function calling.
+
+        Args:
+            task: A task to be solved by the agent.
+            files: An optional list of files related to the task.
+            task_id: Optional task ID.
+            max_iterations: Optional max iterations for the task.
+            recurrent_mode: If True, augment task with previous task context.
+            summarize_progress_on_failure: Whether to summarize progress if
+             the agent fails to solve the task in max iterations.
+
+        Returns:
+            Step updates on the task and the final response.
+
+        Raises:
+            ValueError: If task is empty or too many files provided.
+            RetryError: If LLM calls fail after max retries.
+        """
+        if not task or not task.strip():
+            raise ValueError('Task description cannot be empty!')
+        if files and not isinstance(files, list):
+            raise ValueError('Task files must be a list of file paths!')
+        if files and len(files) > MAX_TASK_FILES:
+            raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
+
+        # Augment task with previous context if recurrent mode enabled
+        if recurrent_mode and self.task is not None:
+            task = await self._augment_task_with_previous(task)
+            logger.debug('Recurrent mode enabled: augmented task with previous context')
+
+        self._run_init(task, files, task_id)
+
+        # Execute pre-run hook
+        async for response in self.pre_run():
+            yield response
+            if response['type'] == 'final' and response['metadata'].get('is_error'):
+                return
+
+        max_iterations = max_iterations or self.max_iterations
+        steps_taken = 0
+
+        try:
+            # Main Loop - Direct function calling without TAO
+            for idx in range(max_iterations):
+                steps_taken = idx + 1
+                logger.debug('ITERATION %d/%d', steps_taken, max_iterations)
+                yield self.response(
+                    rtype='log', channel='run', value=f'* Executing step {steps_taken}'
+                )
+
+                try:
+                    # Get LLM response with tool calls
+                    async for update in self._think():
+                        yield update
+
+                    # Execute tool calls if any
+                    async for update in self._act():
+                        yield update
+
+                except asyncio.CancelledError:
+                    logger.info('Task cancelled by consumer')
+                    raise
+                except RetryError as e:
+                    logger.warning('Max retries reached for LLM call: %s', e)
+                    error_msg = 'Rate limit exceeded. Unable to proceed.'
+                    self.add_to_history(ChatMessage(role='assistant', content=error_msg))
+                    yield self.response(
+                        rtype='final',
+                        value=error_msg,
+                        channel='run',
+                        metadata={'final_answer_found': False, 'is_error': True},
+                    )
+                    return
+
+                if self.final_answer_found:
+                    break
+
+                # Update plan
+                plan_before_update = None
+                if self.planner.plan:
+                    plan_before_update = self.current_plan
+                    try:
+                        await self._update_plan()
+                    except RetryError:
+                        logger.warning('Max retries reached during plan update.')
+                        error_msg = 'Rate limit exceeded during plan update. Unable to proceed.'
+                        self.add_to_history(ChatMessage(role='assistant', content=error_msg))
+                        yield self.response(
+                            rtype='final',
+                            value=error_msg,
+                            channel='run',
+                            metadata={'final_answer_found': False, 'is_error': True},
+                        )
+                        return
+
+                    self.add_to_history(
+                        ChatMessage(
+                            role='user',
+                            content=(f'Plan progress:\n{self.planner.get_formatted_plan()}'),
+                        )
+                    )
+
+                # Observer check
+                try:
+                    correction_msg = await self.observer.observe(
+                        task=self.task,
+                        history=self._get_observer_history(),
+                        plan_before=plan_before_update,
+                        plan_after=self.current_plan,
+                        iteration=idx + 1,
+                        parent_trace=self.current_trace,
+                    )
+                except RetryError:
+                    logger.warning('Observer failed due to rate limit. Skipping observation.')
+                    correction_msg = None
+
+                if correction_msg:
+                    self.add_to_history(ChatMessage(role='user', content=correction_msg))
+                    yield self.response(
+                        rtype='log',
+                        value=f'Observer correction: {correction_msg}',
+                        channel='run',
+                    )
+
+            # Max iterations reached
+            self.task.steps_taken = steps_taken
+            if not self.final_answer_found:
+                logger.warning('Max iterations reached without finding final answer')
+
+                if summarize_progress_on_failure:
+                    salvaged = await self.salvage_response()
+                    yield self.response(
+                        rtype='final',
+                        value=salvaged,
+                        channel='run',
+                        metadata={'final_answer_found': False},
+                    )
+                else:
+                    yield self.response(
+                        rtype='final',
+                        value=f'Failed to complete task in {max_iterations} steps.',
+                        channel='run',
+                        metadata={'final_answer_found': False},
+                    )
+
+        finally:
+            # Always execute post-run hook
+            async for response in self.post_run():
+                yield response
+
+    async def _think(self) -> AsyncIterator[AgentResponse]:
+        """Get LLM response with potential tool calls.
+
+        Returns:
+            AsyncIterator[AgentResponse]: An async iterator of AgentResponse objects.
+        """
+        # Create a generation span for the LLM call
+        gen_span = self.tracer_manager.start_generation(
+            parent=self.current_trace,
+            name='think',
+            input_data={
+                'model': self.model_name,
+                'messages_count': len(self.messages),
+            },
+        )
+
+        # Call LLM with tools parameter (native function calling)
+        try:
+            response = await self._chat_with_tools()
+
+            # Extract message from response
+            if hasattr(response, 'choices') and len(response.choices) > 0:
+                message = response.choices[0].message
+
+                # Create FunctionCallingChatMessage
+                tool_calls = getattr(message, 'tool_calls', None)
+                content = getattr(message, 'content', None)
+
+                fc_message = FunctionCallingChatMessage(
+                    role='assistant',
+                    content=content,
+                    tool_calls=[
+                        {
+                            'id': tc.id,
+                            'type': tc.type,
+                            'function': {
+                                'name': tc.function.name,
+                                'arguments': tc.function.arguments,
+                            },
+                        }
+                        for tc in tool_calls
+                    ]
+                    if tool_calls
+                    else None,
+                )
+
+                self.add_to_history(fc_message)
+
+                gen_span.update(
+                    status='success',
+                    has_content=bool(content),
+                    has_tool_calls=bool(tool_calls),
+                    tool_count=len(tool_calls) if tool_calls else 0,
+                )
+                gen_span.end(
+                    output={
+                        'content': content,
+                        'tool_calls': [tc.function.name for tc in tool_calls] if tool_calls else [],
+                    },
+                )
+
+                yield self.response(rtype='step', value=fc_message, channel='_think')
+            else:
+                raise ValueError('Invalid response from LLM')
+
+        except Exception as e:
+            logger.error('Error in _think: %s', e)
+            gen_span.update(status='error', error=str(e))
+            gen_span.end(output='error', is_error=True)
+            raise
+
+    async def _chat_with_tools(self):
+        """Call LLM with tools parameter for native function calling.
+
+        Returns:
+            LLM response with potential tool calls.
+        """
+        # Convert tools to OpenAI function calling format
+        tools_schema = [
+            {
+                'type': 'function',
+                'function': {
+                    'name': tool.name,
+                    'description': tool.description,
+                    'parameters': tool.args_schema.model_json_schema(),
+                },
+            }
+            for tool in self.tools
+        ]
+
+        # Call LLM with tools
+        history = self.formatted_history_for_llm()
+
+        response = await ku.call_llm(
+            model_name=self.model_name,
+            messages=history,
+            tools=tools_schema,
+            return_raw_response=True,
+            litellm_params=self.litellm_params,
+            max_retries=self.max_retries,
+            usage_tracker=self.usage_tracker,
+            component_name='Agent',
+        )
+
+        return response
+
+    async def _act(self) -> AsyncIterator[AgentResponse]:
+        """Execute tool calls from the previous LLM response.
+
+        Returns:
+            AsyncIterator[AgentResponse]: An async iterator of AgentResponse objects.
+        """
+        prev_msg: FunctionCallingChatMessage = self.messages[-1]  # type: ignore
+
+        # Start root span for the entire act operation
+        act_span = self.tracer_manager.start_span(
+            parent=self.current_trace,
+            name='act',
+            input_data={'content': getattr(prev_msg, 'content', None)},
+        )
+
+        # Check if this is a final answer (no tool calls)
+        if prev_msg.is_final:
+            self.final_answer_found = True
+            self.task.is_finished = True
+            self.task.is_error = False
+
+            final_answer = prev_msg.content or 'Task completed.'
+
+            act_span.update(
+                status='success',
+                operation='final_answer',
+            )
+            act_span.end(
+                output=final_answer,
+                metadata={'task_successful': True},
+            )
+
+            yield self.response(
+                rtype='final',
+                value=final_answer,
+                channel='_act',
+                metadata={'final_answer_found': True},
+            )
+            return
+
+        # Execute tool calls
+        tool_calls = prev_msg.tool_calls or []
+
+        if not tool_calls:
+            # No tool calls and no final answer - this is an error
+            error_msg = 'Error: LLM response has no tool calls and no content for final answer.'
+            act_span.update(status='error', error=error_msg)
+            self.add_to_history(ChatMessage(role='user', content=error_msg))
+            act_span.end(output='error', is_error=True)
+            yield self.response(
+                rtype='step',
+                value=error_msg,
+                channel='_act',
+                metadata={'is_error': True},
+            )
+            return
+
+        # Execute each tool call
+        for tool_call in tool_calls:
+            tool_call_id = tool_call['id']
+            function_info = tool_call['function']
+            tool_name = function_info['name']
+            tool_args_str = function_info['arguments']
+
+            try:
+                # Parse arguments
+                tool_args_dict = json.loads(tool_args_str)
+
+                # Execute tool
+                if tool_name in self.tool_names:
+                    logger.debug(
+                        '🛠 Running tool: %s with args: %s',
+                        tool_name,
+                        tool_args_dict,
+                    )
+
+                    # Create nested span for tool execution
+                    tool_span = self.tracer_manager.start_span(
+                        parent=act_span,
+                        name=tool_name,
+                        input_data=tool_args_dict,
+                    )
+
+                    # Intercept file creation during tool execution
+                    with OutputInterceptor() as interceptor:
+                        result = self.tool_name_to_func[tool_name](**tool_args_dict)
+                        generated_files = interceptor.get_manifest()
+                        for f in generated_files:
+                            self.add_output_file(f)
+
+                    tool_span.update(
+                        status='success',
+                        file_count=len(generated_files),
+                    )
+                    tool_span.end(
+                        output=str(result),
+                        generated_files=generated_files,
+                    )
+
+                    # Add tool response to history
+                    tool_response = ChatMessage(
+                        role='tool',
+                        content=str(result),
+                    )
+                    # Store tool_call_id for proper formatting
+                    tool_response.tool_call_id = tool_call_id  # type: ignore
+                    self.add_to_history(tool_response)
+
+                    act_span.update(
+                        status='success',
+                        operation='tool_execution',
+                        tool=tool_name,
+                    )
+
+                    yield self.response(
+                        rtype='step',
+                        value=result,
+                        channel='_act',
+                        metadata={
+                            'tool': tool_name,
+                            'args': tool_args_dict,
+                            'generated_files': generated_files,
+                        },
+                    )
+                else:
+                    result = (
+                        f'Error: Tool "{tool_name}" not found! '
+                        f'Available tools: {", ".join(sorted(self.tool_names))}. '
+                        'Please use an exact tool name from the list.'
+                    )
+                    act_span.update(
+                        status='error',
+                        operation='tool_not_found',
+                        tool=tool_name,
+                        error=result,
+                    )
+
+                    tool_response = ChatMessage(role='tool', content=result)
+                    tool_response.tool_call_id = tool_call_id  # type: ignore
+                    self.add_to_history(tool_response)
+
+                    yield self.response(
+                        rtype='step',
+                        value=result,
+                        channel='_act',
+                        metadata={'is_error': True},
+                    )
+
+            except Exception as ex:
+                error_msg = (
+                    f'*** Error: Tool execution failed: {type(ex).__name__}: '
+                    f'{str(ex)}\n'
+                    f'Tool: {tool_name}\n'
+                    f'Args provided: {tool_args_str}\n'
+                    f'Please check the tool signature and try again with '
+                    f'correct arguments.'
+                )
+                logger.error(error_msg)
+                act_span.update(
+                    status='error',
+                    operation='tool_execution_exception',
+                    tool=tool_name,
+                    error_type=type(ex).__name__,
+                    error_message=str(ex),
+                )
+
+                tool_response = ChatMessage(role='tool', content=error_msg)
+                tool_response.tool_call_id = tool_call_id  # type: ignore
+                self.add_to_history(tool_response)
+
+                yield self.response(
+                    rtype='step',
+                    value=error_msg,
+                    channel='_act',
+                    metadata={'is_error': True},
+                )
+
+        act_span.end(
+            output='tool_calls_executed',
+            metadata={'tool_count': len(tool_calls)},
+        )
+
+    async def _update_plan(self):
+        """Update the plan based on the last content and observations."""
+        last_thought = None
+        last_observations = []
+
+        # Traverse backwards to find the most recent thought and ALL observations since then
+        for msg in reversed(self.messages):
+            # Look for observations (Tool responses)
+            if msg.role == 'tool' and not last_thought:
+                # Collect all tool observations before we hit the assistant message
+                last_observations.insert(0, msg.content)
+
+            # Look for thought (Assistant response with content)
+            if last_thought is None and msg.role == 'assistant':
+                # Use content as thought
+                content = getattr(msg, 'content', None)
+                if content:
+                    last_thought = content
+                elif getattr(msg, 'tool_calls', None):
+                    # Fallback for models that skip preamble: use the first tool call as context
+                    tool_names = [tc['function']['name'] for tc in msg.tool_calls]
+                    last_thought = f'Executing tools: {", ".join(tool_names)}'
+
+                if last_thought:
+                    # Stop collecting once we find a valid thought
+                    break
+
+        # Aggregate observations
+        if last_observations:
+            last_observation = '\n'.join(str(obs) for obs in last_observations)
+        else:
+            last_observation = None
+
+        # Only update plan if both thought and observation are found
+        if not (last_thought and last_observation):
+            logger.debug(
+                'Skipping plan update: missing thought=%s or observation=%s',
+                bool(last_thought),
+                bool(last_observation),
+            )
+            return
+
+        await self.planner.update_plan(
+            thought=last_thought,
+            observation=last_observation,
+            task_id=self.task.id,
+            parent_trace=self.current_trace,
+        )
+
+
 def llm_vision_support(model_names: list[str]) -> list[bool]:
     """Check whether images can be used with given LLMs.
 
@@ -1983,11 +2793,23 @@ def print_response(response: AgentResponse, only_final: bool = True):
 
 async def main():
     """Demonstrate the use of ReActAgent and CodeActAgent."""
-    litellm_params = {'temperature': 0, 'timeout': 30}
-    model_name = 'gemini/gemini-2.5-flash-lite'
+    litellm_params = {'temperature': 2, 'timeout': 30}
+    model_name = 'gemini/gemini-2.0-flash-lite'
     # model_name = 'openai/gpt-4.1-mini'
 
-    agent = ReActAgent(
+    # agent = ReActAgent(
+    #     name='Simple agent',
+    #     model_name=model_name,
+    #     tools=[
+    #         dtools.calculator,
+    #         dtools.search_web,
+    #         dtools.read_webpage,
+    #         dtools.extract_as_markdown,
+    #     ],
+    #     max_iterations=5,
+    #     litellm_params=litellm_params,
+    # )
+    agent = FunctionCallingAgent(
         name='Simple agent',
         model_name=model_name,
         tools=[

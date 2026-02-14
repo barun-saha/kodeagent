@@ -111,6 +111,10 @@ class ChatMessage(pyd.BaseModel):
         description='Optional list of file paths or URLs associated with the message', default=None
     )
     """Optional list of file paths or URLs associated with the message."""
+    tool_call_id: str | None = pyd.Field(
+        description='ID of the tool call this message is responding to', default=None
+    )
+    """ID of the tool call this message is responding to."""
 
     def __str__(self) -> str:
         """Return proper string representation of the message."""
@@ -307,6 +311,51 @@ class CodeActChatMessage(ChatMessage):
             parts.append(f'Thought: {self.thought}')
         if self.code:
             parts.append(f'Code:\n```python\n{self.code}\n```')
+
+        return '\n'.join(parts)
+
+
+class FunctionCallingChatMessage(ChatMessage):
+    """Messages for FunctionCallingAgent using native function calling.
+
+    This message format leverages the LLM's native tool calling capabilities.
+    Unlike ReAct, thoughts are expressed in the content field, and tool calls
+    are handled via the standard tool_calls structure.
+    """
+
+    role: MESSAGE_ROLES = pyd.Field(
+        description='Role of the message sender',
+        default='assistant',
+    )
+    content: str | None = pyd.Field(
+        description='Reasoning/thought or final answer. Required for all responses.',
+        default=None,
+    )
+    tool_calls: list[dict] | None = pyd.Field(
+        description='Native tool calls from LLM. Populated automatically by LiteLLM.',
+        default=None,
+    )
+
+    @property
+    def is_final(self) -> bool:
+        """Check if this is a final answer (no tool calls)."""
+        return self.tool_calls is None or len(self.tool_calls) == 0
+
+    def __str__(self) -> str:
+        """Return a string representation of the message."""
+        if self.is_final:
+            return self.content or ''
+
+        parts = []
+        if self.content:
+            parts.append(f'Reasoning: {self.content}')
+        if self.tool_calls:
+            for tc in self.tool_calls:
+                func = tc.get('function', {})
+                name = func.get('name', 'unknown')
+                args = func.get('arguments', '{}')
+                parts.append(f'Tool: {name}')
+                parts.append(f'Args: {args}')
 
         return '\n'.join(parts)
 

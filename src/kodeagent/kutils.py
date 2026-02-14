@@ -160,11 +160,13 @@ async def call_llm(
     litellm_params: dict,
     messages: list[dict],
     response_format: type[pyd.BaseModel] | None = None,
+    tools: list[dict] | None = None,
+    return_raw_response: bool = False,
     trace_id: str | None = None,
     max_retries: int = DEFAULT_MAX_LLM_RETRIES,
     usage_tracker: Any | None = None,
     component_name: str = 'unknown',
-) -> str | None:
+) -> Any:
     """Call the LLM with the given parameters and response format.
 
     Args:
@@ -172,13 +174,15 @@ async def call_llm(
         litellm_params: Dictionary of parameters to pass to litellm.
         messages: List of message dictionaries.
         response_format: Optional pydantic model for structured output.
+        tools: Optional list of tools for native function calling.
+        return_raw_response: Whether to return the raw LiteLLM response object.
         trace_id: Optional trace ID for observability.
         max_retries: Maximum number of retries for the LLM call.
         usage_tracker: Optional UsageTracker instance to record usage.
         component_name: Name of the component making the call (for tracking).
 
     Returns:
-        The LLM response as string.
+        The LLM response content as string (default) or the raw response object.
 
     Raises:
         RetryError: If the LLM call fails after maximum retries.
@@ -188,6 +192,9 @@ async def call_llm(
 
     if response_format:
         params['response_format'] = response_format
+
+    if tools:
+        params['tools'] = tools
 
     # Add a timeout to prevent indefinite hangs
     if 'timeout' not in litellm_params:
@@ -225,9 +232,13 @@ async def call_llm(
                 if not response.choices or len(response.choices) == 0:
                     raise ValueError('LLM returned an empty choices list.')
 
-                # Check for empty content
-                response_content = response.choices[0].message.content
-                if not response_content or not response_content.strip():
+                # Check for tool calls if present
+                message = response.choices[0].message
+                tool_calls = getattr(message, 'tool_calls', None)
+                response_content = message.content
+
+                # Check for empty content, but allow it if tool calls are present
+                if not tool_calls and (not response_content or not response_content.strip()):
                     raise ValueError('LLM returned an empty or invalid response body.')
 
                 token_usage = {
@@ -236,7 +247,7 @@ async def call_llm(
                     'completion_tokens': response.usage.get('completion_tokens', 0),
                     'total_tokens': response.usage.get('total_tokens', 0),
                 }
-                logger.info(token_usage)
+                logger.info('Token usage: %s', token_usage)
 
                 # Record usage if tracker provided
                 if usage_tracker:
@@ -250,6 +261,9 @@ async def call_llm(
                         await usage_tracker.record_usage(component_name, metrics)
                     except Exception as e:
                         logger.warning('Failed to record usage: %s', str(e))
+
+                if return_raw_response:
+                    return response
 
                 return response_content
 
