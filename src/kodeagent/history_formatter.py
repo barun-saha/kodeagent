@@ -9,6 +9,7 @@ import json
 import uuid
 from abc import ABC, abstractmethod
 
+from . import kutils as ku
 from .models import ChatMessage
 
 CODE_ACT_PSEUDO_TOOL_NAME = 'code_execution'
@@ -47,16 +48,15 @@ class HistoryFormatter(ABC):
         """
 
     @abstractmethod
-    def should_add_pending_placeholder(self, state: dict) -> bool:
-        """Determine if a placeholder should be added for pending tool calls.
+    def pydantic_to_dict(self, msg: ChatMessage) -> dict:
+        """Convert Pydantic message to dict with proper formatting and metadata.
 
         Args:
-            state: State dict with keys:
-                - last_tool_call_id: The most recent tool call ID
-                - pending_tool_call: Whether a tool call is awaiting response
+            msg: The Pydantic ChatMessage (ReActChatMessage or CodeActChatMessage).
 
         Returns:
-            True if a placeholder should be added.
+            A dictionary representation compliant with OpenAPI/LLM specs,
+            including metadata fields prefixed with '_'.
         """
 
 
@@ -111,16 +111,86 @@ class ReActHistoryFormatter(HistoryFormatter):
             ],
         }
 
-    def should_add_pending_placeholder(self, state: dict) -> bool:
-        """Check if placeholder needed for interrupted tool call.
+    def pydantic_to_dict(self, msg: ChatMessage) -> dict:
+        """Convert ReActChatMessage to dict.
 
         Args:
-            state: State dict with pending_tool_call and last_tool_call_id.
+            msg: The ReActChatMessage to convert.
 
         Returns:
-            True if there's a pending tool call without a response.
+            A dictionary representation of the message, formatted for LLM consumption,
+            with special handling for tool calls and final answers, and metadata fields
+            prefixed with '_'.
         """
-        return bool(state.get('pending_tool_call', False) and state.get('last_tool_call_id'))
+        d = msg.model_dump()
+
+        # Tool call request (Assistant -> Tool)
+        if self.should_format_as_tool_call(msg):
+            tool_call_id = f'call_{uuid.uuid4().hex[:8]}'
+            return {
+                'role': 'assistant',
+                'content': None,
+                'tool_calls': [
+                    {
+                        'id': tool_call_id,
+                        'type': 'function',
+                        'function': {
+                            'name': msg.action,
+                            'arguments': getattr(msg, 'args', '{}'),
+                        },
+                    }
+                ],
+                'files': d.get('files'),
+                # Metadata for internal use
+                '_thought': getattr(msg, 'thought', None),
+                '_action': msg.action,
+                '_args': getattr(msg, 'args', None),
+                '_task_successful': getattr(msg, 'task_successful', True),
+            }
+
+        # Final answer (Assistant -> User)
+        if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
+            return {
+                'role': 'assistant',
+                'content': msg.final_answer,
+                'files': d.get('files'),
+                '_thought': getattr(msg, 'thought', None),
+                '_code': getattr(msg, 'code', None),
+                '_task_successful': getattr(msg, 'task_successful', True),
+                '_action': getattr(
+                    msg, 'action', 'FINISH' if not getattr(msg, 'code', None) else None
+                ),
+            }
+
+        # Generic assistant/user/system message
+        if d.get('role') == 'user':
+            # Use utility to handle files (images/text)
+            usr_msgs = ku.make_user_message(d.get('content', ''), d.get('files'))
+            if usr_msgs:
+                usr_msg = usr_msgs[0]  # ku returns a list of one message dict
+                # Standard metadata preserve
+                usr_msg.update(
+                    {
+                        '_thought': getattr(msg, 'thought', None),
+                        '_action': getattr(msg, 'action', None),
+                        '_args': getattr(msg, 'args', None),
+                        '_task_successful': getattr(msg, 'task_successful', True),
+                        'files': d.get('files'),
+                    }
+                )
+                return usr_msg
+
+        return {
+            'role': d.get('role'),
+            'content': d.get('content', ''),
+            'files': d.get('files'),
+            '_thought': getattr(msg, 'thought', None),
+            # Preserve other potential metadata if present (for cross-agent history compatibility)
+            '_action': getattr(msg, 'action', None),
+            '_code': getattr(msg, 'code', None),
+            '_args': getattr(msg, 'args', None),
+            '_task_successful': getattr(msg, 'task_successful', True),
+        }
 
 
 class CodeActHistoryFormatter(HistoryFormatter):
@@ -173,13 +243,74 @@ class CodeActHistoryFormatter(HistoryFormatter):
             ],
         }
 
-    def should_add_pending_placeholder(self, _state: dict) -> bool:
-        """CodeAct does not use placeholders for interrupted code execution.
+    def pydantic_to_dict(self, msg: ChatMessage) -> dict:
+        """Convert CodeActChatMessage to dict.
 
         Args:
-            _state: State dict (unused).
+            msg: The CodeActChatMessage to convert.
 
         Returns:
-            Always False.
+            A dictionary representation of the message, formatted for LLM consumption,
+            with special handling for code execution tool calls and final answers.
         """
-        return False
+        d = msg.model_dump()
+
+        # Code execution request (Assistant -> Pseudo-Tool)
+        if self.should_format_as_tool_call(msg):
+            tool_call_id = f'call_{uuid.uuid4().hex[:8]}'
+            return {
+                'role': 'assistant',
+                'content': None,
+                'tool_calls': [
+                    {
+                        'id': tool_call_id,
+                        'type': 'function',
+                        'function': {
+                            'name': CODE_ACT_PSEUDO_TOOL_NAME,
+                            'arguments': json.dumps({'code': msg.code}),
+                        },
+                    }
+                ],
+                'files': d.get('files'),
+                # Metadata
+                '_thought': getattr(msg, 'thought', None),
+                '_code': msg.code,
+                '_task_successful': getattr(msg, 'task_successful', True),
+            }
+
+        # Final answer
+        if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
+            return {
+                'role': 'assistant',
+                'content': msg.final_answer,
+                'files': d.get('files'),
+                '_thought': getattr(msg, 'thought', None),
+                '_task_successful': getattr(msg, 'task_successful', True),
+            }
+
+        # Generic
+        if d.get('role') == 'user':
+            usr_msgs = ku.make_user_message(d.get('content', ''), d.get('files'))
+            if usr_msgs:
+                usr_msg = usr_msgs[0]
+                usr_msg.update(
+                    {
+                        '_thought': getattr(msg, 'thought', None),
+                        '_code': getattr(msg, 'code', None),
+                        '_task_successful': getattr(msg, 'task_successful', True),
+                        'files': d.get('files'),
+                    }
+                )
+                return usr_msg
+
+        return {
+            'role': d.get('role'),
+            'content': d.get('content', ''),
+            'files': d.get('files'),
+            '_thought': getattr(msg, 'thought', None),
+            # Preserve other potential metadata if present
+            # '_action': getattr(msg, 'action', None),
+            '_code': getattr(msg, 'code', None),
+            # '_args': getattr(msg, 'args', None),
+            '_task_successful': getattr(msg, 'task_successful', True),
+        }

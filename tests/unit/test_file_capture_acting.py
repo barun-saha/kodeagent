@@ -74,8 +74,8 @@ async def test_react_agent_tool_file_capture():
         mock_react_msg.args = f'{{"content": "hello", "filename": "{safe_path}"}}'
 
         # We'll manually call _act for testing isolation
-        # _act uses self.messages[-1] as the prompt
-        agent.messages.append(mock_react_msg)
+        # _act uses self.chat_history[-1] as the prompt
+        agent.add_to_history(mock_react_msg)
 
         # Act
         response_data = None
@@ -107,7 +107,7 @@ async def test_code_act_agent_file_capture():
     mock_code_msg = CodeActChatMessage(
         role='assistant', thought='Writing code', code="print('creating file')"
     )
-    agent.messages.append(mock_code_msg)
+    agent.add_to_history(mock_code_msg)
 
     # Act
     async for response in agent._act():
