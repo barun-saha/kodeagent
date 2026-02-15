@@ -471,7 +471,11 @@ class Agent(ABC):
                     raise
 
     def add_to_history(self, message: ChatMessage | dict):
-        """Add a chat message to the agent's message history."""
+        """Add a chat message to the agent's message history.
+
+        Args:
+            message: The chat message to add, either as a ChatMessage object or a dictionary.
+        """
         if isinstance(message, ChatMessage):
             # Use formatter if available
             if self._history_formatter:
@@ -482,7 +486,8 @@ class Agent(ABC):
         else:
             message_dict = message
 
-        # Merging consecutive user messages
+        # Merging consecutive user messages since most APIs expect a single user message
+        # followed by an assistant response
         if (
             self.chat_history
             and self.chat_history[-1].get('role') == 'user'

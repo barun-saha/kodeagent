@@ -119,8 +119,7 @@ class TestReActHistoryFormatter:
         assert result['tool_calls'][0]['function']['arguments'] == '{}'
 
     def test_pydantic_to_dict_tool_call(self, formatter: ReActHistoryFormatter):
-        """
-        Test pydantic_to_dict for tool call message.
+        """Test pydantic_to_dict for tool call message.
 
         Args:
             formatter: The ReActHistoryFormatter instance to test.

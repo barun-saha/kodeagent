@@ -112,8 +112,7 @@ class ReActHistoryFormatter(HistoryFormatter):
         }
 
     def pydantic_to_dict(self, msg: ChatMessage) -> dict:
-        """
-        Convert ReActChatMessage to dict.
+        """Convert ReActChatMessage to dict.
 
         Args:
             msg: The ReActChatMessage to convert.
@@ -245,8 +244,7 @@ class CodeActHistoryFormatter(HistoryFormatter):
         }
 
     def pydantic_to_dict(self, msg: ChatMessage) -> dict:
-        """
-        Convert CodeActChatMessage to dict.
+        """Convert CodeActChatMessage to dict.
 
         Args:
             msg: The CodeActChatMessage to convert.
