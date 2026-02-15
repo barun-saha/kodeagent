@@ -32,7 +32,7 @@ Tasks can also be run with input files. The files can be local files, remote fil
 ```python
 async for response in agent.run(
     task='Caption these images',
-    files=[
+    files=[  # Always a list of files
         '/home/user/image1.jpg',
         'http://example.com/image2.jpg',
     ],
@@ -62,7 +62,7 @@ The `run_env` parameter specifies the environment where the agent's code will ex
 
 ## Task Result and State
 
-The only way to execute any task is by invoking the `run()` method with the task description. The `run()` method provides streaming responses from the task execution, which can be iterated over asynchronously. However, often you may want to access the final response from the agent. This can be accessed via `agent.task.result`:
+The only way to execute any task is by invoking the `run()` method with the task description and optional files. The `run()` method provides streaming responses from the task execution, which can be iterated over asynchronously. However, often you may want to access the final response from the agent. This can be accessed via `agent.task.result`:
 
 ```python
 async for _ in agent.run('Some task description'):

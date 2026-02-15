@@ -15,7 +15,7 @@ kodeagent.history\_formatter.ReActHistoryFormatter
    
       ~ReActHistoryFormatter.__init__
       ~ReActHistoryFormatter.format_tool_call
-      ~ReActHistoryFormatter.should_add_pending_placeholder
+      ~ReActHistoryFormatter.pydantic_to_dict
       ~ReActHistoryFormatter.should_format_as_tool_call
    
    

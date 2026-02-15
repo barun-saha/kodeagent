@@ -15,7 +15,7 @@ kodeagent.history\_formatter.HistoryFormatter
    
       ~HistoryFormatter.__init__
       ~HistoryFormatter.format_tool_call
-      ~HistoryFormatter.should_add_pending_placeholder
+      ~HistoryFormatter.pydantic_to_dict
       ~HistoryFormatter.should_format_as_tool_call
    
    
