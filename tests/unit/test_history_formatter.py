@@ -77,7 +77,6 @@ class TestReActHistoryFormatter:
             args='{"query": "test"}',
         )
         state = {'last_tool_call_id': None, 'pending_tool_call': False}
-
         result = formatter.format_tool_call(msg, state)
 
         assert result['role'] == 'assistant'
@@ -98,7 +97,6 @@ class TestReActHistoryFormatter:
             role='assistant', thought='I will search', action='search_web', args='{}'
         )
         state = {'last_tool_call_id': None, 'pending_tool_call': False}
-
         result = formatter.format_tool_call(msg, state)
 
         # State should be updated
@@ -116,42 +114,23 @@ class TestReActHistoryFormatter:
             model_dump=lambda: {'role': 'assistant'},
         )
         state = {'last_tool_call_id': None, 'pending_tool_call': False}
-
         result = formatter.format_tool_call(msg, state)  # type: ignore
 
         assert result['tool_calls'][0]['function']['arguments'] == '{}'
 
-    def test_should_add_pending_placeholder_true(self, formatter: ReActHistoryFormatter):
-        """Test placeholder is added when there's a pending tool call."""
-        state = {'last_tool_call_id': 'call_abc123', 'pending_tool_call': True}
-        assert formatter.should_add_pending_placeholder(state) is True
-
-    def test_should_add_pending_placeholder_false_no_pending(
-        self, formatter: ReActHistoryFormatter
-    ):
-        """Test no placeholder when pending_tool_call is False."""
-        state = {'last_tool_call_id': 'call_abc123', 'pending_tool_call': False}
-        assert formatter.should_add_pending_placeholder(state) is False
-
-    def test_should_add_pending_placeholder_false_no_id(self, formatter: ReActHistoryFormatter):
-        """Test no placeholder when there's no tool_call_id."""
-        state = {'last_tool_call_id': None, 'pending_tool_call': True}
-        assert formatter.should_add_pending_placeholder(state) is False
-
-    def test_should_add_pending_placeholder_empty_state(self, formatter: ReActHistoryFormatter):
-        """Test no placeholder with empty state dict."""
-        state = {}
-        assert formatter.should_add_pending_placeholder(state) is False
-
     def test_pydantic_to_dict_tool_call(self, formatter: ReActHistoryFormatter):
-        """Test pydantic_to_dict for tool call message."""
+        """
+        Test pydantic_to_dict for tool call message.
+
+        Args:
+            formatter: The ReActHistoryFormatter instance to test.
+        """
         msg = ReActChatMessage(
             role='assistant',
             thought='I will search',
             action='search_web',
             args='{"query": "test"}',
         )
-
         result = formatter.pydantic_to_dict(msg)
 
         assert result['role'] == 'assistant'
@@ -291,25 +270,10 @@ class TestCodeActHistoryFormatter:
         code_with_quotes = 'print("Hello \'world\'")\nresult = {"key": "value"}'
         msg = CodeActChatMessage(role='assistant', thought='Testing', code=code_with_quotes)
         state = {'last_tool_call_id': None, 'pending_tool_call': False}
-
         result = formatter.format_tool_call(msg, state)
 
         args = json.loads(result['tool_calls'][0]['function']['arguments'])
         assert args['code'] == code_with_quotes
-
-    def test_should_add_pending_placeholder_always_false(self, formatter: CodeActHistoryFormatter):
-        """Test that CodeAct never adds placeholders."""
-        # Even with pending tool call
-        state = {'last_tool_call_id': 'call_abc123', 'pending_tool_call': True}
-        assert formatter.should_add_pending_placeholder(state) is False
-
-        # Without pending tool call
-        state = {'last_tool_call_id': 'call_abc123', 'pending_tool_call': False}
-        assert formatter.should_add_pending_placeholder(state) is False
-
-        # Empty state
-        state = {}
-        assert formatter.should_add_pending_placeholder(state) is False
 
     def test_pydantic_to_dict_code(self, formatter: CodeActHistoryFormatter):
         """Test pydantic_to_dict for code execution message."""
@@ -318,7 +282,6 @@ class TestCodeActHistoryFormatter:
             thought='I will calculate',
             code='print(2+2)',
         )
-
         result = formatter.pydantic_to_dict(msg)
 
         assert result['role'] == 'assistant'
@@ -336,7 +299,6 @@ class TestCodeActHistoryFormatter:
             task_successful=True,
             code=None,
         )
-
         result = formatter.pydantic_to_dict(msg)
 
         assert result['role'] == 'assistant'

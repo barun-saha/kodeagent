@@ -111,19 +111,18 @@ class ReActHistoryFormatter(HistoryFormatter):
             ],
         }
 
-    def should_add_pending_placeholder(self, state: dict) -> bool:
-        """Check if placeholder needed for interrupted tool call.
+    def pydantic_to_dict(self, msg: ChatMessage) -> dict:
+        """
+        Convert ReActChatMessage to dict.
 
         Args:
-            state: State dict with pending_tool_call and last_tool_call_id.
+            msg: The ReActChatMessage to convert.
 
         Returns:
-            True if there's a pending tool call without a response.
+            A dictionary representation of the message, formatted for LLM consumption,
+            with special handling for tool calls and final answers, and metadata fields
+            prefixed with '_'.
         """
-        return bool(state.get('pending_tool_call', False) and state.get('last_tool_call_id'))
-
-    def pydantic_to_dict(self, msg: ChatMessage) -> dict:
-        """Convert ReActChatMessage to dict."""
         d = msg.model_dump()
 
         # Tool call request (Assistant -> Tool)
@@ -245,19 +244,17 @@ class CodeActHistoryFormatter(HistoryFormatter):
             ],
         }
 
-    def should_add_pending_placeholder(self, _state: dict) -> bool:
-        """CodeAct does not use placeholders for interrupted code execution.
+    def pydantic_to_dict(self, msg: ChatMessage) -> dict:
+        """
+        Convert CodeActChatMessage to dict.
 
         Args:
-            _state: State dict (unused).
+            msg: The CodeActChatMessage to convert.
 
         Returns:
-            Always False.
+            A dictionary representation of the message, formatted for LLM consumption,
+            with special handling for code execution tool calls and final answers.
         """
-        return False
-
-    def pydantic_to_dict(self, msg: ChatMessage) -> dict:
-        """Convert CodeActChatMessage to dict."""
         d = msg.model_dump()
 
         # Code execution request (Assistant -> Pseudo-Tool)
