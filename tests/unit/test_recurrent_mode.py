@@ -252,8 +252,8 @@ async def test_recurrent_mode_forces_assistant_role(react_agent):
         # In this mock, the only "user" role should be the ones explicitly added by the agent
         # as task descriptions or plans.
         for msg in react_agent.chat_history:
-            if hasattr(msg, 'thought'):
-                assert msg.role == 'assistant'
+            if msg.get('_thought'):
+                assert msg['role'] == 'assistant'
 
 
 @pytest.mark.asyncio
