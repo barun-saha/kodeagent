@@ -419,7 +419,7 @@ class Agent(ABC):
             RetryError: If LLM call fails after max retries.
             Exception in case of error.
         """
-        formatted_messages = self.chat_history
+        formatted_messages = list(self.chat_history)  # Avoid permanently polluting chat history
 
         for attempt in range(MAX_RESPONSE_PARSING_ATTEMPTS):
             try:
@@ -469,7 +469,6 @@ class Agent(ABC):
             if self._history_formatter:
                 message_dict = self._history_formatter.pydantic_to_dict(message)
             else:
-                # Default fallback for simple agents
                 message_dict = message.model_dump()
         else:
             message_dict = message
@@ -1986,9 +1985,6 @@ async def main():
 
         if agent.current_plan:
             print(f'Plan:\n{agent.current_plan}')
-
-        # for idx, msg in enumerate(agent.chat_history[1:], start=1):
-        #     print(f'#{idx}: {len(agent.chat_history)} {msg}')
 
         await asyncio.sleep(random.uniform(0.15, 0.55))
         print('\n\n')
