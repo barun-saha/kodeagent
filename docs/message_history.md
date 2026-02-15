@@ -1,5 +1,11 @@
 ## Message History
 
+> **ⓘ NOTE**
+>
+> Starting v0.10.0, KodeAgent will unify the dual storage approach into a single list of dicts suitable for LLM APIs. The documentation will be updated thereafter accordingly.
+
+---
+
 KodeAgent manages conversation history by maintaining two complementary views of your dialogue with the LLM. This "dual storage" approach ensures that while the LLM gets exactly what it needs to function, we keep a rich, human-readable record of the agent's internal state.
 
 ### Dual Storage: Structured vs. API Format

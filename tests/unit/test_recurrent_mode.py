@@ -245,15 +245,15 @@ async def test_recurrent_mode_forces_assistant_role(react_agent):
         # The last message is probably the assistant's final answer
         # Messages: [system, user, user (plan), assistant (result), assistant (summary/final)]
         # Actually in run loop it might vary, let's find the assistant message
-        assistant_msgs = [m for m in react_agent.messages if m.role == 'assistant']
+        assistant_msgs = [m for m in react_agent.chat_history if m['role'] == 'assistant']
         assert len(assistant_msgs) > 0
 
         # Check if any message ended up with role 'user' that should be 'assistant'
         # In this mock, the only "user" role should be the ones explicitly added by the agent
         # as task descriptions or plans.
-        for msg in react_agent.messages:
-            if hasattr(msg, 'thought'):
-                assert msg.role == 'assistant'
+        for msg in react_agent.chat_history:
+            if msg.get('_thought'):
+                assert msg['role'] == 'assistant'
 
 
 @pytest.mark.asyncio

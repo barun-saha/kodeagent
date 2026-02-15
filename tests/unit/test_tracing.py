@@ -380,7 +380,7 @@ class TestTracingIntegration:
 
         # Setup message with tool call
         msg = ReActChatMessage(thought='using tool', action='tool1', args='{"arg1": 1}')
-        agent.messages.append(msg)
+        agent.add_to_history(msg)
         agent.task = Task(description='t')
 
         async for _ in agent._act():
@@ -402,7 +402,7 @@ class TestTracingIntegration:
 
         # Message with missing action
         msg = ReActChatMessage.model_construct(thought='thinking', action=None, args='{}')
-        agent.messages.append(msg)
+        agent.add_to_history(msg)
 
         async for _ in agent._act():
             pass
@@ -425,7 +425,7 @@ class TestTracingIntegration:
 
         # Message with non-dict args (after parsing)
         msg = ReActChatMessage.model_construct(thought='thinking', action='tool1', args='[1, 2, 3]')
-        agent.messages.append(msg)
+        agent.add_to_history(msg)
 
         async for _ in agent._act():
             pass
@@ -491,7 +491,7 @@ class TestTracingIntegration:
 
         # Setup message with code
         msg = CodeActChatMessage(thought='running code', code='print(1)')
-        agent.messages.append(msg)
+        agent.add_to_history(msg)
 
         mock_runner_run.return_value = ('out', '', 0, [])
 
@@ -514,7 +514,7 @@ class TestTracingIntegration:
 
         # Message with missing thought
         msg = CodeActChatMessage.model_construct(thought=None, code='print(1)')
-        agent.messages.append(msg)
+        agent.add_to_history(msg)
 
         async for _ in agent._act():
             pass
@@ -535,7 +535,7 @@ class TestTracingIntegration:
         agent.task = Task(description='t')
 
         msg = CodeActChatMessage(thought='running', code='print(1)')
-        agent.messages.append(msg)
+        agent.add_to_history(msg)
 
         mock_runner_run.side_effect = Exception('runner crashed')
 
@@ -567,7 +567,7 @@ class TestTracingIntegration:
 
         # Setup message with final answer
         msg = CodeActChatMessage(thought='done', final_answer='the answer')
-        agent.messages.append(msg)
+        agent.add_to_history(msg)
 
         async for _ in agent._act():
             pass

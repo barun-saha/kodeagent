@@ -1,4 +1,4 @@
-kodeagent.kodeagent.CodeActAgent
+﻿kodeagent.kodeagent.CodeActAgent
 ================================
 
 .. currentmodule:: kodeagent.kodeagent
@@ -17,13 +17,13 @@ kodeagent.kodeagent.CodeActAgent
       ~CodeActAgent.add_output_file
       ~CodeActAgent.add_to_history
       ~CodeActAgent.clear_history
-      ~CodeActAgent.formatted_history_for_llm
       ~CodeActAgent.get_history
       ~CodeActAgent.get_relevant_tools
       ~CodeActAgent.get_tools_description
       ~CodeActAgent.get_usage_metrics
       ~CodeActAgent.get_usage_report
       ~CodeActAgent.init_history
+      ~CodeActAgent.normalize_content
       ~CodeActAgent.parse_text_response
       ~CodeActAgent.post_run
       ~CodeActAgent.pre_run
