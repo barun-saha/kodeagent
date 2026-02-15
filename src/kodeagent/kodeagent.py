@@ -132,13 +132,6 @@ class Agent(ABC):
 
         self.task: Task | None = None
         self.chat_history: list[dict] = []
-        # Cache for observer history (accumulated string)
-        self._observer_history_str: str = ''
-        self._observer_history_idx: int = -1
-
-        # Cache for observer history (accumulated string)
-        self._observer_history_str: str = ''
-        self._observer_history_idx: int = -1
 
         self._history_formatter: HistoryFormatter | None = None
         self._tool_descriptions_cache: dict[frozenset[str], str] = {}
@@ -295,11 +288,6 @@ class Agent(ABC):
                 'task_id': str(self.task.id),
             },
         )
-
-        self._observer_history_str = ''
-        self._observer_history_idx = -1
-        self._last_tool_call_id = None
-        self._pending_tool_call = False
         self.final_answer_found = False
 
     def add_output_file(self, path: str):
@@ -323,7 +311,7 @@ class Agent(ABC):
         prompt = SALVAGE_RESPONSE_PROMPT.format(
             task=self.task.description,
             task_files='\n'.join(self.task.files) if self.task.files else '[None]',
-            history=self.get_history(start_idx=self.msg_idx_of_new_task),
+            history=self.get_history(),
         )
         salvaged_response = await ku.call_llm(
             model_name=self.model_name,
@@ -565,66 +553,53 @@ class Agent(ABC):
 
         return description
 
-    def _get_observer_history(self) -> str:
-        """Get the history string specifically optimized for the Observer.
-
-        Optimization strategy:
-        1. Maintain an incremental string buffer to avoid O(N) list join operations.
-        2. exclude system prompt (Observer knows the task context separately).
-        3. Truncate long message content to 1000 chars to save tokens.
-        """
-        # Start from the next index
-        start_idx = self._observer_history_idx + 1
-
-        # If there are new messages, process them
-        if start_idx < len(self.chat_history):
-            new_msgs = self.chat_history[start_idx:]
-            new_segments = []
-
-            for msg in new_msgs:
-                # Skip system messages
-                if msg.get('role') == 'system':
-                    continue
-
-                content = str(msg)
-
-                # Truncate any message content exceeding 1000 chars
-                if len(content) > 1000:
-                    content = content[:1000] + '... [TRUNCATED]'
-
-                new_segments.append(f'[{msg.get("role")}]: {content}')
-
-            if new_segments:
-                new_block = '\n'.join(new_segments)
-                if self._observer_history_str:
-                    self._observer_history_str += '\n' + new_block
-                else:
-                    self._observer_history_str = new_block
-
-            self._observer_history_idx = len(self.chat_history) - 1
-
-        return self._observer_history_str
-
-    def get_history(self, start_idx: int = 0, truncate_text: bool = False) -> str:
-        """Get a formatted string representation of all the messages.
+    @staticmethod
+    def normalize_content(content: Any) -> str:
+        """Convert message content to a readable string for Observer.
 
         Args:
-            start_idx: Index to start getting history from.
-            truncate_text: If True, truncate message content to 100 chars.
+            content: The content to normalize, which can be of various types (str, list, dict).
+
+        Returns:
+            A string representation of the content suitable for logging and observation.
         """
-        messages = []
-        for msg in self.chat_history[start_idx:]:
-            content = str(msg)
-            if truncate_text and len(content) > 100:
-                content = content[:100] + '...'
-            messages.append(f'[{msg.get("role")}]: {content}')
-        return '\n'.join(messages)
+        if content is None:
+            return ''
+        if isinstance(content, str):
+            return content
+
+        # OpenAI-style multimodal list
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get('type') == 'text':
+                    parts.append(item.get('text', ''))
+                else:
+                    parts.append(str(item))
+            return '\n'.join(parts)
+
+        return str(content)
+
+    def get_history(self) -> str:
+        """Get a formatted string of the agent's message history, excluding the system prompt
+         and truncating long messages.
+
+        Returns:
+            A string representation of the message history for logging and observation.
+        """
+        segments = []
+        for msg in self.chat_history[1:]:  # Skip system prompt
+            content = Agent.normalize_content(msg.get('content', ''))
+            if len(content) > 1000:
+                content = content[:1000] + '... [TRUNCATED]'
+
+            segments.append(f'[{msg.get("role")}]: {content}')
+
+        return '\n'.join(segments)
 
     def clear_history(self):
         """Clear the agent's message history."""
         self.chat_history = []
-        self._observer_history_str = ''
-        self._observer_history_idx = -1
 
     def init_history(self):
         """Initialize the agent's message history, e.g., with a system prompt."""
@@ -955,14 +930,14 @@ class ReActAgent(Agent):
                     self.add_to_history(
                         ChatMessage(
                             role='user',
-                            content=(f'Plan progress:\n{self.planner.get_formatted_plan()}'),
+                            content=f'Plan progress:\n{self.planner.get_formatted_plan()}',
                         )
                     )
 
                 try:
                     correction_msg = await self.observer.observe(
                         task=self.task,
-                        history=self._get_observer_history(),
+                        history=self.get_history(),
                         plan_before=plan_before_update,
                         plan_after=self.current_plan,
                         iteration=idx + 1,
