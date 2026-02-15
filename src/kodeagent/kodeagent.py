@@ -79,6 +79,7 @@ class Agent(ABC):
     """An abstract agent. Base class for all types of agents."""
 
     response_format_class: ClassVar[type[pyd.BaseModel]] = ChatMessage
+    HISTORY_TRUNCATE_CHARS: ClassVar[int] = 1000
 
     def __init__(
         self,
@@ -579,6 +580,18 @@ class Agent(ABC):
 
         return str(content)
 
+    def _get_last_tool_call_id(self) -> str | None:
+        """Extract the tool_call_id from the last message in chat_history.
+
+        Returns:
+            The tool call ID if present, otherwise None.
+        """
+        if not self.chat_history:
+            return None
+        last_msg = self.chat_history[-1]
+        tool_calls = last_msg.get('tool_calls', [])
+        return tool_calls[0].get('id') if tool_calls else None
+
     def get_history(self) -> str:
         """Get a formatted string of the agent's message history, excluding the system prompt
          and truncating long messages.
@@ -591,6 +604,8 @@ class Agent(ABC):
             content = Agent.normalize_content(msg.get('content', ''))
             if len(content) > 1000:
                 content = content[:1000] + '... [TRUNCATED]'
+            if len(content) > self.HISTORY_TRUNCATE_CHARS:
+                content = content[: self.HISTORY_TRUNCATE_CHARS] + '... [TRUNCATED]'
 
             segments.append(f'[{msg.get("role")}]: {content}')
 
@@ -1326,9 +1341,7 @@ class ReActAgent(Agent):
                     )
 
                     # Get tool call ID for correct pairing in history
-                    prev_msg_dict = self.chat_history[-1]
-                    tool_calls = prev_msg_dict.get('tool_calls', [])
-                    tool_call_id = tool_calls[0].get('id') if tool_calls else None
+                    tool_call_id = self._get_last_tool_call_id()
 
                     # Always use role='tool' for tool results
                     self.add_to_history(
@@ -1372,9 +1385,7 @@ class ReActAgent(Agent):
                         error=result,
                     )
                     # Get tool call ID for correct pairing in history
-                    prev_msg_dict = self.chat_history[-1]
-                    tool_calls = prev_msg_dict.get('tool_calls', [])
-                    tool_call_id = tool_calls[0].get('id') if tool_calls else None
+                    tool_call_id = self._get_last_tool_call_id()
 
                     # Use role='tool' for tool errors too
                     self.add_to_history(
@@ -1805,9 +1816,7 @@ class CodeActAgent(ReActAgent):
                 observation = f'{stdout}\n{stderr}'.strip()
 
                 # Get tool call ID for correct pairing in history
-                prev_msg_dict = self.chat_history[-1]
-                tool_calls = prev_msg_dict.get('tool_calls', [])
-                tool_call_id = tool_calls[0].get('id') if tool_calls else None
+                tool_call_id = self._get_last_tool_call_id()
 
                 msg = {'role': 'tool', 'content': observation, 'tool_call_id': tool_call_id}
                 self.add_to_history(msg)
@@ -1848,9 +1857,7 @@ class CodeActAgent(ReActAgent):
                 )
                 # Respond as the pseudo "tool"
                 # Get tool call ID for correct pairing in history
-                prev_msg_dict = self.chat_history[-1]
-                tool_calls = prev_msg_dict.get('tool_calls', [])
-                tool_call_id = tool_calls[0].get('id') if tool_calls else None
+                tool_call_id = self._get_last_tool_call_id()
 
                 tool_msg = {'role': 'tool', 'content': error_msg, 'tool_call_id': tool_call_id}
                 self.add_to_history(tool_msg)
@@ -1906,7 +1913,7 @@ def print_response(response: AgentResponse, only_final: bool = True):
 async def main():
     """Demonstrate the use of ReActAgent and CodeActAgent."""
     litellm_params = {'temperature': 0, 'timeout': 30}
-    model_name = 'gemini/gemini-2.5-flash-lite'
+    model_name = 'gemini/gemini-2.0-flash-lite'
     # model_name = 'openai/gpt-4.1-mini'
 
     agent = ReActAgent(
@@ -1921,36 +1928,36 @@ async def main():
         max_iterations=5,
         litellm_params=litellm_params,
     )
-    # agent = CodeActAgent(
-    #     name='Simple agent',
-    #     model_name=model_name,
-    #     tools=[
-    #         dtools.calculator,
-    #         dtools.search_web,
-    #         dtools.read_webpage,
-    #         dtools.extract_as_markdown,
-    #     ],
-    #     max_iterations=7,
-    #     litellm_params=litellm_params,
-    #     run_env='host',
-    #     allowed_imports=[
-    #         'math',
-    #         'datetime',
-    #         'time',
-    #         're',
-    #         'typing',
-    #         'mimetypes',
-    #         'random',
-    #         'ddgs',
-    #         'bs4',
-    #         'urllib.parse',
-    #         'requests',
-    #         'markitdown',
-    #         'pathlib',
-    #     ],
-    #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
-    #     work_dir='./agent_workspace',
-    # )
+    agent = CodeActAgent(
+        name='Simple agent',
+        model_name=model_name,
+        tools=[
+            dtools.calculator,
+            dtools.search_web,
+            dtools.read_webpage,
+            dtools.extract_as_markdown,
+        ],
+        max_iterations=7,
+        litellm_params=litellm_params,
+        run_env='host',
+        allowed_imports=[
+            'math',
+            'datetime',
+            'time',
+            're',
+            'typing',
+            'mimetypes',
+            'random',
+            'ddgs',
+            'bs4',
+            'urllib.parse',
+            'requests',
+            'markitdown',
+            'pathlib',
+        ],
+        pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
+        work_dir='./agent_workspace',
+    )
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
