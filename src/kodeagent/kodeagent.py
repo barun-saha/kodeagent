@@ -417,74 +417,6 @@ class Agent(ABC):
 
         return {'type': rtype, 'channel': channel, 'value': value, 'metadata': metadata}
 
-    def formatted_history_for_llm(self) -> list[dict]:
-        """Return the history formatted for the LLM.
-
-        Returns:
-            A list of dictionary messages compliant with OpenAPI/LLM specs.
-        """
-        # Filter out internal metadata fields (starting with _)
-        clean_history = []
-        for msg in self.chat_history:
-            clean_msg = {k: v for k, v in msg.items() if not k.startswith('_')}
-            clean_history.append(clean_msg)
-
-        # Check if the last assistant message has tool calls that haven't been responded to
-        # This is primarily for ReActAgent resume/interruption scenarios
-        if (
-            clean_history
-            and clean_history[-1].get('role') == 'assistant'
-            and clean_history[-1].get('tool_calls')
-        ):
-            # Check if there are tool responses for each tool call
-            # For simplicity, if the last message is assistant with tool_calls,
-            # we assume we need to add placeholders if we are returning this history
-            # (which usually means we're about to call the LLM again)
-            for tool_call in clean_history[-1].get('tool_calls', []):
-                clean_history.append(
-                    {
-                        'role': 'tool',
-                        'content': 'Error: Tool execution was interrupted.',
-                        'tool_call_id': tool_call.get('id'),
-                    }
-                )
-
-        return clean_history
-
-    def _message_to_string(self, msg: dict) -> str:
-        """Reconstruct string representation from dict for Observer/History.
-
-        Args:
-            msg: The message dictionary.
-
-        Returns:
-            String representation of the message content/logic.
-        """
-        role = msg.get('role')
-        content = msg.get('content')
-
-        if role == 'assistant':
-            # ReAct style reconstruction
-            action = msg.get('_action')
-            if action and action != 'FINISH':
-                parts = []
-                if msg.get('_thought'):
-                    parts.append(f'Thought: {msg["_thought"]}')
-                parts.append(f'Action: {action}')
-                if msg.get('_args'):
-                    parts.append(f'Args: {msg["_args"]}')
-                return '\n'.join(parts)
-
-            # CodeAct style reconstruction
-            if msg.get('_code'):
-                parts = []
-                if msg.get('_thought'):
-                    parts.append(f'Thought: {msg["_thought"]}')
-                parts.append(f'Code:\n```python\n{msg["_code"]}\n```')
-                return '\n'.join(parts)
-
-        return str(content) if content else ''
-
     async def _chat(self, response_format: type[pyd.BaseModel] | None = None) -> str | None:
         """Interact with the LLM using the agent's message history.
         Enhanced with retry logic for structured output failures.
@@ -499,7 +431,7 @@ class Agent(ABC):
             RetryError: If LLM call fails after max retries.
             Exception in case of error.
         """
-        formatted_messages = self.formatted_history_for_llm()
+        formatted_messages = self.chat_history
 
         for attempt in range(MAX_RESPONSE_PARSING_ATTEMPTS):
             try:
@@ -547,9 +479,34 @@ class Agent(ABC):
             else:
                 # Default fallback for simple agents
                 message_dict = message.model_dump()
-            self.chat_history.append(message_dict)
         else:
-            self.chat_history.append(message)
+            message_dict = message
+
+        # Merging consecutive user messages
+        if (
+            self.chat_history
+            and self.chat_history[-1].get('role') == 'user'
+            and message_dict.get('role') == 'user'
+        ):
+            prev = self.chat_history[-1]
+            prev_content = prev.get('content', '')
+            curr_content = message_dict.get('content', '')
+
+            # Convert to lists for merging
+            if not isinstance(prev_content, list):
+                prev_content = [{'type': 'text', 'text': str(prev_content)}]
+            if not isinstance(curr_content, list):
+                curr_content = [{'type': 'text', 'text': str(curr_content)}]
+
+            prev['content'] = prev_content + curr_content
+            # Update files metadata if present
+            if message_dict.get('files'):
+                prev_files = prev.get('files') or []
+                if not isinstance(prev_files, list):
+                    prev_files = [prev_files]
+                prev['files'] = prev_files + message_dict['files']
+        else:
+            self.chat_history.append(message_dict)
 
     def get_tools_description(self, tools: list[Any] | None = None) -> str:
         """Generate a description of all the tools available to the agent. Required args are marked.
@@ -624,7 +581,7 @@ class Agent(ABC):
                 if msg.get('role') == 'system':
                     continue
 
-                content = self._message_to_string(msg)
+                content = str(msg)
 
                 # Truncate any message content exceeding 1000 chars
                 if len(content) > 1000:
@@ -652,7 +609,7 @@ class Agent(ABC):
         """
         messages = []
         for msg in self.chat_history[start_idx:]:
-            content = self._message_to_string(msg)
+            content = str(msg)
             if truncate_text and len(content) > 100:
                 content = content[:100] + '...'
             messages.append(f'[{msg.get("role")}]: {content}')
@@ -663,9 +620,6 @@ class Agent(ABC):
         self.chat_history = []
         self._observer_history_str = ''
         self._observer_history_idx = -1
-        if self._history_formatter:
-            # We don't have formatter state anymore in agent, but good to check expectations
-            pass
 
     def init_history(self):
         """Initialize the agent's message history, e.g., with a system prompt."""
@@ -1988,36 +1942,36 @@ async def main():
         max_iterations=5,
         litellm_params=litellm_params,
     )
-    agent = CodeActAgent(
-        name='Simple agent',
-        model_name=model_name,
-        tools=[
-            dtools.calculator,
-            dtools.search_web,
-            dtools.read_webpage,
-            dtools.extract_as_markdown,
-        ],
-        max_iterations=7,
-        litellm_params=litellm_params,
-        run_env='host',
-        allowed_imports=[
-            'math',
-            'datetime',
-            'time',
-            're',
-            'typing',
-            'mimetypes',
-            'random',
-            'ddgs',
-            'bs4',
-            'urllib.parse',
-            'requests',
-            'markitdown',
-            'pathlib',
-        ],
-        pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
-        work_dir='./agent_workspace',
-    )
+    # agent = CodeActAgent(
+    #     name='Simple agent',
+    #     model_name=model_name,
+    #     tools=[
+    #         dtools.calculator,
+    #         dtools.search_web,
+    #         dtools.read_webpage,
+    #         dtools.extract_as_markdown,
+    #     ],
+    #     max_iterations=7,
+    #     litellm_params=litellm_params,
+    #     run_env='host',
+    #     allowed_imports=[
+    #         'math',
+    #         'datetime',
+    #         'time',
+    #         're',
+    #         'typing',
+    #         'mimetypes',
+    #         'random',
+    #         'ddgs',
+    #         'bs4',
+    #         'urllib.parse',
+    #         'requests',
+    #         'markitdown',
+    #         'pathlib',
+    #     ],
+    #     pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
+    #     work_dir='./agent_workspace',
+    # )
 
     the_tasks = [
         ('What is ten plus 15, raised to 2, expressed in words?', None),
@@ -2052,6 +2006,9 @@ async def main():
 
         if agent.current_plan:
             print(f'Plan:\n{agent.current_plan}')
+
+        # for idx, msg in enumerate(agent.chat_history[1:], start=1):
+        #     print(f'#{idx}: {len(agent.chat_history)} {msg}')
 
         await asyncio.sleep(random.uniform(0.15, 0.55))
         print('\n\n')

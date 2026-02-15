@@ -189,7 +189,11 @@ class TestReActHistoryFormatter:
         result = formatter.pydantic_to_dict(msg)
 
         assert result['role'] == 'user'
-        assert result['content'] == 'Hello'
+        content = result['content']
+        if isinstance(content, list):
+            assert content[0]['text'] == 'Hello'
+        else:
+            assert content == 'Hello'
         assert result['_thought'] is None
 
 

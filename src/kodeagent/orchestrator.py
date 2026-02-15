@@ -273,8 +273,8 @@ class Observer:
             tool_names = '\n'.join(sorted(list(self.tool_names)))
             prompt = OBSERVATION_PROMPT.format(
                 task=task.description,
-                plan_before=plan_before,
-                plan_after=plan_after,
+                plan_before=str(plan_before),
+                plan_after=str(plan_after),
                 history=history,
                 tools=tool_names,
             )

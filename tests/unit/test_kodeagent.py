@@ -130,84 +130,11 @@ def test_add_to_history(react_agent):
     react_agent.add_to_history(msg)
     assert len(react_agent.chat_history) == 1
     assert react_agent.chat_history[0]['role'] == 'user'
-    assert react_agent.chat_history[0]['content'] == 'test message'
-
-
-def test_history_formatting():
-    """Test string representation of history with structured messages."""
-    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[])
-
-    # 1. Standard user message
-    agent.add_to_history(ChatMessage(role='user', content='Hello'))
-
-    # 2. ReAct intermediate step
-    agent.add_to_history(
-        ReActChatMessage(
-            role='assistant',
-            thought='I need to think',
-            action='calculator',
-            args='{"expr": "1+1"}',
-            task_successful=False,
-        )
-    )
-
-    # 3. CodeAct intermediate step
-    agent.add_to_history(
-        CodeActChatMessage(
-            role='assistant',
-            thought='I will run python',
-            code='print("hello")',
-            task_successful=False,
-        )
-    )
-
-    # 4. Final answer
-    agent.add_to_history(
-        ReActChatMessage(
-            role='assistant',
-            thought='Done',
-            action='FINISH',
-            final_answer='42',
-            task_successful=True,
-        )
-    )
-
-    history = agent.get_history()
-
-    expected_snippets = [
-        '[user]: Hello',
-        '[assistant]: Thought: I need to think',
-        'Action: calculator',
-        'Args: {"expr": "1+1"}',
-        '[assistant]: Thought: I will run python',
-        'Code:\n```python\nprint("hello")\n```',
-        '[assistant]: 42',
-    ]
-
-    for snippet in expected_snippets:
-        assert snippet in history, f"Expected '{snippet}' in history"
-
-    assert 'None' not in history, "History should not contain 'None'"
-
-
-def test_history_truncation():
-    """Test history truncation."""
-    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[])
-
-    # Add a long message > 100 chars
-    long_text = 'A' * 150
-    agent.add_to_history(ChatMessage(role='user', content=long_text))
-
-    # Test without truncation (default)
-    history_full = agent.get_history()
-    assert long_text in history_full
-    assert '...' not in history_full
-
-    # Test with truncation
-    history_truncated = agent.get_history(truncate_text=True)
-    assert len(history_truncated) < 150
-    assert '...' in history_truncated
-    assert history_truncated.count('A') == 100
+    content = react_agent.chat_history[0]['content']
+    if isinstance(content, list):
+        assert content[0]['text'] == 'test message'
+    else:
+        assert content == 'test message'
 
 
 def test_format_messages_for_prompt(react_agent):
@@ -225,7 +152,7 @@ def test_format_messages_for_prompt(react_agent):
     react_agent.add_to_history(msg1)
     react_agent.add_to_history(msg2)
 
-    formatted = react_agent.formatted_history_for_llm()
+    formatted = react_agent.chat_history
     assert isinstance(formatted, list)
     assert len(formatted) > 0
     assert any('assistant' in str(m) for m in formatted)
@@ -1166,22 +1093,6 @@ async def test_salvage_response():
         assert 'Test Task' in str(mock_call.call_args)
 
 
-def test_get_history():
-    """Test get_history method."""
-    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
-    agent.add_to_history(ChatMessage(role='user', content='Hello'))
-    agent.add_to_history(ChatMessage(role='assistant', content='Hi'))
-
-    history = agent.get_history()
-    assert '[user]: Hello' in history
-    assert '[assistant]: Hi' in history
-
-    # Test with start_idx
-    history_from_1 = agent.get_history(start_idx=1)
-    assert '[user]: Hello' not in history_from_1
-    assert '[assistant]: Hi' in history_from_1
-
-
 def test_run_init():
     """Test _run_init method."""
     agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
@@ -1194,8 +1105,8 @@ def test_run_init():
     assert agent.final_answer_found is False
 
 
-def test_formatted_history_for_llm_react():
-    """Test formatted_history_for_llm for ReActAgent."""
+def test_chat_history_structure_react():
+    """Test chat_history structure for ReActAgent."""
     agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
     agent.add_to_history(ChatMessage(role='system', content='You are helpful'))
     agent.add_to_history(ChatMessage(role='user', content='Calculate 2+2', files=['file.txt']))
@@ -1211,15 +1122,15 @@ def test_formatted_history_for_llm_react():
     )
     agent.add_to_history(ChatMessage(role='tool', content='4'))
 
-    formatted = agent.formatted_history_for_llm()
+    formatted = agent.chat_history
     assert isinstance(formatted, list)
     assert len(formatted) > 0
     assert any(m.get('role') == 'system' for m in formatted)
     assert any(m.get('role') == 'tool' for m in formatted)
 
 
-def test_formatted_history_for_llm_codeact():
-    """Test formatted_history_for_llm for CodeActAgent."""
+def test_chat_history_structure_codeact():
+    """Test chat_history structure for CodeActAgent."""
     # Create agent with proper initialization
     agent = CodeActAgent(
         name='test_agent', model_name=MODEL_NAME, run_env='host', allowed_imports=['datetime']
@@ -1238,7 +1149,7 @@ def test_formatted_history_for_llm_codeact():
     )
     agent.add_to_history(ChatMessage(role='tool', content='2024-01-01'))
 
-    formatted = agent.formatted_history_for_llm()
+    formatted = agent.chat_history
     assert isinstance(formatted, list)
     assert len(formatted) > 0
 
@@ -1973,27 +1884,6 @@ async def test_act_with_invalid_json_args():
         )
 
 
-def test_formatted_history_with_pending_tool_call():
-    """Test formatted_history_for_llm with pending tool call."""
-    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator])
-
-    agent.add_to_history(
-        ReActChatMessage(
-            role='assistant',
-            thought='Using calculator',
-            action='calculator',
-            args='{"expression": "2+2"}',
-            task_successful=False,
-            final_answer=None,
-        )
-    )
-    # No tool response added
-
-    formatted = agent.formatted_history_for_llm()
-    # Should add placeholder for missing tool response
-    assert any(m.get('role') == 'tool' for m in formatted)
-
-
 @pytest.mark.asyncio
 async def test_codeact_act_with_exception():
     """Test CodeActAgent _act with exception during execution."""
@@ -2371,10 +2261,12 @@ def test_formatted_history_with_final_answer():
         )
     )
 
-    formatted = agent.formatted_history_for_llm()
+    formatted = agent.chat_history
     assert len(formatted) > 0
-    # Should have assistant message with content
-    assert any(m.get('role') == 'assistant' and m.get('content') for m in formatted)
+    # Should have assistant message with content (final_answer)
+    assert any(
+        m.get('role') == 'assistant' and m.get('content') == 'The answer is 42' for m in formatted
+    )
 
 
 def test_codeact_formatted_history_with_final_answer(codeact_agent_factory):
@@ -2390,10 +2282,12 @@ def test_codeact_formatted_history_with_final_answer(codeact_agent_factory):
         )
     )
 
-    formatted = agent.formatted_history_for_llm()
+    formatted = agent.chat_history
     assert len(formatted) > 0
-    # Should have assistant message with content
-    assert any(m.get('role') == 'assistant' and m.get('content') for m in formatted)
+    # Should have assistant message with content (final_answer)
+    assert any(
+        m.get('role') == 'assistant' and m.get('content') == 'The result is 42' for m in formatted
+    )
 
 
 @pytest.mark.asyncio
@@ -2968,5 +2862,14 @@ async def test_record_thought_parsing_failures(mock_agent):
     assert res is None
     assert mock_agent._chat.call_count == 3
     # Check history for feedback messages
-    feedback_msgs = [m for m in mock_agent.chat_history if 'Parsing Error' in m['content']]
-    assert len(feedback_msgs) >= 2
+    feedback_msgs = []
+    for m in mock_agent.chat_history:
+        content = m['content']
+        text = ''
+        if isinstance(content, list):
+            text = '\n'.join([c.get('text', '') for c in content if c.get('type') == 'text'])
+        else:
+            text = str(content)
+        if 'Parsing Error' in text:
+            feedback_msgs.append(m)
+    assert len(feedback_msgs) == 1

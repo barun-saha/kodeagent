@@ -9,6 +9,7 @@ import json
 import uuid
 from abc import ABC, abstractmethod
 
+from . import kutils as ku
 from .models import ChatMessage
 
 CODE_ACT_PSEUDO_TOOL_NAME = 'code_execution'
@@ -141,6 +142,7 @@ class ReActHistoryFormatter(HistoryFormatter):
                         },
                     }
                 ],
+                'files': d.get('files'),
                 # Metadata for internal use
                 '_thought': getattr(msg, 'thought', None),
                 '_action': msg.action,
@@ -152,7 +154,8 @@ class ReActHistoryFormatter(HistoryFormatter):
         if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
             return {
                 'role': 'assistant',
-                'content': getattr(msg, 'final_answer'),
+                'content': msg.final_answer,
+                'files': d.get('files'),
                 '_thought': getattr(msg, 'thought', None),
                 '_code': getattr(msg, 'code', None),
                 '_task_successful': getattr(msg, 'task_successful', True),
@@ -162,9 +165,27 @@ class ReActHistoryFormatter(HistoryFormatter):
             }
 
         # Generic assistant/user/system message
+        if d.get('role') == 'user':
+            # Use utility to handle files (images/text)
+            usr_msgs = ku.make_user_message(d.get('content', ''), d.get('files'))
+            if usr_msgs:
+                usr_msg = usr_msgs[0]  # ku returns a list of one message dict
+                # Standard metadata preserve
+                usr_msg.update(
+                    {
+                        '_thought': getattr(msg, 'thought', None),
+                        '_action': getattr(msg, 'action', None),
+                        '_args': getattr(msg, 'args', None),
+                        '_task_successful': getattr(msg, 'task_successful', True),
+                        'files': d.get('files'),
+                    }
+                )
+                return usr_msg
+
         return {
             'role': d.get('role'),
             'content': d.get('content', ''),
+            'files': d.get('files'),
             '_thought': getattr(msg, 'thought', None),
             # Preserve other potential metadata if present (for cross-agent history compatibility)
             '_action': getattr(msg, 'action', None),
@@ -255,6 +276,7 @@ class CodeActHistoryFormatter(HistoryFormatter):
                         },
                     }
                 ],
+                'files': d.get('files'),
                 # Metadata
                 '_thought': getattr(msg, 'thought', None),
                 '_code': msg.code,
@@ -265,19 +287,35 @@ class CodeActHistoryFormatter(HistoryFormatter):
         if hasattr(msg, 'final_answer') and getattr(msg, 'final_answer', None):
             return {
                 'role': 'assistant',
-                'content': getattr(msg, 'final_answer'),
+                'content': msg.final_answer,
+                'files': d.get('files'),
                 '_thought': getattr(msg, 'thought', None),
                 '_task_successful': getattr(msg, 'task_successful', True),
             }
 
         # Generic
+        if d.get('role') == 'user':
+            usr_msgs = ku.make_user_message(d.get('content', ''), d.get('files'))
+            if usr_msgs:
+                usr_msg = usr_msgs[0]
+                usr_msg.update(
+                    {
+                        '_thought': getattr(msg, 'thought', None),
+                        '_code': getattr(msg, 'code', None),
+                        '_task_successful': getattr(msg, 'task_successful', True),
+                        'files': d.get('files'),
+                    }
+                )
+                return usr_msg
+
         return {
             'role': d.get('role'),
             'content': d.get('content', ''),
+            'files': d.get('files'),
             '_thought': getattr(msg, 'thought', None),
             # Preserve other potential metadata if present
-            '_action': getattr(msg, 'action', None),
+            # '_action': getattr(msg, 'action', None),
             '_code': getattr(msg, 'code', None),
-            '_args': getattr(msg, 'args', None),
+            # '_args': getattr(msg, 'args', None),
             '_task_successful': getattr(msg, 'task_successful', True),
         }
