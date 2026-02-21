@@ -126,8 +126,8 @@ class Agent(ABC):
         self.max_iterations = max_iterations
         self.max_retries = max_retries
 
-        self.tool_names = {t.name for t in tools} if tools else set()
-        self.tool_name_to_func = {t.name: t for t in tools} if tools else {}
+        self.tool_name_to_func = {t.name: t for t in (tools or [])}
+        self.tool_names = set(self.tool_name_to_func)
 
         self.task: Task | None = None
         self.chat_history: list[dict] = []
