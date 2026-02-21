@@ -149,7 +149,7 @@ async def _run_examples_async(
 def run_examples(
     agent_type: str = 'react', max_steps: int = 5, model_name: str = 'gemini/gemini-2.0-flash-lite'
 ) -> None:
-    """Run KodeAgent with a list of pre-definedtasks. Some of the tasks include files or URLs.
+    """Run KodeAgent with a list of pre-defined tasks. Some of the tasks include files or URLs.
     The last task is run with `recurrent_mode=True` to demonstrate that feature.
     This function provides a synchronous importable API.
 
