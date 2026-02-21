@@ -56,7 +56,6 @@ logger = ku.get_logger()
 REACT_SYSTEM_PROMPT = ku.read_prompt('system/react.txt')
 CODE_ACT_SYSTEM_PROMPT = ku.read_prompt('system/codeact.txt')
 SALVAGE_RESPONSE_PROMPT = ku.read_prompt('salvage_response.txt')
-RELEVANT_TOOLS_PROMPT = ku.read_prompt('relevant_tools.txt')
 
 
 # Regex for message parsing from LLM response text (case-insensitive, multiline)
