@@ -1,6 +1,7 @@
 """Unit tests for LLMMessage class in history_formatter.py."""
 
 import pytest
+
 from kodeagent.history_formatter import LLMMessage
 
 

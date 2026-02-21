@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from kodeagent import CodeActAgent, ReActAgent, calculator, search_arxiv
+from kodeagent import CodeActAgent, ReActAgent, search_arxiv
 from kodeagent.kutils import call_llm
 
 MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
@@ -32,26 +32,6 @@ def test_search_arxiv():
     results = search_arxiv(query=query, max_results=3)
     assert query in results.lower()
     assert '## ArXiv Search Results for:' in results
-
-
-@pytest.mark.asyncio
-async def test_get_relevant_tools_integration():
-    """Integration test for getting relevant tools using real LLM call."""
-    agent = ReActAgent(
-        name='test_react_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator],
-        description='Test ReAct agent for arithmetic tasks',
-        max_iterations=3,
-    )
-
-    task_description = 'What is 2 plus 3?'
-    agent._run_init(task_description)
-    tools = await agent.get_relevant_tools(task_description)
-
-    assert len(tools) > 0
-    tool_names = {t.name for t in tools}
-    assert len(tool_names) > 0
 
 
 @pytest.mark.asyncio

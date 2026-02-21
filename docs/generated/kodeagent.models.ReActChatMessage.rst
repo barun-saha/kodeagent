@@ -1,4 +1,4 @@
-kodeagent.models.ReActChatMessage
+﻿kodeagent.models.ReActChatMessage
 =================================
 
 .. currentmodule:: kodeagent.models
@@ -33,6 +33,7 @@ kodeagent.models.ReActChatMessage
       ~ReActChatMessage.parse_file
       ~ReActChatMessage.parse_obj
       ~ReActChatMessage.parse_raw
+      ~ReActChatMessage.sanitize_action_xor_final_answer
       ~ReActChatMessage.schema
       ~ReActChatMessage.schema_json
       ~ReActChatMessage.update_forward_refs

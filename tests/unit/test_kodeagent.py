@@ -338,20 +338,6 @@ def test_get_tools_description_caching(react_agent):
     assert react_agent.tools[0].name in desc_subset
 
 
-@pytest.mark.asyncio
-@patch('kodeagent.kutils.call_llm')
-async def test_get_relevant_tools(mock_llm, react_agent):
-    """Test filtering relevant tools for a task."""
-    mock_llm.return_value = 'calculator'
-    task_description = 'What is 2 plus 3?'
-    react_agent._run_init(task_description)
-
-    tools = await react_agent.get_relevant_tools(task_description)
-    assert len(tools) > 0
-    tool_names = {t.name for t in tools}
-    assert 'calculator' in tool_names
-
-
 def test_clear_history(react_agent):
     """Test clearing agent's message history."""
     msg = ChatMessage(role='user', content='test message')
@@ -835,16 +821,18 @@ def test_react_chat_message_validation_mutual_exclusivity():
     )
     assert msg.action == 'calculator'
 
-    # Invalid: action with final_answer
-    with pytest.raises(pydantic_core.ValidationError):
-        ReActChatMessage(
-            role='assistant',
-            thought='test',
-            action='calculator',
-            args='{"expression": "2+2"}',
-            final_answer='4',
-            task_successful=False,
-        )
+    # Valid: action with final_answer (should be sanitized)
+    msg = ReActChatMessage(
+        role='assistant',
+        thought='test',
+        action='calculator',
+        args='{"expression": "2+2"}',
+        final_answer='4',
+        task_successful=True,
+    )
+    assert msg.action == 'calculator'
+    assert msg.final_answer is None
+    assert msg.task_successful is False
 
     # Invalid: FINISH without final_answer
     with pytest.raises(pydantic_core.ValidationError):
@@ -881,15 +869,17 @@ def test_codeact_chat_message_validation_mutual_exclusivity():
     )
     assert msg.code is not None
 
-    # Invalid: both code and final_answer
-    with pytest.raises(pydantic_core.ValidationError):
-        CodeActChatMessage(
-            role='assistant',
-            thought='test',
-            code='print("hello")',
-            final_answer='hello',
-            task_successful=False,
-        )
+    # Valid: both code and final_answer (should be sanitized)
+    msg = CodeActChatMessage(
+        role='assistant',
+        thought='test',
+        code='print("hello")',
+        final_answer='hello',
+        task_successful=True,
+    )
+    assert msg.code == 'print("hello")'
+    assert msg.final_answer is None
+    assert msg.task_successful is False
 
     # Invalid: neither code nor final_answer
     with pytest.raises(pydantic_core.ValidationError):
@@ -1152,37 +1142,6 @@ def test_chat_history_structure_codeact():
     formatted = agent.chat_history
     assert isinstance(formatted, list)
     assert len(formatted) > 0
-
-
-@pytest.mark.asyncio
-async def test_think_with_filter_tools():
-    """Test _think with filter_tools_for_task enabled."""
-    agent = ReActAgent(
-        name='test_agent',
-        model_name=MODEL_NAME,
-        tools=[calculator, search_web],
-        filter_tools_for_task=True,
-    )
-    agent._run_init('Calculate 2+2')
-
-    with patch.object(agent, 'get_relevant_tools', return_value=[calculator]):
-        with patch.object(
-            agent,
-            '_record_thought',
-            return_value=ReActChatMessage(
-                role='assistant',
-                thought='test',
-                action='calculator',
-                args='{"expression": "2+2"}',
-                task_successful=False,
-                final_answer=None,
-            ),
-        ):
-            responses = []
-            async for response in agent._think():
-                responses.append(response)
-
-            assert len(responses) > 0
 
 
 def test_chat_message_with_files():
@@ -1607,19 +1566,6 @@ def test_agent_id():
     agent2 = ReActAgent(name='agent2', model_name=MODEL_NAME, tools=[calculator])
 
     assert agent1.id != agent2.id
-
-
-@pytest.mark.asyncio
-async def test_get_relevant_tools_error_handling():
-    """Test get_relevant_tools error handling."""
-    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator, search_web])
-    agent._run_init('Test task')
-
-    # Mock LLM error
-    with patch('kodeagent.kutils.call_llm', side_effect=Exception('LLM error')):
-        tools = await agent.get_relevant_tools('Test task')
-        # Should return all tools on error
-        assert len(tools) == 2
 
 
 def test_chat_message_model_dump():
@@ -2219,32 +2165,6 @@ print(datetime.now())
     assert msg.code is not None
     # Code should be extracted even without markdown
     assert 'datetime' in msg.code
-
-
-@pytest.mark.asyncio
-async def test_get_relevant_tools_with_empty_response():
-    """Test get_relevant_tools when LLM returns empty string."""
-    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator, search_web])
-    agent._run_init('Test task')
-
-    with patch('kodeagent.kutils.call_llm', return_value=''):
-        tools = await agent.get_relevant_tools('Test task')
-        # Should return empty list when no tools specified
-        assert len(tools) == 0
-
-
-@pytest.mark.asyncio
-async def test_get_relevant_tools_with_whitespace():
-    """Test get_relevant_tools with whitespace in response."""
-    agent = ReActAgent(name='test_agent', model_name=MODEL_NAME, tools=[calculator, search_web])
-    agent._run_init('Test task')
-
-    with patch('kodeagent.kutils.call_llm', return_value='  calculator  ,  search_web  '):
-        tools = await agent.get_relevant_tools('Test task')
-        assert len(tools) == 2
-        tool_names = {t.name for t in tools}
-        assert 'calculator' in tool_names
-        assert 'search_web' in tool_names
 
 
 def test_formatted_history_with_final_answer():

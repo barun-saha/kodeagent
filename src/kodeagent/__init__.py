@@ -1,5 +1,6 @@
 """KodeAgent: An intelligent code agent"""
 
+from .examples import run_examples
 from .kodeagent import (
     Agent,
     AgentResponse,
@@ -49,6 +50,7 @@ __all__ = [
     'detect_file_type',
     'download_file',
     'extract_as_markdown',
+    'run_examples',
     'transcribe_audio',
     'transcribe_youtube',
     'is_image_file',

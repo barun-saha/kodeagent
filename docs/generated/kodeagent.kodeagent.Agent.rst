@@ -1,4 +1,4 @@
-﻿kodeagent.kodeagent.Agent
+kodeagent.kodeagent.Agent
 =========================
 
 .. currentmodule:: kodeagent.kodeagent
@@ -18,7 +18,6 @@
       ~Agent.add_to_history
       ~Agent.clear_history
       ~Agent.get_history
-      ~Agent.get_relevant_tools
       ~Agent.get_tools_description
       ~Agent.get_usage_metrics
       ~Agent.get_usage_report
@@ -39,6 +38,7 @@
 
    .. autosummary::
    
+      ~Agent.HISTORY_TRUNCATE_CHARS
       ~Agent.artifacts
       ~Agent.current_plan
       ~Agent.purpose

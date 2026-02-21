@@ -1,10 +1,10 @@
-﻿kodeagent.kodeagent
-===================
+﻿kodeagent.examples
+==================
 ===================================
 
 .. currentmodule:: kodeagent
 
-.. automodule:: kodeagent.kodeagent
+.. automodule:: kodeagent.examples
    :noindex:
 
 .. autosummary::
@@ -12,20 +12,12 @@
    :nosignatures:
 
    
-   llm_vision_support
-   
-   print_response
+   run_examples
    
 
    
-   Agent
-   
-   CodeActAgent
-   
-   ReActAgent
-   
 
-.. automodule:: kodeagent.kodeagent
+.. automodule:: kodeagent.examples
    :members:
    :undoc-members:
    :show-inheritance:

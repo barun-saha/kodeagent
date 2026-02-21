@@ -170,10 +170,16 @@ class TestTracingIntegration:
     def mock_tracer_manager(self) -> MagicMock:
         """Fixture for a mocked tracer manager."""
         manager = MagicMock(spec=tracer.AbstractTracerManager)
-        # Ensure start_span returns a mock with an end method to avoid Errors
-        manager.start_span.return_value = MagicMock(spec=tracer.AbstractObservation)
-        manager.start_trace.return_value = MagicMock(spec=tracer.AbstractObservation)
-        manager.start_generation.return_value = MagicMock(spec=tracer.AbstractObservation)
+
+        def make_mock_obs():
+            obs = MagicMock(spec=tracer.AbstractObservation)
+            obs.__enter__.return_value = obs
+            return obs
+
+        # Ensure start calls return a mock with an end method and context manager support
+        manager.start_trace.return_value = make_mock_obs()
+        manager.start_span.return_value = make_mock_obs()
+        manager.start_generation.return_value = make_mock_obs()
         return manager
 
     @pytest.mark.asyncio
@@ -412,8 +418,9 @@ class TestTracingIntegration:
             status='error',
             operation='tool_validation_failed',
             error=ANY,
+            output='validation_error',
+            is_error=True,
         )
-        mock_span.end.assert_called_with(output='validation_error', is_error=True)
 
     @pytest.mark.asyncio
     async def test_react_agent_act_args_error_tracing(self, mock_tracer_manager: MagicMock) -> None:
@@ -435,8 +442,9 @@ class TestTracingIntegration:
             status='error',
             operation='args_validation_failed',
             error=ANY,
+            output='args_error',
+            is_error=True,
         )
-        mock_span.end.assert_called_with(output='args_error', is_error=True)
 
     @pytest.mark.asyncio
     @patch('kodeagent.kodeagent.ReActAgent._record_thought')
@@ -475,8 +483,12 @@ class TestTracingIntegration:
             pass
 
         mock_gen = mock_tracer_manager.start_generation.return_value
-        mock_gen.update.assert_called_with(status='error', error='Failed to parse response')
-        mock_gen.end.assert_called_with(output='parse_failure', is_error=True)
+        mock_gen.update.assert_called_with(
+            status='error',
+            error='Failed to parse response',
+            output='parse_failure',
+            is_error=True,
+        )
 
     @pytest.mark.asyncio
     @patch('kodeagent.code_runner.CodeRunner.run')
@@ -520,8 +532,11 @@ class TestTracingIntegration:
             pass
 
         mock_span = mock_tracer_manager.start_span.return_value
-        mock_span.update.assert_called_with(status='error', error='Missing or empty thought field')
-        mock_span.end.assert_called_with(output='malformed_response')
+        mock_span.update.assert_called_with(
+            status='error',
+            error='Missing or empty thought field',
+            output='malformed_response',
+        )
 
     @pytest.mark.asyncio
     @patch('kodeagent.code_runner.CodeRunner.run')
@@ -548,8 +563,6 @@ class TestTracingIntegration:
             operation='code_execution_exception',
             error_type='Exception',
             error_message='runner crashed',
-        )
-        mock_span.end.assert_called_with(
             output='exception',
             is_error=True,
             error=ANY,
@@ -580,8 +593,6 @@ class TestTracingIntegration:
             status='success',
             operation='final_answer',
             task_successful=False,
-        )
-        mock_span.end.assert_called_with(
             output='the answer',
             metadata={'task_successful': False},
         )
