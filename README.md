@@ -117,7 +117,7 @@ async for response in agent.run('Double the previous result', recurrent_mode=Tru
     print_response(response)
 ```
 
-For more examples, including how to provide files as inputs, see the [kodeagent.py](src/kodeagent/kodeagent.py) module and [API documentation](https://kodeagent.readthedocs.io/en/latest/usage.html).
+For more examples, including how to provide files as inputs, see the [examples.py](src/kodeagent/examples.py) module and [API documentation](https://kodeagent.readthedocs.io/en/latest/usage.html).
 
 ### API Configuration
 
@@ -271,14 +271,14 @@ A [Kaggle notebook](https://www.kaggle.com/code/barunsaha/kodeagent-benchmark/) 
 The following results were measured using [Scalene](https://github.com/plasma-umass/scalene) and `psutil` on development machine (Windows 10, Python 3.10). "Peak Memory" refers to the maximum Resident Set Size (RSS), i.e., the actual RAM used by the process.
 
 ```shell
-python -m scalene run -c scalene.yaml -m src.kodeagent.kodeagent
+python -m scalene run -c scalene.yaml -m src.kodeagent.examples
 scalene view
 ```
 
 | Agent Type   | Avg. Runtime | Peak Memory (Scalene) | Peak Memory (psutil) | Notes                                        |
-|--------------|--------------|------------------------|---------------------|----------------------------------------------|
-| ReActAgent   | ~58s         | 21MB                   | 294MB               | Faster, because tools are directly executed  |
-| CodeActAgent | ~155s        | 21MB                   | 253MB               | Slower, because of code review and execution |
+|--------------|--------------|-----------------------|---------------------|----------------------------------------------|
+| ReActAgent   | ~58s         | 30MB                  | 294MB               | Faster, because tools are directly executed  |
+| CodeActAgent | ~155s        | 21MB                  | 253MB               | Slower, because of code review and execution |
 
 **Notes:**
 - _Scalene_ reports the maximum _sampled_ RSS during profiling, which is useful for comparing code sections but may miss short-lived or end-of-program memory spikes.
