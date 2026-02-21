@@ -44,7 +44,8 @@ def test_get_last_tool_call_id_none_when_no_history() -> None:
 
 def test_get_last_tool_call_id_none_when_last_has_no_tool_calls() -> None:
     """Test that _get_last_tool_call_id returns None when the last assistant message
-     has no tool_calls."""
+    has no tool_calls.
+    """
     agent = DummyAgent(name='d', model_name='m', tools=[])
     agent.chat_history = [
         {'role': 'system', 'content': 'sys'},
@@ -70,7 +71,8 @@ def test_get_last_tool_call_id_returns_id_when_present() -> None:
 
 def test_get_last_tool_call_id_none_when_tool_calls_empty() -> None:
     """Test that _get_last_tool_call_id returns None when the last assistant message
-     has an empty tool_calls list."""
+    has an empty tool_calls list.
+    """
     agent = DummyAgent(name='d', model_name='m', tools=[])
     agent.chat_history = [
         {'role': 'system', 'content': 'sys'},

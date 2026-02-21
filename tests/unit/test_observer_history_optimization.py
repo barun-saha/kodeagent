@@ -55,4 +55,3 @@ class TestObserverOptimization:
         assert '... [TRUNCATED]' in history
         # Verify length constraint (roughly 1000 + formatting overhead)
         assert len(history) < 1100
-

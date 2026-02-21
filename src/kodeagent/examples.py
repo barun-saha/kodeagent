@@ -12,14 +12,12 @@ from typing import Any
 
 import rich
 
-from .kodeagent import CodeActAgent, ReActAgent, print_response
 from . import tools as dtools
+from .kodeagent import CodeActAgent, ReActAgent, print_response
 
 
 async def _run_examples_async(
-        agent_type: str,
-        max_steps: int,
-        model_name: str = 'gemini/gemini-2.0-flash-lite'
+    agent_type: str, max_steps: int, model_name: str = 'gemini/gemini-2.0-flash-lite'
 ) -> None:
     """Run the example agent demos asynchronously.
 
@@ -100,7 +98,6 @@ async def _run_examples_async(
         ('Write an elegant haiku in Basho style. Save it as poem.txt', None),
     ]
 
-
     async def _run_with_agent(agent: Any) -> None:
         """Run the example tasks with the given agent and print results.
 
@@ -148,9 +145,7 @@ async def _run_examples_async(
 
 
 def run_examples(
-        agent_type: str = 'react',
-        max_steps: int = 5,
-        model_name: str = 'gemini/gemini-2.0-flash-lite'
+    agent_type: str = 'react', max_steps: int = 5, model_name: str = 'gemini/gemini-2.0-flash-lite'
 ) -> None:
     """Run the bundled examples from a synchronous importable API.
 
