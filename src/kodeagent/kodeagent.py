@@ -181,37 +181,6 @@ class Agent(ABC):
         """Returns the list of output files generated during task execution."""
         return self.task_output_files
 
-    async def get_relevant_tools(
-        self,
-        task_description: str,
-        task_files: list[str] | None = None,
-    ) -> list[Any]:
-        """Calls an LLM to determine which tools are relevant for the given task."""
-        tool_descriptions = self.get_tools_description()
-        prompt = RELEVANT_TOOLS_PROMPT.format(
-            task_description=task_description,
-            task_files=task_files,
-            tool_descriptions=tool_descriptions,
-        )
-
-        try:
-            tools_response = await ku.call_llm(
-                model_name=self.model_name,
-                litellm_params=self.litellm_params,
-                messages=ku.make_user_message(prompt),
-                trace_id=self.task.id if self.task else None,
-                usage_tracker=self.usage_tracker,
-                component_name='Agent.tool_filter',
-            )
-            relevant_tool_names = tools_response.split(',') if tools_response.strip() else []
-            relevant_tool_names = {t.strip() for t in relevant_tool_names if t.strip()}
-            logger.debug('Relevant tool names: %s', relevant_tool_names)
-            relevant_tools = [t for t in self.tools if t.name in relevant_tool_names]
-            return relevant_tools
-        except Exception as e:
-            logger.error('Error determining relevant tools: %s', str(e))
-            return list(self.tools)
-
     async def _augment_task_with_previous(self, current_task: str) -> str:
         """Augment current task with previous task context.
 
@@ -257,16 +226,26 @@ class Agent(ABC):
         return ''.join(context_parts)
 
     def _run_init(
-        self, description: str, files: list[str] | None = None, task_id: str | None = None
-    ):
+        self, task: str, files: list[str] | None = None, task_id: str | None = None
+    ) -> None:
         """Initialize the running of a task by an agent.
 
         Args:
-            description: Task description.
+            task: Task description.
             files: Optional files for the task.
             task_id: Optional task ID.
+
+        Raises:
+            ValueError: If task is empty or files list is invalid.
         """
-        self.task = Task(description=description, files=files)
+        if not task or not task.strip():
+            raise ValueError('Task description cannot be empty!')
+        if files and not isinstance(files, list):
+            raise ValueError('Task files must be a list of file paths!')
+        if files and len(files) > MAX_TASK_FILES:
+            raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
+
+        self.task = Task(description=task, files=files)
         self.task_output_files = []
         if task_id:
             self.task.id = task_id
@@ -284,7 +263,7 @@ class Agent(ABC):
         self.current_trace = self.tracer_manager.start_trace(
             name=f'{self.__class__.__name__}',
             input_data={
-                'task': description,
+                'task': task,
                 'files': files,
                 'task_id': str(self.task.id),
             },
@@ -602,8 +581,6 @@ class Agent(ABC):
         segments = []
         for msg in self.chat_history[1:]:  # Skip system prompt
             content = Agent.normalize_content(msg.get('content', ''))
-            if len(content) > 1000:
-                content = content[:1000] + '... [TRUNCATED]'
             if len(content) > self.HISTORY_TRUNCATE_CHARS:
                 content = content[: self.HISTORY_TRUNCATE_CHARS] + '... [TRUNCATED]'
 
@@ -867,14 +844,6 @@ class ReActAgent(Agent):
             ValueError: If task is empty or too many files provided.
             RetryError: If LLM calls fail after max retries.
         """
-        if not task or not task.strip():
-            raise ValueError('Task description cannot be empty!')
-        if files and not isinstance(files, list):
-            raise ValueError('Task files must be a list of file paths!')
-        if files and len(files) > MAX_TASK_FILES:
-            raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
-
-        # Augment task with previous context if recurrent mode enabled
         if recurrent_mode and self.task is not None:
             task = await self._augment_task_with_previous(task)
             logger.debug('Recurrent mode enabled: augmented task with previous context')
@@ -1021,33 +990,32 @@ class ReActAgent(Agent):
                 objects.
         """
         # Create a generation span for the LLM call
-        gen_span = self.tracer_manager.start_generation(
+        with self.tracer_manager.start_generation(
             parent=self.current_trace,
             name='think',
             input_data={
                 'model': self.model_name,
                 'messages_count': len(self.chat_history),
             },
-        )
+        ) as gen_span:
+            thought = await self._record_thought(ReActChatMessage)
 
-        thought = await self._record_thought(ReActChatMessage)
-
-        if thought:
-            gen_span.update(
-                status='success',
-                has_thought=bool(thought.thought),
-                has_action=bool(getattr(thought, 'action', None)),
-                has_final_answer=bool(getattr(thought, 'final_answer', None)),
-            )
-            gen_span.end(
-                output={
-                    'thought': thought.thought,
-                    'action': getattr(thought, 'action', None),
-                },
-            )
-        else:
-            gen_span.update(status='error', error='Failed to parse response')
-            gen_span.end(output='parse_failure', is_error=True)
+            if thought:
+                gen_span.update(
+                    status='success',
+                    has_thought=bool(thought.thought),
+                    has_action=bool(getattr(thought, 'action', None)),
+                    has_final_answer=bool(getattr(thought, 'final_answer', None)),
+                )
+                gen_span.end(
+                    output={
+                        'thought': thought.thought,
+                        'action': getattr(thought, 'action', None),
+                    },
+                )
+            else:
+                gen_span.update(status='error', error='Failed to parse response')
+                gen_span.end(output='parse_failure', is_error=True)
 
         yield self.response(rtype='step', value=thought, channel='_think')
 
@@ -1085,32 +1053,6 @@ class ReActAgent(Agent):
                         elif isinstance(parsed_json['args'], dict):
                             # Ensure deeply nested args are converted to string for Pydantic
                             parsed_json['args'] = json.dumps(parsed_json['args'])
-
-                    # Handle mutual exclusivity violations
-                    if response_format_class == ReActChatMessage:
-                        has_action = parsed_json.get('action') and parsed_json['action'] != 'FINISH'
-                        has_final_answer = parsed_json.get('final_answer')
-
-                        if has_action and has_final_answer:
-                            logger.warning(
-                                "LLM provided both action ('%s') and final_answer."
-                                ' Keeping action, removing final_answer.',
-                                parsed_json['action'],
-                            )
-                            parsed_json['final_answer'] = None
-                            parsed_json['task_successful'] = False
-
-                    elif response_format_class == CodeActChatMessage:
-                        has_code = parsed_json.get('code')
-                        has_final_answer = parsed_json.get('final_answer')
-
-                        if has_code and has_final_answer:
-                            logger.warning(
-                                'LLM provided both code and final_answer. '
-                                'Keeping code, removing final_answer.'
-                            )
-                            parsed_json['final_answer'] = None
-                            parsed_json['task_successful'] = False
 
                     # Validate and create message directly
                     # CRITICAL: Always force role to 'assistant' for model responses.
@@ -1181,6 +1123,50 @@ class ReActAgent(Agent):
 
         return None
 
+    def _handle_final_answer(
+        self,
+        final_answer: str,
+        task_successful: bool,
+        act_span: Any,
+    ) -> None:
+        """Mark the task as finished and close the tracing span for a final answer.
+
+        Args:
+            final_answer: The final answer text.
+            task_successful: Whether the task was completed successfully.
+            act_span: The active tracing span to close.
+        """
+        self.final_answer_found = True
+        self.task.is_finished = True
+        self.task.is_error = not task_successful
+        act_span.update(
+            status='success',
+            operation='final_answer',
+            task_successful=task_successful,
+        )
+        act_span.end(
+            output=final_answer,
+            metadata={'task_successful': task_successful},
+        )
+
+    def _handle_missing_thought(self, act_span: Any) -> None:
+        """Log an error and close the act span when the thought field is missing.
+
+        Args:
+            act_span: The active tracing span to close.
+        """
+        act_span.update(status='error', error='Missing or empty thought field')
+        self.add_to_history(
+            ChatMessage(
+                role='user',
+                content=(
+                    '* Error: Response must have a valid `thought` field. '
+                    'Please respond strictly following the schema.'
+                ),
+            )
+        )
+        act_span.end(output='malformed_response')
+
     async def _act(self) -> AsyncIterator[AgentResponse]:
         """Take action based on the agent's previous thought.
 
@@ -1200,106 +1186,42 @@ class ReActAgent(Agent):
         final_answer = prev_msg_dict.get('content') if action == 'FINISH' else None
 
         # Start root span for the entire act operation
-        act_span = self.tracer_manager.start_span(
+        with self.tracer_manager.start_span(
             parent=self.current_trace,
             name='act',
             input_data={'thought': thought},
-        )
-
-        # Check for malformed response
-        if not thought:
-            act_span.update(status='error', error='Missing or empty thought field')
-            self.add_to_history(
-                ChatMessage(
-                    role='user',
-                    content=(
-                        '* Error: Response must have a valid `thought` field. '
-                        'Please respond strictly following the schema.'
-                    ),
-                )
-            )
-            act_span.end(output='malformed_response')
-            return
-
-        # Check if this is a final answer
-        if final_answer:
-            self.final_answer_found = True
-            self.task.is_finished = True
-            self.task.is_error = not task_successful
-
-            act_span.update(
-                status='success',
-                operation='final_answer',
-                task_successful=task_successful,
-            )
-            act_span.end(
-                output=final_answer,
-                metadata={'task_successful': task_successful},
-            )
-
-            yield self.response(
-                rtype='final',
-                value=final_answer,
-                channel='_act',
-                metadata={'final_answer_found': task_successful},
-            )
-        else:
-            # Tool execution
-            tool_name = action
-            tool_args = args
-            tool_args_dict = {}
-
-            # Validate tool call has required fields
-            if not tool_name or not tool_args:
-                error_msg = 'Error: Both action and args must be provided for tool calls.'
-                act_span.update(
-                    status='error',
-                    operation='tool_validation_failed',
-                    error=error_msg,
-                )
-                # CRITICAL: Use role='tool' instead of role='user' to maintain
-                # conversation format
-                self.add_to_history(ChatMessage(role='tool', content=error_msg))
-                act_span.end(output='validation_error', is_error=True)
-                yield self.response(
-                    rtype='step',
-                    value=error_msg,
-                    channel='_act',
-                    metadata={'is_error': True},
-                )
+        ) as act_span:
+            # Check for malformed response
+            if not thought:
+                self._handle_missing_thought(act_span)
                 return
 
-            try:
-                # CRITICAL: Parse the JSON string into a dictionary
-                # The args field is a JSON string, not a dict
-                if isinstance(tool_args, str):
-                    tool_args = tool_args.strip().strip('`').strip()
-                    if tool_args.startswith('json'):
-                        tool_args = tool_args[4:].strip()
+            if final_answer:
+                self._handle_final_answer(final_answer, task_successful, act_span)
+                yield self.response(
+                    rtype='final',
+                    value=final_answer,
+                    channel='_act',
+                    metadata={'final_answer_found': task_successful},
+                )
+            else:
+                # Tool execution
+                tool_name = action
+                tool_args = args
+                tool_args_dict = {}
 
-                    try:
-                        tool_args_dict = json.loads(tool_args)
-                    except JSONDecodeError:
-                        logger.warning('JSON decode failed, attempting repair...')
-                        tool_args_dict = json_repair.loads(tool_args)
-                elif isinstance(tool_args, dict):
-                    # Handle case where args might already be a dict (defensive)
-                    tool_args_dict = tool_args
-                else:
-                    # Attempt to cast to str and parse if it's some other type?
-                    # Or force error.
-                    pass  # Will fail isinstance check below if not dict
-
-                # Validate it's actually a dictionary
-                if not isinstance(tool_args_dict, dict):
-                    error_msg = f'Tool args must be a dict, got {type(tool_args_dict).__name__}'
+                # Validate tool call has required fields
+                if not tool_name or not tool_args:
+                    error_msg = 'Error: Both action and args must be provided for tool calls.'
                     act_span.update(
                         status='error',
-                        operation='args_validation_failed',
+                        operation='tool_validation_failed',
                         error=error_msg,
                     )
+                    # CRITICAL: Use role='tool' instead of role='user' to maintain
+                    # conversation format
                     self.add_to_history(ChatMessage(role='tool', content=error_msg))
-                    act_span.end(output='args_error', is_error=True)
+                    act_span.end(output='validation_error', is_error=True)
                     yield self.response(
                         rtype='step',
                         value=error_msg,
@@ -1308,127 +1230,169 @@ class ReActAgent(Agent):
                     )
                     return
 
-                # Execute tool
-                if tool_name in self.tool_names:
-                    logger.debug(
-                        '🛠 Running tool: %s with args: %s',
-                        tool_name,
-                        tool_args_dict,
-                    )
+                try:
+                    # CRITICAL: Parse the JSON string into a dictionary
+                    # The args field is a JSON string, not a dict
+                    if isinstance(tool_args, str):
+                        tool_args = tool_args.strip().strip('`').strip()
+                        if tool_args.startswith('json'):
+                            tool_args = tool_args[4:].strip()
 
-                    # Create nested span for tool execution
-                    tool_span = self.tracer_manager.start_span(
-                        parent=act_span,
-                        name=tool_name,
-                        input_data=tool_args_dict,
-                    )
+                        try:
+                            tool_args_dict = json.loads(tool_args)
+                        except JSONDecodeError:
+                            logger.warning('JSON decode failed, attempting repair...')
+                            tool_args_dict = json_repair.loads(tool_args)
+                    elif isinstance(tool_args, dict):
+                        # Handle case where args might already be a dict (defensive)
+                        tool_args_dict = tool_args
+                    else:
+                        # Attempt to cast to str and parse if it's some other type?
+                        # Or force error.
+                        pass  # Will fail isinstance check below if not dict
 
-                    # Intercept file creation during tool execution
-                    with OutputInterceptor() as interceptor:
-                        result = self.tool_name_to_func[tool_name](**tool_args_dict)
-                        # Record any files captured by the interceptor
-                        generated_files = interceptor.get_manifest()
-                        for f in generated_files:
-                            self.add_output_file(f)
+                    # Validate it's actually a dictionary
+                    if not isinstance(tool_args_dict, dict):
+                        error_msg = f'Tool args must be a dict, got {type(tool_args_dict).__name__}'
+                        act_span.update(
+                            status='error',
+                            operation='args_validation_failed',
+                            error=error_msg,
+                        )
+                        self.add_to_history(ChatMessage(role='tool', content=error_msg))
+                        act_span.end(output='args_error', is_error=True)
+                        yield self.response(
+                            rtype='step',
+                            value=error_msg,
+                            channel='_act',
+                            metadata={'is_error': True},
+                        )
+                        return
 
-                    tool_span.update(
-                        status='success',
-                        file_count=len(generated_files),
-                    )
-                    tool_span.end(
-                        output=str(result),
-                        generated_files=generated_files,
-                    )
+                    # Execute tool
+                    if tool_name in self.tool_names:
+                        logger.debug(
+                            '🛠 Running tool: %s with args: %s',
+                            tool_name,
+                            tool_args_dict,
+                        )
 
-                    # Get tool call ID for correct pairing in history
-                    tool_call_id = self._get_last_tool_call_id()
+                        # Create nested span for tool execution
+                        with self.tracer_manager.start_span(
+                            parent=act_span,
+                            name=tool_name,
+                            input_data=tool_args_dict,
+                        ) as tool_span:
+                            # Intercept file creation during tool execution
+                            with OutputInterceptor() as interceptor:
+                                result = self.tool_name_to_func[tool_name](**tool_args_dict)
+                                # Record any files captured by the interceptor
+                                generated_files = interceptor.get_manifest()
+                                for f in generated_files:
+                                    self.add_output_file(f)
 
-                    # Always use role='tool' for tool results
-                    self.add_to_history(
-                        {'role': 'tool', 'content': str(result), 'tool_call_id': tool_call_id}
-                    )
+                            tool_span.update(
+                                status='success',
+                                file_count=len(generated_files),
+                            )
+                            tool_span.end(
+                                output=str(result),
+                                generated_files=generated_files,
+                            )
 
-                    act_span.update(
-                        status='success',
-                        operation='tool_execution',
-                        tool=tool_name,
-                    )
-                    act_span.end(
-                        output=str(result),
-                        metadata={
-                            'tool': tool_name,
-                            'args': tool_args_dict,
-                            'generated_files': generated_files,
-                        },
-                    )
+                            # Get tool call ID for correct pairing in history
+                            tool_call_id = self._get_last_tool_call_id()
 
-                    yield self.response(
-                        rtype='step',
-                        value=result,
-                        channel='_act',
-                        metadata={
-                            'tool': tool_name,
-                            'args': tool_args_dict,
-                            'generated_files': generated_files,
-                        },
+                            # Always use role='tool' for tool results
+                            self.add_to_history(
+                                {
+                                    'role': 'tool',
+                                    'content': str(result),
+                                    'tool_call_id': tool_call_id,
+                                }
+                            )
+
+                            act_span.update(
+                                status='success',
+                                operation='tool_execution',
+                                tool=tool_name,
+                            )
+                            act_span.end(
+                                output=str(result),
+                                metadata={
+                                    'tool': tool_name,
+                                    'args': tool_args_dict,
+                                    'generated_files': generated_files,
+                                },
+                            )
+
+                            yield self.response(
+                                rtype='step',
+                                value=result,
+                                channel='_act',
+                                metadata={
+                                    'tool': tool_name,
+                                    'args': tool_args_dict,
+                                    'generated_files': generated_files,
+                                },
+                            )
+                    else:
+                        result = (
+                            f'Error: Tool "{tool_name}" not found! '
+                            f'Available tools: {", ".join(sorted(self.tool_names))}. '
+                            'Please use an exact tool name from the list.'
+                        )
+                        act_span.update(
+                            status='error',
+                            operation='tool_not_found',
+                            tool=tool_name,
+                            error=result,
+                        )
+                        # Get tool call ID for correct pairing in history
+                        tool_call_id = self._get_last_tool_call_id()
+
+                        # Use role='tool' for tool errors too
+                        self.add_to_history(
+                            {'role': 'tool', 'content': result, 'tool_call_id': tool_call_id}
+                        )
+                        act_span.end(output='tool_not_found', is_error=True)
+                        yield self.response(
+                            rtype='step',
+                            value=result,
+                            channel='_act',
+                            metadata={'is_error': True},
+                        )
+
+                except Exception as ex:
+                    error_msg = (
+                        f'*** Error: Tool execution failed: {type(ex).__name__}: '
+                        f'{str(ex)}\n'
+                        f'Tool: {tool_name}\n'
+                        f'Args provided: {tool_args_dict}\n'
+                        f'Please check the tool signature and try again with '
+                        f'correct arguments.'
                     )
-                else:
-                    result = (
-                        f'Error: Tool "{tool_name}" not found! '
-                        f'Available tools: {", ".join(sorted(self.tool_names))}. '
-                        'Please use an exact tool name from the list.'
-                    )
+                    logger.error(error_msg)
                     act_span.update(
                         status='error',
-                        operation='tool_not_found',
+                        operation='tool_execution_exception',
                         tool=tool_name,
-                        error=result,
+                        error_type=type(ex).__name__,
+                        error_message=str(ex),
                     )
-                    # Get tool call ID for correct pairing in history
-                    tool_call_id = self._get_last_tool_call_id()
-
-                    # Use role='tool' for tool errors too
-                    self.add_to_history(
-                        {'role': 'tool', 'content': result, 'tool_call_id': tool_call_id}
+                    # Use role='tool' to maintain proper conversation structure
+                    self.add_to_history(ChatMessage(role='tool', content=error_msg))
+                    act_span.end(
+                        output='exception',
+                        is_error=True,
+                        error=error_msg,
                     )
-                    act_span.end(output='tool_not_found', is_error=True)
                     yield self.response(
                         rtype='step',
-                        value=result,
+                        value=error_msg,
                         channel='_act',
                         metadata={'is_error': True},
                     )
-
-            except Exception as ex:
-                error_msg = (
-                    f'*** Error: Tool execution failed: {type(ex).__name__}: '
-                    f'{str(ex)}\n'
-                    f'Tool: {tool_name}\n'
-                    f'Args provided: {tool_args_dict}\n'
-                    f'Please check the tool signature and try again with '
-                    f'correct arguments.'
-                )
-                logger.error(error_msg)
-                act_span.update(
-                    status='error',
-                    operation='tool_execution_exception',
-                    tool=tool_name,
-                    error_type=type(ex).__name__,
-                    error_message=str(ex),
-                )
-                # Use role='tool' to maintain proper conversation structure
-                self.add_to_history(ChatMessage(role='tool', content=error_msg))
-                act_span.end(
-                    output='exception',
-                    is_error=True,
-                    error=error_msg,
-                )
-                yield self.response(
-                    rtype='step',
-                    value=error_msg,
-                    channel='_act',
-                    metadata={'is_error': True},
-                )
 
     def parse_text_response(self, text: str) -> ReActChatMessage:
         """Parse text-based response when structured output fails.
@@ -1677,36 +1641,35 @@ class CodeActAgent(ReActAgent):
         code output with full hierarchical tracing.
         """
         # Create generation span for code generation
-        gen_span = self.tracer_manager.start_generation(
+        with self.tracer_manager.start_generation(
             parent=self.current_trace,
             name='think_code',
             input_data={
                 'model': self.model_name,
                 'messages_count': len(self.chat_history),
             },
-        )
+        ) as gen_span:
+            msg = await self._record_thought(CodeActChatMessage)
+            msg_dict = self.chat_history[-1] if (msg and self.chat_history) else None
 
-        msg = await self._record_thought(CodeActChatMessage)
-        msg_dict = self.chat_history[-1] if (msg and self.chat_history) else None
-
-        if msg_dict:
-            gen_span.update(
-                status='success',
-                has_thought=bool(msg_dict.get('_thought')),
-                has_code=bool(msg_dict.get('_code')),
-                has_final_answer=bool(msg_dict.get('content'))
-                if not msg_dict.get('_code')
-                else False,
-            )
-            gen_span.end(
-                output={
-                    'thought': msg_dict.get('_thought'),
-                    'code': msg_dict.get('_code')[:100] if msg_dict.get('_code') else None,
-                },
-            )
-        else:
-            gen_span.update(status='error', error='Failed to parse response')
-            gen_span.end(output='parse_failure', is_error=True)
+            if msg_dict:
+                gen_span.update(
+                    status='success',
+                    has_thought=bool(msg_dict.get('_thought')),
+                    has_code=bool(msg_dict.get('_code')),
+                    has_final_answer=bool(msg_dict.get('content'))
+                    if not msg_dict.get('_code')
+                    else False,
+                )
+                gen_span.end(
+                    output={
+                        'thought': msg_dict.get('_thought'),
+                        'code': msg_dict.get('_code')[:100] if msg_dict.get('_code') else None,
+                    },
+                )
+            else:
+                gen_span.update(status='error', error='Failed to parse response')
+                gen_span.end(output='parse_failure', is_error=True)
 
         yield self.response(rtype='step', value=msg_dict, channel='_think')
 
@@ -1727,153 +1690,132 @@ class CodeActAgent(ReActAgent):
         final_answer = prev_msg_dict.get('content') if not code else None
 
         # Start root span for the entire act operation
-        act_span = self.tracer_manager.start_span(
+        with self.tracer_manager.start_span(
             parent=self.current_trace,
             name='act',
             input_data={'thought': thought},
-        )
+        ) as act_span:
+            if not thought:
+                self._handle_missing_thought(act_span)
+                return
 
-        if not thought:
-            act_span.update(status='error', error='Missing or empty thought field')
-            self.add_to_history(
-                ChatMessage(
-                    role='user',
-                    content=(
-                        '* Error: Response must have a valid `thought` field. '
-                        'Please respond strictly following the schema.'
-                    ),
-                )
-            )
-            act_span.end(output='malformed_response')
-            return
-
-        if final_answer:
-            self.final_answer_found = True
-            self.task.is_finished = True
-            self.task.is_error = not task_successful
-
-            act_span.update(
-                status='success',
-                operation='final_answer',
-                task_successful=task_successful,
-            )
-            act_span.end(
-                output=final_answer,
-                metadata={'task_successful': task_successful},
-            )
-
-            yield self.response(
-                rtype='final',
-                value=final_answer,
-                channel='_act',
-                metadata={'final_answer_found': task_successful},
-            )
-        else:
-            try:
-                code_to_run = code.strip() if code else ''
-                code_to_run = code_to_run.replace('```py', '')
-                code_to_run = code_to_run.replace('```python', '')
-                code_to_run = code_to_run.replace('```', '').strip()
-
-                logger.debug(
-                    '🛠 Running code [truncated]: ... %s', code_to_run[-100:] if code_to_run else ''
-                )
-
-                # Create nested span for code execution
-                code_span = self.tracer_manager.start_span(
-                    parent=act_span,
-                    name='code_execution',
-                    input_data={'code_length': len(code_to_run)},
-                )
-
-                stdout, stderr, exit_status, generated_files = await self.code_runner.run(
-                    self.tools_source_code, code_to_run, self.task.id
-                )
-
-                # Download files from remote environment if necessary
-                if generated_files:
-                    files = await self.code_runner.download_files_from_remote(generated_files)
-                    for f in files:
-                        self.add_output_file(f)
-
-                code_span.update(
-                    status='success' if exit_status == 0 else 'error',
-                    exit_status=exit_status,
-                    has_stdout=bool(stdout),
-                    has_stderr=bool(stderr),
-                    file_count=len(generated_files),
-                )
-                code_span.end(
-                    output={
-                        'exit_status': exit_status,
-                        'stdout_lines': len(stdout.split('\n')) if stdout else 0,
-                        'stderr_lines': len(stderr.split('\n')) if stderr else 0,
-                    },
-                    generated_files=generated_files,
-                    is_error=exit_status != 0,
-                )
-
-                observation = f'{stdout}\n{stderr}'.strip()
-
-                # Get tool call ID for correct pairing in history
-                tool_call_id = self._get_last_tool_call_id()
-
-                msg = {'role': 'tool', 'content': observation, 'tool_call_id': tool_call_id}
-                self.add_to_history(msg)
-
-                act_span.update(
-                    status='success' if exit_status == 0 else 'warning',
-                    operation='code_execution',
-                    exit_status=exit_status,
-                )
-                act_span.end(
-                    output=observation[:500],
-                    metadata={
-                        'is_error': exit_status != 0,
-                        'generated_files': generated_files,
-                        'exit_status': exit_status,
-                    },
-                )
+            if final_answer:
+                self._handle_final_answer(final_answer, task_successful, act_span)
 
                 yield self.response(
-                    rtype='step',
-                    value=observation,
+                    rtype='final',
+                    value=final_answer,
                     channel='_act',
-                    metadata={
-                        'is_error': exit_status != 0,
-                        'generated_files': generated_files,
-                    },
+                    metadata={'final_answer_found': task_successful},
                 )
+            else:
+                try:
+                    code_to_run = code.strip() if code else ''
+                    code_to_run = code_to_run.replace('```py', '')
+                    code_to_run = code_to_run.replace('```python', '')
+                    code_to_run = code_to_run.replace('```', '').strip()
 
-            except Exception as ex:
-                error_msg = f'*** Error running code: {type(ex).__name__}: {str(ex)}'
-                logger.error(error_msg)
+                    logger.debug(
+                        '🛠 Running code [truncated]: ... %s',
+                        code_to_run[-100:] if code_to_run else '',
+                    )
 
-                act_span.update(
-                    status='error',
-                    operation='code_execution_exception',
-                    error_type=type(ex).__name__,
-                    error_message=str(ex),
-                )
-                # Respond as the pseudo "tool"
-                # Get tool call ID for correct pairing in history
-                tool_call_id = self._get_last_tool_call_id()
+                    # Create nested span for code execution
+                    with self.tracer_manager.start_span(
+                        parent=act_span,
+                        name='code_execution',
+                        input_data={'code_length': len(code_to_run)},
+                    ) as code_span:
+                        stdout, stderr, exit_status, generated_files = await self.code_runner.run(
+                            self.tools_source_code, code_to_run, self.task.id
+                        )
 
-                tool_msg = {'role': 'tool', 'content': error_msg, 'tool_call_id': tool_call_id}
-                self.add_to_history(tool_msg)
+                        # Download files from remote environment if necessary
+                        if generated_files:
+                            files = await self.code_runner.download_files_from_remote(
+                                generated_files
+                            )
+                            for f in files:
+                                self.add_output_file(f)
 
-                act_span.end(
-                    output='exception',
-                    is_error=True,
-                    error=error_msg,
-                )
+                        code_span.update(
+                            status='success' if exit_status == 0 else 'error',
+                            exit_status=exit_status,
+                            has_stdout=bool(stdout),
+                            has_stderr=bool(stderr),
+                            file_count=len(generated_files),
+                        )
+                        code_span.end(
+                            output={
+                                'exit_status': exit_status,
+                                'stdout_lines': len(stdout.split('\n')) if stdout else 0,
+                                'stderr_lines': len(stderr.split('\n')) if stderr else 0,
+                            },
+                            generated_files=generated_files,
+                            is_error=exit_status != 0,
+                        )
 
-                yield self.response(
-                    rtype='step',
-                    value=error_msg,
-                    channel='_act',
-                    metadata={'is_error': True},
-                )
+                        observation = f'{stdout}\n{stderr}'.strip()
+
+                        # Get tool call ID for correct pairing in history
+                        tool_call_id = self._get_last_tool_call_id()
+
+                        msg = {'role': 'tool', 'content': observation, 'tool_call_id': tool_call_id}
+                        self.add_to_history(msg)
+
+                        act_span.update(
+                            status='success' if exit_status == 0 else 'warning',
+                            operation='code_execution',
+                            exit_status=exit_status,
+                        )
+                        act_span.end(
+                            output=observation[:500],
+                            metadata={
+                                'is_error': exit_status != 0,
+                                'generated_files': generated_files,
+                                'exit_status': exit_status,
+                            },
+                        )
+
+                        yield self.response(
+                            rtype='step',
+                            value=observation,
+                            channel='_act',
+                            metadata={
+                                'is_error': exit_status != 0,
+                                'generated_files': generated_files,
+                            },
+                        )
+
+                except Exception as ex:
+                    error_msg = f'*** Error running code: {type(ex).__name__}: {str(ex)}'
+                    logger.error(error_msg)
+
+                    act_span.update(
+                        status='error',
+                        operation='code_execution_exception',
+                        error_type=type(ex).__name__,
+                        error_message=str(ex),
+                    )
+                    # Respond as the pseudo "tool"
+                    # Get tool call ID for correct pairing in history
+                    tool_call_id = self._get_last_tool_call_id()
+
+                    tool_msg = {'role': 'tool', 'content': error_msg, 'tool_call_id': tool_call_id}
+                    self.add_to_history(tool_msg)
+
+                    act_span.end(
+                        output='exception',
+                        is_error=True,
+                        error=error_msg,
+                    )
+
+                    yield self.response(
+                        rtype='step',
+                        value=error_msg,
+                        channel='_act',
+                        metadata={'is_error': True},
+                    )
 
 
 def llm_vision_support(model_names: list[str]) -> list[bool]:

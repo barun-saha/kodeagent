@@ -170,10 +170,16 @@ class TestTracingIntegration:
     def mock_tracer_manager(self) -> MagicMock:
         """Fixture for a mocked tracer manager."""
         manager = MagicMock(spec=tracer.AbstractTracerManager)
-        # Ensure start_span returns a mock with an end method to avoid Errors
-        manager.start_span.return_value = MagicMock(spec=tracer.AbstractObservation)
-        manager.start_trace.return_value = MagicMock(spec=tracer.AbstractObservation)
-        manager.start_generation.return_value = MagicMock(spec=tracer.AbstractObservation)
+
+        def make_mock_obs():
+            obs = MagicMock(spec=tracer.AbstractObservation)
+            obs.__enter__.return_value = obs
+            return obs
+
+        # Ensure start calls return a mock with an end method and context manager support
+        manager.start_trace.return_value = make_mock_obs()
+        manager.start_span.return_value = make_mock_obs()
+        manager.start_generation.return_value = make_mock_obs()
         return manager
 
     @pytest.mark.asyncio

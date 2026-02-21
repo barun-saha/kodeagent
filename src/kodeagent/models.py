@@ -4,6 +4,7 @@ Uses Pydantic for data validation and serialization. This module defines various
 """
 
 import json
+import logging
 import uuid
 from json import JSONDecodeError
 from typing import Any, Literal, TypedDict
@@ -12,6 +13,8 @@ import json_repair
 import pydantic as pyd
 
 from . import kutils as ku
+
+logger = logging.getLogger(__name__)
 
 MESSAGE_ROLES = Literal['user', 'assistant', 'system', 'tool']
 """Defined roles for chat messages."""
@@ -195,6 +198,25 @@ class ReActChatMessage(ChatMessage):
                     f'args must be valid JSON object string. Received: {v[:100]}... Error: {e}'
                 )
 
+    @pyd.model_validator(mode='before')
+    @classmethod
+    def sanitize_action_xor_final_answer(cls, data: Any) -> Any:
+        """Sanitize action and final_answer to ensure mutual exclusivity."""
+        if not isinstance(data, dict):
+            return data
+
+        has_action = data.get('action') and data.get('action') != 'FINISH'
+        has_final = data.get('final_answer')
+
+        if has_action and has_final:
+            logger.warning(
+                "LLM provided both action ('%s') and final_answer. Keeping action.",
+                data['action'],
+            )
+            data['final_answer'] = None
+            data['task_successful'] = False
+        return data
+
     @pyd.model_validator(mode='after')
     def validate_mutual_exclusivity(self) -> 'ReActChatMessage':
         """Ensure tool call and final answer are mutually exclusive.
@@ -268,6 +290,22 @@ class CodeActChatMessage(ChatMessage):
         description='Task completed or failed? False when `code` is set.', default=False
     )
     """Task completed or failed? False when `code` is set."""
+
+    @pyd.model_validator(mode='before')
+    @classmethod
+    def sanitize_code_xor_final_answer(cls, data: Any) -> Any:
+        """Sanitize code and final_answer to ensure mutual exclusivity."""
+        if not isinstance(data, dict):
+            return data
+
+        has_code = data.get('code') and data.get('code').strip()
+        has_final = data.get('final_answer')
+
+        if has_code and has_final:
+            logger.warning('LLM provided both code and final_answer. Keeping code.')
+            data['final_answer'] = None
+            data['task_successful'] = False
+        return data
 
     @pyd.model_validator(mode='after')
     def validate_mutual_exclusivity(self) -> 'CodeActChatMessage':
