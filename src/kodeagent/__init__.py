@@ -1,6 +1,7 @@
 """KodeAgent: An intelligent code agent"""
 
 from .examples import run_examples
+from .fca import FunctionCallingAgent
 from .kodeagent import (
     Agent,
     AgentResponse,
@@ -39,6 +40,7 @@ __all__ = [
     'CodeActAgent',
     'CodeActChatMessage',
     'CodeRunner',
+    'FunctionCallingAgent',
     'Observer',
     'ObserverResponse',
     'PlanStep',

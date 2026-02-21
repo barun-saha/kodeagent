@@ -8,11 +8,13 @@ user code. The API exposes a synchronous `run_examples` function plus an
 import asyncio
 import os
 import random
+import sys
 from typing import Any
 
 import rich
 
 from . import tools as dtools
+from .fca import FunctionCallingAgent
 from .kodeagent import CodeActAgent, ReActAgent, print_response
 
 
@@ -22,7 +24,7 @@ async def _run_examples_async(
     """Run the example agent demos asynchronously.
 
     Args:
-        agent_type: Which agent to run; one of 'react', or 'codeact'.
+        agent_type: Which agent to run; one of 'react', 'codeact', or 'fca'.
         max_steps: Maximum iterations/steps for the agent.
         model_name: Which model to use for the agent.
     """
@@ -74,6 +76,20 @@ async def _run_examples_async(
             pip_packages='ddgs~=9.10.0;beautifulsoup4~=4.14.3;',
             work_dir='./agent_workspace',
             # tracing_type='langsmith',
+        )
+
+    def _make_fca_agent() -> FunctionCallingAgent:
+        return FunctionCallingAgent(
+            name='Simple agent',
+            model_name=model_name,
+            tools=[
+                dtools.calculator,
+                dtools.search_web,
+                dtools.read_webpage,
+                dtools.extract_as_markdown,
+            ],
+            max_iterations=max_steps,
+            litellm_params=litellm_params,
         )
 
     the_tasks = [
@@ -142,19 +158,24 @@ async def _run_examples_async(
     elif atype == 'react':
         agent = _make_react_agent()
         await _run_with_agent(agent)
+    elif atype == 'fca':
+        agent = _make_fca_agent()
+        await _run_with_agent(agent)
     else:
         raise ValueError(f'Unknown agent_type: {agent_type}')
 
 
 def run_examples(
-    agent_type: str = 'react', max_steps: int = 5, model_name: str = 'gemini/gemini-2.0-flash-lite'
+    agent_type: str = 'react',
+    max_steps: int = 5,
+    model_name: str = 'gemini/gemini-2.0-flash-lite',
 ) -> None:
     """Run KodeAgent with a list of pre-defined tasks. Some of the tasks include files or URLs.
     The last task is run with `recurrent_mode=True` to demonstrate that feature.
     This function provides a synchronous importable API.
 
     Args:
-        agent_type: Which agent to run; one of 'react', or 'codeact'.
+        agent_type: Which agent to run; one of 'react', 'codeact', or 'fca'.
         max_steps: Maximum iterations/steps for the agent.
         model_name: Which model to use for the agent (LiteLLM style).
     """
@@ -163,4 +184,13 @@ def run_examples(
 
 if __name__ == '__main__':
     os.environ['PYTHONUTF8'] = '1'
-    run_examples()
+    # Simple CLI handling for demo purposes
+    selected_atype = 'react'
+    if len(sys.argv) > 1:
+        for arg in sys.argv[1:]:
+            if arg.startswith('--agent_type='):
+                selected_atype = arg.split('=')[1]
+            elif arg in ['react', 'codeact', 'fca']:
+                selected_atype = arg
+
+    run_examples(agent_type=selected_atype)
