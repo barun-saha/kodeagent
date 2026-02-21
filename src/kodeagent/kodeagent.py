@@ -1243,10 +1243,6 @@ class ReActAgent(Agent):
                     elif isinstance(tool_args, dict):
                         # Handle case where args might already be a dict (defensive)
                         tool_args_dict = tool_args
-                    else:
-                        # Attempt to cast to str and parse if it's some other type?
-                        # Or force error.
-                        pass  # Will fail isinstance check below if not dict
 
                     # Validate it's actually a dictionary
                     if not isinstance(tool_args_dict, dict):
