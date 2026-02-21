@@ -22,7 +22,7 @@ async def _run_examples_async(
     """Run the example agent demos asynchronously.
 
     Args:
-        agent_type: Which agent to run; one of 'react', or 'codeact',.
+        agent_type: Which agent to run; one of 'react', or 'codeact'.
         max_steps: Maximum iterations/steps for the agent.
         model_name: Which model to use for the agent.
     """
@@ -70,7 +70,7 @@ async def _run_examples_async(
                 'markitdown',
                 'pathlib',
             ],
-            pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
+            pip_packages='ddgs~=9.10.0;beautifulsoup4~=4.14.3;',
             work_dir='./agent_workspace',
         )
 
