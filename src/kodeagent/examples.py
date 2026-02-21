@@ -40,6 +40,7 @@ async def _run_examples_async(
             ],
             max_iterations=max_steps,
             litellm_params=litellm_params,
+            # tracing_type='langfuse',
         )
 
     def _make_code_agent() -> CodeActAgent:
@@ -72,6 +73,7 @@ async def _run_examples_async(
             ],
             pip_packages='ddgs~=9.10.0;beautifulsoup4~=4.14.3;',
             work_dir='./agent_workspace',
+            # tracing_type='langsmith',
         )
 
     the_tasks = [

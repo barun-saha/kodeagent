@@ -1003,16 +1003,18 @@ class ReActAgent(Agent):
                     has_thought=bool(thought.thought),
                     has_action=bool(getattr(thought, 'action', None)),
                     has_final_answer=bool(getattr(thought, 'final_answer', None)),
-                )
-                gen_span.end(
                     output={
                         'thought': thought.thought,
                         'action': getattr(thought, 'action', None),
                     },
                 )
             else:
-                gen_span.update(status='error', error='Failed to parse response')
-                gen_span.end(output='parse_failure', is_error=True)
+                gen_span.update(
+                    status='error',
+                    error='Failed to parse response',
+                    output='parse_failure',
+                    is_error=True,
+                )
 
         yield self.response(rtype='step', value=thought, channel='_think')
 
@@ -1140,8 +1142,6 @@ class ReActAgent(Agent):
             status='success',
             operation='final_answer',
             task_successful=task_successful,
-        )
-        act_span.end(
             output=final_answer,
             metadata={'task_successful': task_successful},
         )
@@ -1152,7 +1152,11 @@ class ReActAgent(Agent):
         Args:
             act_span: The active tracing span to close.
         """
-        act_span.update(status='error', error='Missing or empty thought field')
+        act_span.update(
+            status='error',
+            error='Missing or empty thought field',
+            output='malformed_response',
+        )
         self.add_to_history(
             ChatMessage(
                 role='user',
@@ -1162,7 +1166,6 @@ class ReActAgent(Agent):
                 ),
             )
         )
-        act_span.end(output='malformed_response')
 
     async def _act(self) -> AsyncIterator[AgentResponse]:
         """Take action based on the agent's previous thought.
@@ -1214,11 +1217,12 @@ class ReActAgent(Agent):
                         status='error',
                         operation='tool_validation_failed',
                         error=error_msg,
+                        output='validation_error',
+                        is_error=True,
                     )
                     # CRITICAL: Use role='tool' instead of role='user' to maintain
                     # conversation format
                     self.add_to_history(ChatMessage(role='tool', content=error_msg))
-                    act_span.end(output='validation_error', is_error=True)
                     yield self.response(
                         rtype='step',
                         value=error_msg,
@@ -1251,9 +1255,10 @@ class ReActAgent(Agent):
                             status='error',
                             operation='args_validation_failed',
                             error=error_msg,
+                            output='args_error',
+                            is_error=True,
                         )
                         self.add_to_history(ChatMessage(role='tool', content=error_msg))
-                        act_span.end(output='args_error', is_error=True)
                         yield self.response(
                             rtype='step',
                             value=error_msg,
@@ -1287,48 +1292,44 @@ class ReActAgent(Agent):
                             tool_span.update(
                                 status='success',
                                 file_count=len(generated_files),
-                            )
-                            tool_span.end(
                                 output=str(result),
                                 generated_files=generated_files,
                             )
 
-                            # Get tool call ID for correct pairing in history
-                            tool_call_id = self._get_last_tool_call_id()
+                        # Get tool call ID for correct pairing in history
+                        tool_call_id = self._get_last_tool_call_id()
 
-                            # Always use role='tool' for tool results
-                            self.add_to_history(
-                                {
-                                    'role': 'tool',
-                                    'content': str(result),
-                                    'tool_call_id': tool_call_id,
-                                }
-                            )
+                        # Always use role='tool' for tool results
+                        self.add_to_history(
+                            {
+                                'role': 'tool',
+                                'content': str(result),
+                                'tool_call_id': tool_call_id,
+                            }
+                        )
 
-                            act_span.update(
-                                status='success',
-                                operation='tool_execution',
-                                tool=tool_name,
-                            )
-                            act_span.end(
-                                output=str(result),
-                                metadata={
-                                    'tool': tool_name,
-                                    'args': tool_args_dict,
-                                    'generated_files': generated_files,
-                                },
-                            )
+                        act_span.update(
+                            status='success',
+                            operation='tool_execution',
+                            tool=tool_name,
+                            output=str(result),
+                            metadata={
+                                'tool': tool_name,
+                                'args': tool_args_dict,
+                                'generated_files': generated_files,
+                            },
+                        )
 
-                            yield self.response(
-                                rtype='step',
-                                value=result,
-                                channel='_act',
-                                metadata={
-                                    'tool': tool_name,
-                                    'args': tool_args_dict,
-                                    'generated_files': generated_files,
-                                },
-                            )
+                        yield self.response(
+                            rtype='step',
+                            value=result,
+                            channel='_act',
+                            metadata={
+                                'tool': tool_name,
+                                'args': tool_args_dict,
+                                'generated_files': generated_files,
+                            },
+                        )
                     else:
                         result = (
                             f'Error: Tool "{tool_name}" not found! '
@@ -1340,6 +1341,8 @@ class ReActAgent(Agent):
                             operation='tool_not_found',
                             tool=tool_name,
                             error=result,
+                            output='tool_not_found',
+                            is_error=True,
                         )
                         # Get tool call ID for correct pairing in history
                         tool_call_id = self._get_last_tool_call_id()
@@ -1348,7 +1351,6 @@ class ReActAgent(Agent):
                         self.add_to_history(
                             {'role': 'tool', 'content': result, 'tool_call_id': tool_call_id}
                         )
-                        act_span.end(output='tool_not_found', is_error=True)
                         yield self.response(
                             rtype='step',
                             value=result,
@@ -1372,14 +1374,12 @@ class ReActAgent(Agent):
                         tool=tool_name,
                         error_type=type(ex).__name__,
                         error_message=str(ex),
-                    )
-                    # Use role='tool' to maintain proper conversation structure
-                    self.add_to_history(ChatMessage(role='tool', content=error_msg))
-                    act_span.end(
                         output='exception',
                         is_error=True,
                         error=error_msg,
                     )
+                    # Use role='tool' to maintain proper conversation structure
+                    self.add_to_history(ChatMessage(role='tool', content=error_msg))
                     yield self.response(
                         rtype='step',
                         value=error_msg,
@@ -1654,15 +1654,13 @@ class CodeActAgent(ReActAgent):
                     if not msg_dict.get('_code')
                     else False,
                 )
-                gen_span.end(
-                    output={
-                        'thought': msg_dict.get('_thought'),
-                        'code': msg_dict.get('_code')[:100] if msg_dict.get('_code') else None,
-                    },
-                )
             else:
-                gen_span.update(status='error', error='Failed to parse response')
-                gen_span.end(output='parse_failure', is_error=True)
+                gen_span.update(
+                    status='error',
+                    error='Failed to parse response',
+                    output='parse_failure',
+                    is_error=True,
+                )
 
         yield self.response(rtype='step', value=msg_dict, channel='_think')
 
@@ -1737,8 +1735,6 @@ class CodeActAgent(ReActAgent):
                             has_stdout=bool(stdout),
                             has_stderr=bool(stderr),
                             file_count=len(generated_files),
-                        )
-                        code_span.end(
                             output={
                                 'exit_status': exit_status,
                                 'stdout_lines': len(stdout.split('\n')) if stdout else 0,
@@ -1760,8 +1756,6 @@ class CodeActAgent(ReActAgent):
                             status='success' if exit_status == 0 else 'warning',
                             operation='code_execution',
                             exit_status=exit_status,
-                        )
-                        act_span.end(
                             output=observation[:500],
                             metadata={
                                 'is_error': exit_status != 0,
@@ -1789,6 +1783,9 @@ class CodeActAgent(ReActAgent):
                         operation='code_execution_exception',
                         error_type=type(ex).__name__,
                         error_message=str(ex),
+                        output='exception',
+                        is_error=True,
+                        error=error_msg,
                     )
                     # Respond as the pseudo "tool"
                     # Get tool call ID for correct pairing in history
@@ -1796,12 +1793,6 @@ class CodeActAgent(ReActAgent):
 
                     tool_msg = {'role': 'tool', 'content': error_msg, 'tool_call_id': tool_call_id}
                     self.add_to_history(tool_msg)
-
-                    act_span.end(
-                        output='exception',
-                        is_error=True,
-                        error=error_msg,
-                    )
 
                     yield self.response(
                         rtype='step',
