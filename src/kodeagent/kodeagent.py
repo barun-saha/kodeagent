@@ -5,7 +5,6 @@ Implements ReAct and CodeAct agents, supported by Planner and Observer.
 import asyncio
 import inspect
 import json
-import os
 import random
 import re
 import uuid
@@ -24,7 +23,6 @@ from dotenv import load_dotenv
 from tenacity import RetryError
 
 from . import kutils as ku
-from . import tools as dtools
 from . import tracer
 from .code_runner import CODE_ENV_NAMES, CodeRunner
 from .file_tracker import OutputInterceptor, install_interceptor
@@ -1850,107 +1848,3 @@ def print_response(response: AgentResponse, only_final: bool = True):
             rich.print(f'[white]{response}[/white]')
         else:
             rich.print(f'{response}')
-
-
-async def main():
-    """Demonstrate the use of ReActAgent and CodeActAgent."""
-    litellm_params = {'temperature': 0, 'timeout': 30}
-    model_name = 'gemini/gemini-2.0-flash-lite'
-    # model_name = 'openai/gpt-4.1-mini'
-
-    agent = ReActAgent(
-        name='Simple agent',
-        model_name=model_name,
-        tools=[
-            dtools.calculator,
-            dtools.search_web,
-            dtools.read_webpage,
-            dtools.extract_as_markdown,
-        ],
-        max_iterations=5,
-        litellm_params=litellm_params,
-    )
-    agent = CodeActAgent(
-        name='Simple agent',
-        model_name=model_name,
-        tools=[
-            dtools.calculator,
-            dtools.search_web,
-            dtools.read_webpage,
-            dtools.extract_as_markdown,
-        ],
-        max_iterations=7,
-        litellm_params=litellm_params,
-        run_env='host',
-        allowed_imports=[
-            'math',
-            'datetime',
-            'time',
-            're',
-            'typing',
-            'mimetypes',
-            'random',
-            'ddgs',
-            'bs4',
-            'urllib.parse',
-            'requests',
-            'markitdown',
-            'pathlib',
-        ],
-        pip_packages='ddgs~=9.5.2;beautifulsoup4~=4.14.2;',
-        work_dir='./agent_workspace',
-    )
-
-    the_tasks = [
-        ('What is ten plus 15, raised to 2, expressed in words?', None),
-        ('What is the date today? Express it in words like <Month> <Day>, <Year>.', None),
-        (
-            'Which image has a purple background?',
-            [
-                'https://www.slideteam.net/media/catalog/product/cache/1280x720/p/r/process_of_natural_language_processing_training_ppt_slide01.jpg',
-                'https://cdn.prod.website-files.com/61a05ff14c09ecacc06eec05/66e8522cbe3d357b8434826a_ai-agents.jpg',
-            ],
-        ),
-        (
-            'What is four plus seven? Also, what are the festivals in Paris?'
-            ' How they differ from Kolkata?',
-            None,
-        ),
-        ('Write an elegant haiku in Basho style. Save it as poem.txt', None),
-        # ('generate an image of AI. Use model gemini/imagen-4.0-fast-generate-001', None),
-    ]
-
-    print(f'{agent.__class__.__name__} demo\n')
-
-    for task, img_urls in the_tasks:
-        rich.print(f'[yellow][bold]User[/bold]: {task}[/yellow]')
-        async for response in agent.run(task, files=img_urls):
-            print_response(response, only_final=True)
-
-        if agent.artifacts:
-            print('Artifacts generated:')
-            for art in agent.artifacts:
-                print(f'- {art} (size: {os.path.getsize(art)} bytes)')
-
-        if agent.current_plan:
-            print(f'Plan:\n{agent.current_plan}')
-
-        await asyncio.sleep(random.uniform(0.15, 0.55))
-        print('\n\n')
-
-    print('Demonstrating recurrent mode:\n')
-    # Task 1: Perform a calculation or data retrieval
-    async for response in agent.run('Find the population of France in 2023'):
-        print_response(response, only_final=True)
-
-    # Task 2: Use the result of Task 1 with recurrent_mode=True
-    async for response in agent.run(
-        'What would it be with a 0.5% growth?',
-        recurrent_mode=True,
-    ):
-        print_response(response, only_final=True)
-
-
-if __name__ == '__main__':
-    os.environ['PYTHONUTF8'] = '1'
-    asyncio.run(main())

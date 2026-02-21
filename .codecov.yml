@@ -1,6 +1,7 @@
 ignore:
   # Exclude the version file from all coverage calculations
   - "src/kodeagent/_version.py"
+  - "src/koagent/examples.py"
 
 coverage:
   status:
