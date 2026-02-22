@@ -1,16 +1,68 @@
+"""Function Calling Agent.
+This module is optimized for Small Language Models (SLMs).
+"""
+
 import inspect
 import json
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, TypedDict, Literal
 
 import litellm
+
+from . import tools as dtools
 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class Task:
+    """Represents a task for the agent to solve. A simplified version for SLMs."""
+
+    id: str | None
+    """Optional unique identifier for the task."""
+    description: str
+    """Text description of the task to be solved."""
+    result: str | None
+    """Final result or answer after solving the task."""
+    steps_taken: int | None
+    """Number of steps taken by the agent to solve the task."""
+
+
+class AgentResponse(TypedDict):
+    """Streaming response sent by an agent in the course of solving a task.
+    This class is reproduced here to keep this moudle self-contained and optimized.
+    """
+
+    type: Literal['step', 'final', 'log']
+    """Type of the response: 'step', 'final', or 'log'."""
+    channel: str | None
+    """Optional channel name for the response."""
+    value: Any
+    """Value of the response, varies by type."""
+    metadata: dict[str, Any] | None
+    """Optional metadata associated with the response."""
+
+
+DATA_TYPES = {
+    int: 'integer',
+    float: 'number',
+    str: 'string',
+    bool: 'boolean',
+    list: 'array',
+    dict: 'object',
+    Any: 'string',
+}
+
+
 class FunctionCallingAgent:
+    """An agent that uses native function calling to solve tasks,
+     optimized for Small Language Models (SLMs). If your're using Ollama, make sure to select
+     a model that supports function calling, such as 'ollama/qwen3:8b-q8_0'."""
+
     def __init__(
         self,
         model: str,
@@ -29,13 +81,13 @@ class FunctionCallingAgent:
         """
         self.model = model
         self.tools = tools or []
-
         self.tool_schemas = [FunctionCallingAgent._build_tool_schema(fn) for fn in self.tools]
         self.tool_map = {fn.__name__: fn for fn in self.tools}
 
         self.system_prompt = system_prompt
-        self.chat_history: list[dict[str, Any]] = [{'role': 'system', 'content': system_prompt}]
+        self.chat_history: list[dict[str, Any]] = []
         self.loop_detection_threshold = loop_detection_threshold
+        self.task: Task | None = None
 
     @staticmethod
     def _build_tool_schema(fn: Callable) -> dict[str, Any]:
@@ -43,18 +95,9 @@ class FunctionCallingAgent:
         sig = inspect.signature(fn)
         params = {}
         required = []
-        mapping = {
-            int: 'integer',
-            float: 'number',
-            str: 'string',
-            bool: 'boolean',
-            list: 'array',
-            dict: 'object',
-            Any: 'string',
-        }
 
         for name, param in sig.parameters.items():
-            param_type = mapping.get(param.annotation, 'string')
+            param_type = DATA_TYPES.get(param.annotation, 'string')
             params[name] = {
                 'type': param_type,
                 'description': f"Parameter '{name}' of type {param_type}",
@@ -121,9 +164,7 @@ class FunctionCallingAgent:
                     tool_name = (
                         tool_call.get('function', {}).get('name')
                         if isinstance(tool_call, dict)
-                        else getattr(
-                            getattr(tool_call, 'function', None), 'name', None
-                        )
+                        else getattr(getattr(tool_call, 'function', None), 'name', None)
                     )
                     if tool_name:
                         recent_tool_calls.append(tool_name)
@@ -131,64 +172,62 @@ class FunctionCallingAgent:
         # Check for consecutive identical tool calls
         if (
             len(recent_tool_calls) >= self.loop_detection_threshold
-            and len(set(recent_tool_calls[:self.loop_detection_threshold])) == 1
+            and len(set(recent_tool_calls[: self.loop_detection_threshold])) == 1
         ):
             loop_tool = recent_tool_calls[0]
             logger.warning(
-                f'Loop detected: Tool "{loop_tool}" called '
-                f'{self.loop_detection_threshold} times consecutively.'
+                'Loop detected: Tool %s called %d times consecutively.',
+                loop_tool,
+                self.loop_detection_threshold,
             )
 
             # Get all available tools except the looping one
-            available_tools = [
-                tool for tool in self.tool_map.keys() if tool != loop_tool
-            ]
+            available_tools = [tool for tool in self.tool_map.keys() if tool != loop_tool]
 
             nudge_message = (
-                f'Loop detected: The tool "{loop_tool}" has been called '
-                f'{self.loop_detection_threshold} consecutive times without '
-                'making progress. This approach is not working. '
+                f' Loop detected: The tool "{loop_tool}" has been called'
+                f' {self.loop_detection_threshold} consecutive times without'
+                ' making progress. This approach is not working.'
             )
 
             if available_tools:
                 nudge_message += (
-                    f'Try a different approach. Consider using one of these '
-                    f'tools instead: {", ".join(available_tools)}. '
+                    f'Try a different approach. Consider using one of these'
+                    f' tools instead: {", ".join(available_tools)}.'
                 )
 
             nudge_message += (
-                'If you have gathered enough information, provide a final '
-                'answer instead of calling a tool.'
+                'If you have gathered enough information, provide a final'
+                ' answer instead of calling a tool.'
             )
 
             # Add the nudge message as a tool result
             # This maintains OpenAI compliance: assistant message with
             # tool_calls is followed by tool message(s)
-            self.chat_history.append({
-                'role': 'tool',
-                'name': loop_tool,
-                'content': nudge_message,
-                'tool_call_id': 'loop-detection',
-            })
+            self.chat_history.append(
+                {
+                    'role': 'tool',
+                    'name': loop_tool,
+                    'content': nudge_message,
+                    'tool_call_id': 'loop-detection',
+                }
+            )
 
             return True
 
         return False
 
-    def _run_init(
-        self, task: str, files: list[str] | None = None, task_id: str | None = None
-    ) -> None:
+    def _run_init(self, task: str, task_id: str | None = None) -> None:
         """Initialize the running of a task.
 
         Args:
             task: Task description.
-            files: Optional files for the task.
             task_id: Optional task ID.
         """
-        # self.task = Task(description=task, files=files)
-        # self.final_answer_found = False
-        # if task_id:
-        #     self.task.id = task_id
+        if not task or not task.strip():
+            raise ValueError('Task description cannot be empty!')
+
+        self.task = Task(description=task, id=task_id, result=None, steps_taken=None)
         self.chat_history = [
             {'role': 'system', 'content': self.system_prompt},
             {'role': 'user', 'content': task},
@@ -221,9 +260,7 @@ class FunctionCallingAgent:
                     tool_names = []
                     for tool_call in tool_calls:
                         if isinstance(tool_call, dict):
-                            tool_name = (
-                                tool_call.get('function', {}).get('name')
-                            )
+                            tool_name = tool_call.get('function', {}).get('name')
                         else:
                             tool_name = getattr(
                                 getattr(tool_call, 'function', None),
@@ -233,9 +270,7 @@ class FunctionCallingAgent:
                         if tool_name:
                             tool_names.append(tool_name)
                     if tool_names:
-                        formatted.append(
-                            f'Assistant: [Called tools: {", ".join(tool_names)}]'
-                        )
+                        formatted.append(f'Assistant: [Called tools: {", ".join(tool_names)}]')
             elif role == 'tool':
                 tool_name = msg.get('name', 'unknown')
                 if content:
@@ -244,33 +279,36 @@ class FunctionCallingAgent:
         return '\n'.join(formatted)
 
     async def _prepare_final_answer(self) -> str:
-        """Prepare a user-readable final response from chat history.
+        """Assess task completion and prepare a user-readable final response.
 
-        Formats the conversation history as readable text and calls LiteLLM
-        with a separate system prompt to generate a comprehensive final
-        answer. This is a standalone SLM call separate from the agent's
-        ongoing interaction.
+        Formats the conversation history as readable text and calls the SLM
+        with a structured prompt that asks it to determine whether the task
+        was completed and to provide a concise final answer. This is a
+        standalone SLM call separate from the agent's main loop.
 
         Returns:
-            A user-readable final response string.
+            A user-readable string summarising the result.
         """
         formatted_history = self._format_history_as_text()
+
         final_system_prompt = (
-            'You are a helpful assistant. Based on the conversation history '
-            'below, provide a clear and concise final answer to the user\'s '
-            'question.'
+            'You are a helpful assistant. Based on the conversation history'
+            ' below, provide a clear and concise final answer to the user\'s question/task.'
         )
+        user_prompt = f'Conversation history:\n{formatted_history}\n\nNow output the JSON object.'
 
         response = await litellm.acompletion(
             model=self.model,
             messages=[
                 {'role': 'system', 'content': final_system_prompt},
-                {'role': 'user', 'content': formatted_history},
+                {'role': 'user', 'content': user_prompt},
             ],
         )
 
-        final_message = response.choices[0].message
-        return final_message.content or 'No response generated.'
+        final_answer = (response.choices[0].message.content or '').strip()
+        logger.debug('Raw final-answer SLM response: %s', final_answer)
+
+        return final_answer
 
     async def run(self, task: str, max_iterations: int = 10) -> str:
         """Main loop for the agent to process input and execute tools until finished.
@@ -284,8 +322,13 @@ class FunctionCallingAgent:
         """
         self._run_init(task)
 
+        n_turns = 0
+
+        # TODO Return streaming response per step of type AgentResponse
+
         for turn in range(max_iterations):
-            logger.info(f'Turn {turn + 1}/{max_iterations} for model {self.model}')
+            logger.info('Turn %d/%d for model %s', turn + 1, max_iterations, self.model)
+            n_turns += 1
 
             response = await litellm.acompletion(
                 model=self.model,
@@ -311,15 +354,28 @@ class FunctionCallingAgent:
             if self._detect_tool_loop():
                 logger.info('Loop detection triggered, continuing with nudge.')
 
-        # When max iterations exceeded, prepare final answer
-        return await self._prepare_final_answer()
+        # When max iterations exceeded (or task is finished), prepare final answer
+        # TODO Use a flag to skip final answer preparation and present the last content
+        prepare_final_answer = True
+        self.task.steps_taken = n_turns
+
+        if prepare_final_answer:
+            result = await self._prepare_final_answer()
+            self.task.result = result
+            return result
+
+        # TODO Include a non-LLm version of answer cleaning based on the history
+
+        # Fallback: return the content of the last assistant message
+        for msg in reversed(self.chat_history):
+            if msg.get('role') == 'assistant' and msg.get('content'):
+                return msg['content']
+        return 'No response generated.'
 
 
 async def main():
+    """Example usage of the FunctionCallingAgent."""
     # litellm._turn_on_debug()
-
-    import tools as dtools
-
     # Initialize Agent
     agent = FunctionCallingAgent(
         model='gemini/gemini-2.0-flash-lite',
@@ -329,20 +385,23 @@ async def main():
 
     # Run Agent
     tasks = [
-        'What is 5 time 7?',
-        'What is this page about: https://ollama.com/library/qwen3/tags',
+        'What is 5 times 7?',
+        'What is this page about? https://en.wikipedia.org/wiki/Artificial_intelligence',
     ]
 
     for task in tasks:
         print(f'\nUser Input: {task}')
         final_answer = await agent.run(task, max_iterations=10)
         print(f'\nFinal Result: {final_answer}')
-        print()
-        for msg in agent.chat_history:
-            print(msg)
+        print(f'>>> {agent.task.result=}')
+        print(f'>>> {agent.task.steps_taken=}')
+        # print()
+        # for msg in agent.chat_history:
+        #     print(msg)
         print('-' * 50)
 
 
 if __name__ == '__main__':
     import asyncio
+
     asyncio.run(main())
