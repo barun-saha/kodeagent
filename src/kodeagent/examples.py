@@ -19,13 +19,13 @@ from .kodeagent import CodeActAgent, ReActAgent, print_response
 
 
 async def _run_examples_async(
-    agent_type: str, max_steps: int, model_name: str = 'gemini/gemini-2.0-flash-lite'
+    agent_type: str, max_iterations: int, model_name: str = 'gemini/gemini-2.0-flash-lite'
 ) -> None:
     """Run the example agent demos asynchronously.
 
     Args:
         agent_type: Which agent to run; one of 'react', 'codeact', or 'fca'.
-        max_steps: Maximum iterations/steps for the agent.
+        max_iterations: Maximum iterations/steps for the agent.
         model_name: Which model to use for the agent.
     """
     litellm_params: dict[str, Any] = {'temperature': 0, 'timeout': 30}
@@ -40,7 +40,7 @@ async def _run_examples_async(
                 dtools.read_webpage,
                 dtools.extract_as_markdown,
             ],
-            max_iterations=max_steps,
+            max_iterations=max_iterations,
             litellm_params=litellm_params,
             # tracing_type='langfuse',
         )
@@ -55,7 +55,7 @@ async def _run_examples_async(
                 dtools.read_webpage,
                 dtools.extract_as_markdown,
             ],
-            max_iterations=max_steps,
+            max_iterations=max_iterations,
             litellm_params=litellm_params,
             run_env='host',
             allowed_imports=[
@@ -80,7 +80,6 @@ async def _run_examples_async(
 
     def _make_fca_agent() -> FunctionCallingAgent:
         return FunctionCallingAgent(
-            name='Simple agent',
             model_name=model_name,
             tools=[
                 dtools.calculator,
@@ -88,7 +87,6 @@ async def _run_examples_async(
                 dtools.read_webpage,
                 dtools.extract_as_markdown,
             ],
-            max_iterations=max_steps,
             litellm_params=litellm_params,
         )
 
@@ -165,9 +163,9 @@ async def _run_examples_async(
         raise ValueError(f'Unknown agent_type: {agent_type}')
 
 
-def run_examples(
+async def run_examples(
     agent_type: str = 'react',
-    max_steps: int = 5,
+    max_iterations: int = 5,
     model_name: str = 'gemini/gemini-2.0-flash-lite',
 ) -> None:
     """Run KodeAgent with a list of pre-defined tasks. Some of the tasks include files or URLs.
@@ -176,16 +174,16 @@ def run_examples(
 
     Args:
         agent_type: Which agent to run; one of 'react', 'codeact', or 'fca'.
-        max_steps: Maximum iterations/steps for the agent.
+        max_iterations: Maximum iterations/steps for the agent.
         model_name: Which model to use for the agent (LiteLLM style).
     """
-    asyncio.run(_run_examples_async(agent_type, max_steps, model_name))
+    await _run_examples_async(agent_type, max_iterations, model_name)
 
 
 if __name__ == '__main__':
     os.environ['PYTHONUTF8'] = '1'
     # Simple CLI handling for demo purposes
-    selected_atype = 'react'
+    selected_atype = 'fca'
     if len(sys.argv) > 1:
         for arg in sys.argv[1:]:
             if arg.startswith('--agent_type='):
@@ -193,4 +191,4 @@ if __name__ == '__main__':
             elif arg in ['react', 'codeact', 'fca']:
                 selected_atype = arg
 
-    run_examples(agent_type=selected_atype)
+    asyncio.run(run_examples(agent_type=selected_atype))
