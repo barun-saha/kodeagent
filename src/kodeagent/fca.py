@@ -12,7 +12,7 @@ from typing import Any, TypedDict, Literal
 import litellm
 
 from . import tools as dtools
-
+from .orchestrator import Planner
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,6 +30,8 @@ class Task:
     """Final result or answer after solving the task."""
     steps_taken: int | None
     """Number of steps taken by the agent to solve the task."""
+    files: None = None
+    """Placeholder only for compatibility with Planner."""
 
 
 class AgentResponse(TypedDict):
@@ -69,6 +71,7 @@ class FunctionCallingAgent:
         tools: list[Callable] | None = None,
         system_prompt: str = 'You are a helpful assistant that uses tools to solve tasks.',
         loop_detection_threshold: int = 3,
+        litellm_params: dict | None = None,
     ):
         """Initialize the FunctionCallingAgent.
 
@@ -78,12 +81,14 @@ class FunctionCallingAgent:
             system_prompt: System prompt for the agent.
             loop_detection_threshold: Number of consecutive same tool calls
                 before triggering loop detection. Default is 3.
+            litellm_params: Optional dictionary of parameters to pass to LiteLLM calls.
         """
         self.model = model
         self.tools = tools or []
         self.tool_schemas = [FunctionCallingAgent._build_tool_schema(fn) for fn in self.tools]
         self.tool_map = {fn.__name__: fn for fn in self.tools}
 
+        self.litellm_params = litellm_params
         self.system_prompt = system_prompt
         self.chat_history: list[dict[str, Any]] = []
         self.loop_detection_threshold = loop_detection_threshold
@@ -217,12 +222,18 @@ class FunctionCallingAgent:
 
         return False
 
-    def _run_init(self, task: str, task_id: str | None = None) -> None:
+    async def _run_init(
+            self,
+            task: str,
+            task_id: str | None = None,
+            use_planning: bool = True
+    ) -> None:
         """Initialize the running of a task.
 
         Args:
             task: Task description.
             task_id: Optional task ID.
+            use_planning: If True, generate a simple plan at the beginning of the task.
         """
         if not task or not task.strip():
             raise ValueError('Task description cannot be empty!')
@@ -230,8 +241,18 @@ class FunctionCallingAgent:
         self.task = Task(description=task, id=task_id, result=None, steps_taken=None)
         self.chat_history = [
             {'role': 'system', 'content': self.system_prompt},
-            {'role': 'user', 'content': task},
+            {'role': 'user', 'content': f'New Task:\n{task}'},
         ]
+
+        if use_planning:
+            planner = Planner(
+                model_name=self.model,
+                litellm_params=self.litellm_params,
+            )
+            plan = await planner.create_plan(task=self.task, agent_type='fca')
+            self.chat_history.append({'role': 'assistant', 'content': f'Plan:\n{plan}'})
+            print(f'>>> Generated plan:\n{plan}\n')
+
 
     def _format_history_as_text(self) -> str:
         """Format chat history as readable text.
@@ -295,7 +316,7 @@ class FunctionCallingAgent:
             'You are a helpful assistant. Based on the conversation history'
             ' below, provide a clear and concise final answer to the user\'s question/task.'
         )
-        user_prompt = f'Conversation history:\n{formatted_history}\n\nNow output the JSON object.'
+        user_prompt = f'Conversation history:\n{formatted_history}'
 
         response = await litellm.acompletion(
             model=self.model,
@@ -303,6 +324,7 @@ class FunctionCallingAgent:
                 {'role': 'system', 'content': final_system_prompt},
                 {'role': 'user', 'content': user_prompt},
             ],
+            **(self.litellm_params or {}),
         )
 
         final_answer = (response.choices[0].message.content or '').strip()
@@ -310,17 +332,31 @@ class FunctionCallingAgent:
 
         return final_answer
 
-    async def run(self, task: str, max_iterations: int = 10) -> str:
+    async def run(
+            self,
+            task: str, max_iterations: int = 10,
+            refine_final_answer: bool = True,
+            use_planning: bool = True,
+            recurrent_mode: bool = False,
+    ) -> str:
         """Main loop for the agent to process input and execute tools until finished.
 
         Args:
             task: Task description to process.
             max_iterations: Maximum number of iterations to run.
+            refine_final_answer: If True, the agent will call an additional SLM step
+             at the end to prepare a user-friendly final answer based on the conversation history.
+            use_planning: If True, the agent will generate a simple plan at the beginning
+             of the run to guide its actions. This is optional and can be disabled
+            for very simple tasks.
+            recurrent_mode: If True, the agent will continue to run on the same task
+             until it decides to stop, allowing for more dynamic interactions.
+
 
         Returns:
             A user-readable final response string.
         """
-        self._run_init(task)
+        await self._run_init(task, use_planning=use_planning)
 
         n_turns = 0
 
@@ -335,6 +371,7 @@ class FunctionCallingAgent:
                 messages=self.chat_history,
                 tools=self.tool_schemas,
                 tool_choice='auto',
+                **(self.litellm_params or {}),
             )
 
             message = response.choices[0].message
@@ -355,17 +392,14 @@ class FunctionCallingAgent:
                 logger.info('Loop detection triggered, continuing with nudge.')
 
         # When max iterations exceeded (or task is finished), prepare final answer
-        # TODO Use a flag to skip final answer preparation and present the last content
-        prepare_final_answer = True
         self.task.steps_taken = n_turns
 
-        if prepare_final_answer:
+        if refine_final_answer:
             result = await self._prepare_final_answer()
             self.task.result = result
             return result
 
         # TODO Include a non-LLm version of answer cleaning based on the history
-
         # Fallback: return the content of the last assistant message
         for msg in reversed(self.chat_history):
             if msg.get('role') == 'assistant' and msg.get('content'):
@@ -381,6 +415,7 @@ async def main():
         model='gemini/gemini-2.0-flash-lite',
         # model='ollama/qwen3:8b-q8_0',
         tools=[dtools.search_web, dtools.calculator, dtools.read_webpage],
+        litellm_params={'temperature': 0, 'timeout': 90},
     )
 
     # Run Agent
@@ -391,7 +426,7 @@ async def main():
 
     for task in tasks:
         print(f'\nUser Input: {task}')
-        final_answer = await agent.run(task, max_iterations=10)
+        final_answer = await agent.run(task, max_iterations=10, use_planning=True)
         print(f'\nFinal Result: {final_answer}')
         print(f'>>> {agent.task.result=}')
         print(f'>>> {agent.task.steps_taken=}')
