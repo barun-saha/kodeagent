@@ -10,6 +10,7 @@ API Reference
    kodeagent.code_reviewer
    kodeagent.code_runner
    kodeagent.examples
+   kodeagent.fca
    kodeagent.history_formatter
    kodeagent.kodeagent
    kodeagent.kutils
