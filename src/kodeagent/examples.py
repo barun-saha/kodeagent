@@ -8,22 +8,24 @@ user code. The API exposes a synchronous `run_examples` function plus an
 import asyncio
 import os
 import random
+import sys
 from typing import Any
 
 import rich
 
 from . import tools as dtools
+from .fca import FunctionCallingAgent
 from .kodeagent import CodeActAgent, ReActAgent, print_response
 
 
 async def _run_examples_async(
-    agent_type: str, max_steps: int, model_name: str = 'gemini/gemini-2.0-flash-lite'
+    agent_type: str, max_iterations: int, model_name: str = 'gemini/gemini-2.0-flash-lite'
 ) -> None:
     """Run the example agent demos asynchronously.
 
     Args:
-        agent_type: Which agent to run; one of 'react', or 'codeact'.
-        max_steps: Maximum iterations/steps for the agent.
+        agent_type: Which agent to run; one of 'react', 'codeact', or 'fca'.
+        max_iterations: Maximum iterations/steps for the agent.
         model_name: Which model to use for the agent.
     """
     litellm_params: dict[str, Any] = {'temperature': 0, 'timeout': 30}
@@ -38,7 +40,7 @@ async def _run_examples_async(
                 dtools.read_webpage,
                 dtools.extract_as_markdown,
             ],
-            max_iterations=max_steps,
+            max_iterations=max_iterations,
             litellm_params=litellm_params,
             # tracing_type='langfuse',
         )
@@ -53,7 +55,7 @@ async def _run_examples_async(
                 dtools.read_webpage,
                 dtools.extract_as_markdown,
             ],
-            max_iterations=max_steps,
+            max_iterations=max_iterations,
             litellm_params=litellm_params,
             run_env='host',
             allowed_imports=[
@@ -74,6 +76,18 @@ async def _run_examples_async(
             pip_packages='ddgs~=9.10.0;beautifulsoup4~=4.14.3;',
             work_dir='./agent_workspace',
             # tracing_type='langsmith',
+        )
+
+    def _make_fca_agent() -> FunctionCallingAgent:
+        return FunctionCallingAgent(
+            model_name=model_name,
+            tools=[
+                dtools.calculator,
+                dtools.search_web,
+                dtools.read_webpage,
+                dtools.extract_as_markdown,
+            ],
+            litellm_params=litellm_params,
         )
 
     the_tasks = [
@@ -142,25 +156,40 @@ async def _run_examples_async(
     elif atype == 'react':
         agent = _make_react_agent()
         await _run_with_agent(agent)
+    elif atype == 'fca':
+        agent = _make_fca_agent()
+        await _run_with_agent(agent)
     else:
         raise ValueError(f'Unknown agent_type: {agent_type}')
 
 
-def run_examples(
-    agent_type: str = 'react', max_steps: int = 5, model_name: str = 'gemini/gemini-2.0-flash-lite'
+async def run_examples(
+    agent_type: str = 'react',
+    max_iterations: int = 5,
+    model_name: str = 'gemini/gemini-2.0-flash-lite',
 ) -> None:
-    """Run KodeAgent with a list of pre-defined tasks. Some of the tasks include files or URLs.
+    """Run KodeAgent with a list of pre-defined tasks and the choice of agent.
+    Some of the tasks include files or URLs.
     The last task is run with `recurrent_mode=True` to demonstrate that feature.
-    This function provides a synchronous importable API.
 
     Args:
-        agent_type: Which agent to run; one of 'react', or 'codeact'.
-        max_steps: Maximum iterations/steps for the agent.
+        agent_type: Which agent to run; one of `react`, `codeact`, or `fca`.
+        max_iterations: Maximum iterations/steps for the agent.
         model_name: Which model to use for the agent (LiteLLM style).
     """
-    asyncio.run(_run_examples_async(agent_type, max_steps, model_name))
+    await _run_examples_async(agent_type, max_iterations, model_name)
 
 
 if __name__ == '__main__':
     os.environ['PYTHONUTF8'] = '1'
-    run_examples()
+    # Simple CLI handling for demo purposes
+    selected_atype = 'fca'
+
+    if len(sys.argv) > 1:
+        for arg in sys.argv[1:]:
+            if arg.startswith('--agent_type='):
+                selected_atype = arg.split('=', 1)[1] or 'react'
+            elif arg in ['react', 'codeact', 'fca']:
+                selected_atype = arg
+
+    asyncio.run(run_examples(agent_type=selected_atype))

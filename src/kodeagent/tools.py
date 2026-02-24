@@ -77,24 +77,17 @@ def tool(func: Callable) -> Callable:
 
 @tool
 def calculator(expression: str) -> float | None:
-    """A simple calculator tool that can evaluate basic arithmetic expressions.
-
-    Examples:
-        - "2 + 2" returns 4.0
-        - "2 ** 3" returns 8.0 (exponentiation)
-
-    Supported operations: +, -, *, /, ** (exponent), parentheses
-    Note: Use ** for exponents, not ^
-    In case the expression has any invalid symbol, the function returns `None`.
+    """Evaluate a single arithmetic expression and return the numeric result.
+    Call this tool once per arithmetic operation. Do NOT try to compute
+    multi-step problems in one call; chain multiple calls instead.
+    Supported operators: +, -, *, /, ** (exponent), parentheses.
 
     Args:
-        expression (str): The arithmetic expression as a string.
+        expression: A single arithmetic expression, e.g. "7 + 5" or "12 * 4".
+            Use ** for exponents, not ^. Returns None for invalid input.
 
     Returns:
-        The numerical result or `None` if the expression is invalid.
-
-    Raises:
-        ValueError: If the expression contains invalid characters.
+        The numeric result as a float, or None if the expression is invalid.
     """
     import ast
     import operator
@@ -153,27 +146,16 @@ def calculator(expression: str) -> float | None:
 
 @tool
 def search_web(query: str, max_results: int = 10) -> str:
-    """Search the web using DuckDuckGo and return top results with titles and links.
-    Use this when you need current information, news, or general web search.
-
-    The results include clickable links that can be visited using the `read_webpage` tool
-    to get the full content of any page.
-
-    Examples:
-        - "latest news about AI" - finds recent AI news articles
-        - "Python tutorial" - finds Python learning resources
-        - "weather in Tokyo" - finds weather information
+    """Search the web using DuckDuckGo and return top results with titles and URLs.
+    Use this to find current information, news, or general web content.
+    To get full page content from a result URL, call `read_webpage` tool next (if available).
 
     Args:
-        query: Search terms (keep it concise, 2-5 words work best).
+        query: Search terms (2-5 words work best).
         max_results: Number of results to return (default 10, min 1, max 20).
 
     Returns:
         Markdown formatted search results with titles, URLs, and snippets, or an error message.
-
-    Next Step:
-        For any question requiring a specific, accurate answer, always use `read_webpage`
-        on a result URL.
     """
     import random
     import time
@@ -656,23 +638,13 @@ def extract_as_markdown(url_or_path: str, max_length: int | None = None) -> str:
 
 @tool
 def read_webpage(url: str, max_length: int = 50000) -> str:
-    """Read and extract the main text content from HTML web pages as clean Markdown.
-    Use this after 'search_web' to read articles, blogs, documentation, or any HTML content.
-
-    This tool intelligently extracts readable text while removing ads, navigation,
-    footers, and other clutter. It's optimized for web pages.
-
-    For documents (PDF, DOCX, XLSX), use 'extract_as_markdown' instead.
-
-    Examples:
-        - Read a news article: "https://www.bbc.com/news/article"
-        - Read documentation: "https://docs.python.org/3/tutorial/"
-        - Read a blog post: "https://example.com/blog/post"
+    """Fetch and return the main text content from an HTML webpage as clean Markdown.
+    Use this after search_web to read articles, blogs, or documentation.
+    For PDF, DOCX, or XLSX files, use `extract_as_markdown` tool instead.
 
     Args:
         url: The complete URL of the webpage (must start with http:// or https://).
-        max_length: Maximum characters to return (default 50000). Lower values
-                   process faster with small LLMs.
+        max_length: Maximum characters to return (default 50000).
 
     Returns:
         Clean webpage content as Markdown text, or an error message.
@@ -966,15 +938,15 @@ def search_arxiv(query: str, max_results: int = 5) -> str:
 
 @tool
 def transcribe_youtube(video_id: str) -> str:
-    """Retrieve the transcript/subtitles for YouTube videos (only). It also works for automatically
-    generated subtitles, supports translating subtitles. The input should be a valid YouTube
-    video ID. E.g., the URL https://www.youtube.com/watch?v=aBc4E has the video ID `aBc4E`.
+    """Get the transcript or subtitles for a YouTube video by its video ID.
+    The video ID is the part after '?v=' in the URL.
+    For example: https://www.youtube.com/watch?v=aBc4E has video ID 'aBc4E'.
 
     Args:
-        video_id: YouTube video ID from the URL.
+        video_id: YouTube video ID (not the full URL).
 
     Returns:
-        The transcript/subtitle of the video, if available.
+        The transcript text of the video, or an error message if unavailable.
     """
     from youtube_transcript_api import YouTubeTranscriptApi
     from youtube_transcript_api import _errors as yt_errors
