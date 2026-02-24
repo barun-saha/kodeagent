@@ -168,12 +168,12 @@ async def run_examples(
     max_iterations: int = 5,
     model_name: str = 'gemini/gemini-2.0-flash-lite',
 ) -> None:
-    """Run KodeAgent with a list of pre-defined tasks. Some of the tasks include files or URLs.
+    """Run KodeAgent with a list of pre-defined tasks and the choice of agent.
+    Some of the tasks include files or URLs.
     The last task is run with `recurrent_mode=True` to demonstrate that feature.
-    This function provides a synchronous importable API.
 
     Args:
-        agent_type: Which agent to run; one of 'react', 'codeact', or 'fca'.
+        agent_type: Which agent to run; one of `react`, `codeact`, or `fca`.
         max_iterations: Maximum iterations/steps for the agent.
         model_name: Which model to use for the agent (LiteLLM style).
     """
@@ -184,10 +184,11 @@ if __name__ == '__main__':
     os.environ['PYTHONUTF8'] = '1'
     # Simple CLI handling for demo purposes
     selected_atype = 'fca'
+
     if len(sys.argv) > 1:
         for arg in sys.argv[1:]:
             if arg.startswith('--agent_type='):
-                selected_atype = arg.split('=')[1]
+                selected_atype = arg.split('=', 1)[1] or 'react'
             elif arg in ['react', 'codeact', 'fca']:
                 selected_atype = arg
 

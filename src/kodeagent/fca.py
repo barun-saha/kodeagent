@@ -236,12 +236,12 @@ class FunctionCallingAgent:
 
             if available_tools:
                 nudge_message += (
-                    f'Try a different approach. Consider using one of these'
+                    f' Try a different approach. Consider using one of these'
                     f' tools instead: {", ".join(available_tools)}.'
                 )
 
             nudge_message += (
-                'If you have gathered enough information, provide a final'
+                ' If you have gathered enough information, provide a final'
                 ' answer instead of calling a tool.'
             )
 
@@ -292,9 +292,10 @@ class FunctionCallingAgent:
                 model_name=self.model_name,
                 litellm_params=self.litellm_params,
             )
-            plan = await planner.create_plan(task=self.task, agent_type='fca')
-            self.chat_history.append({'role': 'assistant', 'content': f'Plan:\n{plan}'})
-            logger.info('Task plan:\n%s\n', plan)
+            await planner.create_plan(task=self.task, agent_type='fca')
+            formatted_plan = planner.get_formatted_plan()
+            self.chat_history.append({'role': 'assistant', 'content': f'Plan:\n{formatted_plan}'})
+            logger.info('Task plan:\n%s\n', formatted_plan)
 
     def _format_history_as_text(self) -> str:
         """Format chat history as readable text.
@@ -398,8 +399,8 @@ class FunctionCallingAgent:
             files: *Unused* parameter only for API compatibility. Do not use with function calling
              agent. Instead, add any URLs or file contents to the task description.
 
-        Returns:
-            AsyncIterator[AgentResponse]: An iterator yielding agent responses.
+        Yields:
+            AgentResponse: An iterator yielding agent responses.
         """
         await self._run_init(task, use_planning=use_planning, recurrent_mode=recurrent_mode)
         n_turns = 0
@@ -437,7 +438,10 @@ class FunctionCallingAgent:
                 self.chat_history.append(tool_result_message)
                 yield self.response(
                     rtype='log',
-                    value=f'Executed tool: {tool_call.function.name}. Result: {tool_result_message["content"][:100]}...',
+                    value=(
+                        f'Executed tool: {tool_call.function.name}.'
+                        f' Result: {tool_result_message["content"][:100]}...'
+                    ),
                     channel='tool',
                 )
 
