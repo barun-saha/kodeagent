@@ -26,11 +26,11 @@ KodeAgent is a frameworkless, minimalistic approach to building AI agents. Writt
 KodeAgent adheres to the **Unix Philosophy**: do one thing well and integrate seamlessly.
 
 Use KodeAgent because it offers:
-- **ReAct & CodeAct:** KodeAgent supports both ReAct and CodeAct agent paradigms out-of-the-box, enabling agents to reason and act using tools or by generating and executing code.
+- **ReAct, CodeAct, and Function Calling:** KodeAgent supports ReAct, CodeAct, and native Function Calling paradigms out-of-the-box. This allows agents to reason, generate/execute code, or use a model's native tool-calling capabilities.
 - **Guidance and Auto-Correction:** Includes a "Planner" to plan the steps and an internal "Observer" to monitor progress, detect loops or stalled plans, and provide corrective feedback to stay on track.
+- **Optimized for SLMs:** The `FunctionCallingAgent` is specifically designed for Small Language Models (SLMs) and models with efficient function-calling support.
 - **Scalable:** With only a few dependencies, KodeAgent perfectly integrates into serverless environments, standalone applications, or existing platforms.
-- **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models (e.g., Gemini, OpenAI, and Claude) without changing your core logic.
-- **Lightweight Glass Box:** Read the entire source and debug without fighting opaque abstraction layers. Follow the key abstractions and build something on your own!
+- **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models (e.g., Gemini, OpenAI, and Claude) and providers (e.g., Ollama) without changing your core logic.
 
 
 ## ✋ Why Not?
@@ -108,6 +108,24 @@ agent = CodeActAgent(
 ```
 
 That's it! Your agent should start solving the task and keep streaming the updates.
+
+#### Native Function Calling (Optimized for SLMs)
+For models that natively support function calling (like Gemini, OpenAI, or specialized SLMs), you can use the `FunctionCallingAgent`:
+
+```python
+from kodeagent import FunctionCallingAgent, print_response
+from kodeagent.tools import calculator
+
+agent = FunctionCallingAgent(
+    name='Math Agent',
+    # Try with your SLMs here, e.g., 'ollama/functiongemma:270m-it-fp16' or 'ollama/granite4:7b-a1b-h'
+    model_name='gemini/gemini-2.0-flash-lite',
+    tools=[calculator],
+)
+
+async for response in agent.run('What is 123 * 456?'):
+    print_response(response, only_final=True)
+```
 
 By default, an agent is **memoryless** across tasks—each task begins with no prior context, a clean slate. To enable context from the previous task (only), use **Recurrent Mode**:
 
