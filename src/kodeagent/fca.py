@@ -124,7 +124,8 @@ class FunctionCallingAgent:
         self.task: Task | None = None
         self.final_answer_found = False
         self.max_tool_result_chars = max_tool_result_chars
-        self.full_tool_results: dict[tuple[str, str], str] = {}
+        # Keyed by tool_call_id (unique per invocation) for exact per-call lookup
+        self.full_tool_results: dict[str, str] = {}
 
         self.loop_detection_threshold = loop_detection_threshold
         self.nudge_count = 0
@@ -312,12 +313,16 @@ class FunctionCallingAgent:
             'content': result,
         }
 
-    def _detect_tool_loop(self) -> bool:
+    def _detect_tool_loop(self, nudge_hard_stop: int = 2) -> bool:
         """Detect if the agent is stuck in a tool calling loop.
 
         Analyzes chat history to identify when the same tool is being called
         consecutively without progress. Supports two-stage nudge escalation
         before signalling hard termination.
+
+        Args:
+            nudge_hard_stop: Number of nudges after which hard termination is signalled.
+             Callers should pass their ``loop_threshold`` value here.
 
         Returns:
             True if a loop was detected (nudge added or hard termination signalled),
@@ -341,8 +346,8 @@ class FunctionCallingAgent:
         ):
             loop_tool = recent_tool_calls[0]
 
-            # Hard termination after two nudges
-            if self.nudge_count >= 2:
+            # Hard termination once nudge limit has been reached
+            if self.nudge_count >= nudge_hard_stop:
                 return True
 
             available_tools = [t for t in self.tool_map if t != loop_tool]
@@ -488,12 +493,11 @@ class FunctionCallingAgent:
                         formatted.append(f'Assistant: [Called tools: {", ".join(tool_names)}]')
             elif role == 'tool':
                 tool_name = msg.get('name', 'unknown')
-                call_key_match = next(
-                    (k for k in self.full_tool_results if k[0] == tool_name),
-                    None,
-                )
-                # Prefer full result for final answer quality; fall back to history version
-                full_content = self.full_tool_results[call_key_match] if call_key_match else content
+                tool_call_id = msg.get('tool_call_id')
+                # Exact lookup by tool_call_id — avoids wrong-result for repeated same-tool calls
+                full_content = (
+                    self.full_tool_results.get(tool_call_id) if tool_call_id else None
+                ) or content
                 if full_content:
                     formatted.append(f'Tool ({tool_name}): {full_content}')
 
@@ -530,13 +534,12 @@ class FunctionCallingAgent:
         refine_final_answer: bool = True,
         use_planning: bool = True,
         recurrent_mode: bool = False,
-        files: None = None,
         loop_threshold: int = 3,
     ) -> AsyncIterator[AgentResponse]:
         """Main loop for the agent to process input and execute tools until finished.
 
         Args:
-            task: Task description to process.
+            task: Task description to process. Add URLs or file contents in the task description.
             max_iterations: Maximum number of iterations to run.
             refine_final_answer: If True, calls an additional SLM step to produce a
              clean final answer when the model exits without calling final_answer.
@@ -544,8 +547,6 @@ class FunctionCallingAgent:
             use_planning: If True, generate a simple plan at the beginning of the task.
             recurrent_mode: If True, the agent continues from the previous task result,
              allowing for multi-turn workflows.
-            files: *Unused* — for API compatibility only. Pass URLs or file content
-             directly in the task description instead.
             loop_threshold: Number of consecutive same tool calls before triggering loop detection.
 
         Yields:
@@ -557,7 +558,7 @@ class FunctionCallingAgent:
         self.final_answer_found = False
         consecutive_errors = 0
         executed_tool_calls: dict[tuple[str, str], str] = {}
-        self.full_tool_results: dict[tuple[str, str], str] = {}  # full content for final answer
+        self.full_tool_results: dict[str, str] = {}  # keyed by tool_call_id for exact lookup
 
         yield self.response(
             rtype='log', value=f'Solving task: `{self.task.description}`', channel='run'
@@ -607,8 +608,10 @@ class FunctionCallingAgent:
                     raw_content = tool_result_message['content']
 
                     if not raw_content.startswith('Error:'):
-                        # Store full result separately for _prepare_final_answer
-                        self.full_tool_results[call_key] = raw_content
+                        # Populate deduplication cache with the raw result
+                        executed_tool_calls[call_key] = raw_content
+                        # Store full result keyed by tool_call_id for exact per-call lookup
+                        self.full_tool_results[tool_call.id] = raw_content
                         # Truncate/summarise for history
                         tool_result_message = {
                             **tool_result_message,
@@ -646,7 +649,11 @@ class FunctionCallingAgent:
                 )
                 break
 
-            if self._detect_tool_loop():
+            loop_detected = self._detect_tool_loop(nudge_hard_stop=loop_threshold)
+            if loop_detected:
+                # Hard-stop: nudge_count was already >= loop_threshold, so the method
+                # returned True without incrementing — nudge_count stays at loop_threshold.
+                # Nudge path: _detect_tool_loop incremented nudge_count before returning.
                 if self.nudge_count >= loop_threshold:
                     logger.error('Loop persisted after nudges. Terminating for safety.')
                     yield self.response(
@@ -668,7 +675,11 @@ class FunctionCallingAgent:
         result = 'No response generated.'
         for msg in reversed(self.chat_history):
             if msg.get('role') == 'tool' and msg.get('name') == 'final_answer':
-                result = msg['content']
+                # Use the full (untruncated) stored result if available
+                tool_call_id = msg.get('tool_call_id')
+                result = (
+                    self.full_tool_results.get(tool_call_id) if tool_call_id else None
+                ) or msg['content']
                 break
         else:
             # Fall back to last assistant text content
@@ -721,7 +732,6 @@ async def main():
     # Some smaller models with 8-bit quantization or higher can perform well with function calling
     # model_name='ollama/qwen3:8b-q8_0'
     # model_name = 'ollama/qwen3:4b-instruct-2507-fp16'
-    # model_name = 'ollama/functiongemma:270m-it-fp16'
     # model_name = 'ollama/granite4:7b-a1b-h'
     # model_name = 'ollama/phi4-mini:3.8b-q8_0'
 
@@ -752,10 +762,7 @@ async def main():
     for idx, task in enumerate(tasks, start=1):
         print(f'\nTask #{idx}: {task}')
         async for response in agent.run(task, max_iterations=10, use_planning=False):
-            if response['type'] == 'log':
-                print(f'Log: {response["value"]}')
-            elif response['type'] == 'final':
-                print(f'\nFinal Result: {response["value"]}')
+            print(response)
 
         print(f'>>> {agent.task.result=}')
         print(f'>>> {agent.task.steps_taken=}')
