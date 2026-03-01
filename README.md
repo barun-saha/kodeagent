@@ -11,7 +11,7 @@
 [![Ruff](https://img.shields.io/badge/linting-ruff-%23f64e60)](https://docs.astral.sh/ruff/)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)
 
-<a href="https://aiagentsdirectory.com?utm_source=badge&utm_medium=referral&utm_campaign=free_listing&utm_content=homepage" target="_blank" rel="noopener noreferrer">
+<a href="https://aiagentsdirectory.com/agent/kodeagent?utm_source=badge&utm_medium=referral&utm_campaign=free_listing&utm_content=homepage" target="_blank" rel="noopener noreferrer">
   <img src="https://aiagentsdirectory.com/featured-badge.svg?v=2024" alt="Featured AI Agents on AI Agents Directory" width="200" height="50" />
 </a>
 
@@ -26,11 +26,11 @@ KodeAgent is a frameworkless, minimalistic approach to building AI agents. Writt
 KodeAgent adheres to the **Unix Philosophy**: do one thing well and integrate seamlessly.
 
 Use KodeAgent because it offers:
-- **ReAct & CodeAct:** KodeAgent supports both ReAct and CodeAct agent paradigms out-of-the-box, enabling agents to reason and act using tools or by generating and executing code.
+- **ReAct, CodeAct, and Function Calling:** KodeAgent supports ReAct, CodeAct, and native Function Calling paradigms out-of-the-box. This allows agents to reason, generate/execute code, or use a model's native tool-calling capabilities.
 - **Guidance and Auto-Correction:** Includes a "Planner" to plan the steps and an internal "Observer" to monitor progress, detect loops or stalled plans, and provide corrective feedback to stay on track.
+- **Optimized for SLMs:** The `FunctionCallingAgent` is specifically designed for Small Language Models (SLMs) and models with efficient function-calling support.
 - **Scalable:** With only a few dependencies, KodeAgent perfectly integrates into serverless environments, standalone applications, or existing platforms.
-- **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models (e.g., Gemini, OpenAI, and Claude) without changing your core logic.
-- **Lightweight Glass Box:** Read the entire source and debug without fighting opaque abstraction layers. Follow the key abstractions and build something on your own!
+- **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models (e.g., Gemini, OpenAI, and Claude) and providers (e.g., Ollama) without changing your core logic.
 
 
 ## ✋ Why Not?
@@ -87,6 +87,8 @@ for task in [
         print_response(response, only_final=True)
 ```
 
+After the loop is done, you can access the final result of the task using `agent.task.result`.
+
 You can also create a CodeActAgent, which leverages the core CodeAct pattern to generate and execute Python code on the fly for complex tasks. For example:
 
 ```python
@@ -108,6 +110,28 @@ agent = CodeActAgent(
 ```
 
 That's it! Your agent should start solving the task and keep streaming the updates.
+
+
+### Native Function Calling (Optimized for SLMs)
+
+For models that natively support function calling (like Gemini, OpenAI, or specialized SLMs), you can use the `FunctionCallingAgent`:
+
+```python
+from kodeagent import FunctionCallingAgent, print_response
+from kodeagent.tools import calculator
+
+agent = FunctionCallingAgent(
+    # Try with your SLMs here, e.g., 'ollama/functiongemma:270m-it-fp16' or 'ollama/granite4:7b-a1b-h'
+    model_name='gemini/gemini-2.0-flash-lite',
+    tools=[calculator],
+    litellm_params={'temperature': 0, 'timeout': 90},
+)
+
+async for response in agent.run('What is 123 * 456?'):
+    print_response(response, only_final=True)
+```
+
+Use this [Colab notebook](https://colab.research.google.com/drive/1c7RMTCcSYrO7wZgB25bLX9QenDgVDmAP?usp=sharing) to run function-calling agent with several SLMs (uses T4 GPU).
 
 By default, an agent is **memoryless** across tasks—each task begins with no prior context, a clean slate. To enable context from the previous task (only), use **Recurrent Mode**:
 
