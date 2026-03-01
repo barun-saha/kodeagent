@@ -87,6 +87,8 @@ for task in [
         print_response(response, only_final=True)
 ```
 
+After the loop is done, you can access the final result of the task using `agent.task.result`.
+
 You can also create a CodeActAgent, which leverages the core CodeAct pattern to generate and execute Python code on the fly for complex tasks. For example:
 
 ```python
@@ -109,7 +111,8 @@ agent = CodeActAgent(
 
 That's it! Your agent should start solving the task and keep streaming the updates.
 
-#### Native Function Calling (Optimized for SLMs)
+
+### Native Function Calling (Optimized for SLMs)
 
 For models that natively support function calling (like Gemini, OpenAI, or specialized SLMs), you can use the `FunctionCallingAgent`:
 
@@ -118,10 +121,10 @@ from kodeagent import FunctionCallingAgent, print_response
 from kodeagent.tools import calculator
 
 agent = FunctionCallingAgent(
-    name='Math Agent',
     # Try with your SLMs here, e.g., 'ollama/functiongemma:270m-it-fp16' or 'ollama/granite4:7b-a1b-h'
     model_name='gemini/gemini-2.0-flash-lite',
     tools=[calculator],
+    litellm_params={'temperature': 0, 'timeout': 90},
 )
 
 async for response in agent.run('What is 123 * 456?'):
