@@ -60,6 +60,33 @@ agent = CodeActAgent(
 The `run_env` parameter specifies the environment where the agent's code will execute. Setting it to `'host'` allows the agent to run code directly on the host machine. You can also use `'e2b'` to run the code on [E2B sandbox](https://e2b.dev/).
 
 
+## Function Calling Agent (SLM Optimized)
+
+The `FunctionCallingAgent` (FCA) is specifically designed and optimized for **Small Language Models (SLMs)**. It uses the model's native function-calling capabilities instead of the more complex ReAct or CodeAct reasoning loops.
+
+While its internal implementation is specialized for SLMs, it maintains the **same `run()` API** as `ReActAgent` and `CodeActAgent`, making it easy to swap according to your model choice. Some features, such as observability, are yet to be supported for function-calling agent.
+
+```python
+from kodeagent import FunctionCallingAgent, search_web, calculator, print_response
+
+# Optimized for models like Qwen, Granite, Phi, or smaller local models
+agent = FunctionCallingAgent(
+    model_name='ollama/qwen3:4b-instruct-2507-fp16',
+    tools=[search_web, calculator],
+    litellm_params={'temperature': 0}
+)
+
+async for response in agent.run('Calculate the market cap of Apple'):
+    print_response(response, only_final=True)
+```
+
+### Key Features
+- **Lightweight**: Minimal overhead, ideal for models with 4B-8B parameters.
+- **Native Tooling**: Leverages the model's built-in tool-calling interface.
+- **Final Answer Tool**: Automatically includes a `final_answer` pseudo-tool to ensure structured outputs from smaller models.
+- **Nudge Mechanism**: Includes built-in loop detection and "nudges" to prevent smaller models from getting stuck.
+
+
 ## Task Result and State
 
 The only way to execute any task is by invoking the `run()` method with the task description and optional files. The `run()` method provides streaming responses from the task execution, which can be iterated over asynchronously. However, often you may want to access the final response from the agent. This can be accessed via `agent.task.result`:
