@@ -23,7 +23,7 @@ extensions = [
     'sphinx.ext.napoleon',  # Converts Google/NumPy style docstrings
     'sphinx.ext.viewcode',
     'myst_parser',  # Enables Markdown support (.md files)
-    'sphinxcontrib.kroki',  # Use Kroki image rendering of Mermaid
+    'sphinxcontrib.mermaid',
 ]
 autosummary_generate = True
 

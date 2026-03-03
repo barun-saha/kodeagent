@@ -1,4 +1,4 @@
-﻿kodeagent.models.ReActChatMessage
+kodeagent.models.ReActChatMessage
 =================================
 
 .. currentmodule:: kodeagent.models
