@@ -1,43 +1,35 @@
-## Message History
+# Message History
 
-> **ⓘ NOTE**
->
-> Starting v0.10.0, KodeAgent will unify the dual storage approach into a single list of dicts suitable for LLM APIs. The documentation will be updated thereafter accordingly.
+KodeAgent manages conversation history by maintaining a single, unified view of the dialogue that is directly compatible with LLM APIs while still preserving rich, structured information for the agent's internal reasoning.
 
----
+## Unified History (`self.chat_history`)
 
-KodeAgent manages conversation history by maintaining two complementary views of your dialogue with the LLM. This "dual storage" approach ensures that while the LLM gets exactly what it needs to function, we keep a rich, human-readable record of the agent's internal state.
+Starting from v0.10.0, KodeAgent uses a single `chat_history` member (a list of dictionaries) as the master record. This approach offers several advantages:
 
-### Dual Storage: Structured vs. API Format
+- **API Compatibility**: The history is already in the format expected by most LLM APIs (e.g., OpenAI, Gemini, Anthropic), containing `role`, `content`, and optional `tool_calls`.
+- **Consistency**: There's no longer a "dual storage" paradigm to keep in sync, reducing complexity and potential for bugs.
+- **Provider Agnostic**: The history handles multimodal content and tool calls in a standard way across different LLM providers through LiteLLM.
 
-- **The Internal Log (`self.messages`):** This is the master record. Messages are stored as structured Pydantic objects (like `ChatMessage` or `CodeActChatMessage`). They don't just hold text; they capture the agent's "thoughts," specific tool actions, and code blocks in an organized, searchable way.
-- **The LLM View:** LLM APIs require a specific format (usually a list of dictionaries with `role` and `content`). Before every call, KodeAgent transforms the internal log into this API-ready format. This includes mapping agent actions into official `tool_calls` so the LLM stays in sync with its own reasoning loop.
+## Structured Messaging & Formatters
 
-> **ⓘ NOTE**
->
-> Ideally, it should be possible to maintain only the latter view. However, this has proved to be a bit challenging so far, especially with tool call IDs. Hence, we maintain both views.
+While messages are stored as dictionaries, the agent still reasons using structured Pydantic objects (like `ChatMessage`, `ReActChatMessage`, or `CodeActChatMessage`). 
 
-### Smart Formatting & Optimization
+To bridge this gap, KodeAgent uses specialized **History Formatters**:
+- **Bidirectional Mapping**: Formatters convert structured agent objects into API-compliant dictionaries and vice versa.
+- **Agent Specificity**: Each agent type (ReAct, CodeAct, FCA) has a dedicated formatter that knows how to map its specific thoughts, actions, and observations into the standard `tool`/`assistant` roles.
+- **Rich Content**: Thoughts and intermediate reasoning are often stored as text in the assistant's response or as metadata, ensuring they are preserved for context without breaking API schemas.
 
-Formatting isn't a simple 1:1 conversion. KodeAgent uses specialized **History Formatters** tailored to each agent type:
-- **ReAct Agents:** Convert "Action" and "Args" fields into standard API tool calls.
-- **CodeAct Agents:** Treat Python code blocks as "pseudo" tool calls (named `code_execution`).
-- **Incremental Caching:** To keep things fast, the agent caches formatted messages. It only processes new messages since the last turn, avoiding the overhead of re-formatting the entire history on every step.
+## The Message Lifecycle
 
-### The Message Lifecycle
+1.  **Input**: Your request is wrapped in a `ChatMessage`, formatted into a dictionary, and added to `self.chat_history`.
+2.  **Inference**: When it's time to "think," the agent sends `self.chat_history` (excluding the system prompt) to the LLM.
+3.  **Parsing**: The LLM responds. KodeAgent's `parse_text_response` (or native parsing) extracts thoughts, actions, or final answers, which are then added back to the history.
+4.  **Observation**: Any tool output or code result is recorded as a `tool` role message in the unified history, and the cycle repeats.
 
-1.  **Input:** Your request is wrapped in a `ChatMessage` and added to `self.messages`.
-2.  **Transformation:** When it's time to "think," `formatted_history_for_llm()` scans the history, applies the appropriate transformation (ReAct vs. CodeAct), and prepares the payload for the LLM.
-3.  **Inference:** The LLM responds. KodeAgent parses this response—extracting thoughts, actions, or final answers—and creates a new structured message object.
-4.  **Observation:** Any tool output or code result is recorded as a `tool` role message, and the cycle repeats until the task is complete.
+## Truncation and Cleanup
 
-This system ensures that the conversation remains robust, provider-agnostic, and easy to debug.
+To handle long conversations and prevent token overflow:
+- **Automatic Truncation**: Large tool results or long message contents are truncated when being added to history or when being formatted for display/observation.
+- **History Management**: Methods like `get_history()` allow for easy inspection of the dialogue, while `clear_history()` resets the agent's state for a new task.
 
-### Extending with New Formatters
-
-If you're building a new agent type with unique message requirements, you can implement a custom formatter:
-
-1.  **Define a Strategy:** Create a new class inheriting from `HistoryFormatter` in `src/kodeagent/history_formatter.py`.
-2.  **Implement Core Methods:** You'll need to define `should_format_as_tool_call` (to detect agent actions), `format_tool_call` (to transform them), and `should_add_pending_placeholder` (for handling interrupted turns).
-3.  **Reference:** Use `ReActHistoryFormatter` as your primary template. It demonstrates how to handle standard tool call IDs and intermediate state.
-4.  **Register with Agent:** Assign your new formatter to `self._history_formatter` in your agent's `__init__`.
+This unified system ensures that KodeAgent remains lightweight, scalable, and easy to debug while maintaining full compatibility with modern LLM capabilities.

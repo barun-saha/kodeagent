@@ -80,11 +80,31 @@ async for response in agent.run('Calculate the market cap of Apple'):
     print_response(response, only_final=True)
 ```
 
+Note: Unlike the other two agents, `FunctionCallingAgent` does not take a `files` argument; instead, copy the files or URLs to the task description.
+
 ### Key Features
-- **Lightweight**: Minimal overhead, ideal for models with 4B-8B parameters.
+- **Lightweight**: Minimal overhead, ideal for models with at least 4B parameters.
 - **Native Tooling**: Leverages the model's built-in tool-calling interface.
 - **Final Answer Tool**: Automatically includes a `final_answer` pseudo-tool to ensure structured outputs from smaller models.
 - **Nudge Mechanism**: Includes built-in loop detection and "nudges" to prevent smaller models from getting stuck.
+
+
+## Choosing the Right Agent
+
+KodeAgent provides three types of agents. Choosing the right one depends on your target model and the task's complexity.
+
+| Agent | Best For | Model Type | Notes |
+| :--- | :--- | :--- | :--- |
+| **FunctionCallingAgent** | General tasks, orchestration | **SLMs** (≥ 4B params) | Optimized for smaller models, such as Qwen, Granite, or Phi. |
+| **ReActAgent** | Search, simple reasoning | **Frontier LLMs** | Uses standard Thought-Action-Observation loop. |
+| **CodeActAgent** | Data heavy, algorithmic | **Frontier LLMs** | Most powerful; writes and executes Python code. |
+
+### When to use which?
+
+1. **Model Size**: If you are running small local models (SLMs), use **`FunctionCallingAgent`**. It is lightweight and designed to work within the constraints of models with fewer parameters. Try 8-bit or higher quantization for better performance.
+2. **Task Complexity**: For tasks involving complex data manipulation, algorithmic problem solving, or multi-step calculations, **`CodeActAgent`** is usually more robust than `ReActAgent`.
+3. **Safety & Sandboxing**: Because `CodeActAgent` executes arbitrary Python code, it is **highly recommended** to run it in a sandboxed environment (e.g., `run_env='e2b'`) rather than the host machine.
+4. **LLM Performance**: Frontier models like Gemini 3.0 or GPT-5 perform exceptionally well with both `ReActAgent` and `CodeActAgent`.
 
 
 ## Task Result and State
