@@ -30,7 +30,7 @@ Use KodeAgent because it offers:
 - **Guidance and Auto-Correction:** Includes a "Planner" to plan the steps and an internal "Observer" to monitor progress, detect loops or stalled plans, and provide corrective feedback to stay on track.
 - **Optimized for SLMs:** The `FunctionCallingAgent` is specifically designed for Small Language Models (SLMs) and models with efficient function-calling support.
 - **Scalable:** With only a few dependencies, KodeAgent perfectly integrates into serverless environments, standalone applications, or existing platforms.
-- **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models (e.g., Gemini, OpenAI, and Claude) and providers (e.g., Ollama) without changing your core logic.
+- **LLM Agnostic:** Built on LiteLLM, KodeAgent easily swaps between models (e.g., Gemini, GPT, and Claude) and providers (e.g., Ollama) without changing your core logic.
 
 
 ## ✋ Why Not?
@@ -121,7 +121,7 @@ from kodeagent import FunctionCallingAgent, print_response
 from kodeagent.tools import calculator
 
 agent = FunctionCallingAgent(
-    # Try with your SLMs here, e.g., 'ollama/functiongemma:270m-it-fp16' or 'ollama/granite4:7b-a1b-h'
+    # Try with your SLMs here, e.g., 'ollama/granite4:7b-a1b-h' or 'ollama/qwen3:4b-instruct-2507-fp16'
     model_name='gemini/gemini-2.0-flash-lite',
     tools=[calculator],
     litellm_params={'temperature': 0, 'timeout': 90},
@@ -133,7 +133,10 @@ async for response in agent.run('What is 123 * 456?'):
 
 Use this [Colab notebook](https://colab.research.google.com/drive/1c7RMTCcSYrO7wZgB25bLX9QenDgVDmAP?usp=sharing) to run function-calling agent with several SLMs (uses T4 GPU).
 
-By default, an agent is **memoryless** across tasks—each task begins with no prior context, a clean slate. To enable context from the previous task (only), use **Recurrent Mode**:
+
+### Memory(less)
+
+By default, any agent in KodeAgent is **memoryless** across tasks—each task begins with no prior context, a clean slate. To enable context from the previous task (only), use **Recurrent Mode**:
 
 ```python
 # Enable recurrent mode to leverage context from the previous run
@@ -141,7 +144,10 @@ async for response in agent.run('Double the previous result', recurrent_mode=Tru
     print_response(response)
 ```
 
+This will copy the previous task's description & result into the current task's context.
+
 For more examples, including how to provide files as inputs, see the [examples.py](src/kodeagent/examples.py) module and [API documentation](https://kodeagent.readthedocs.io/en/latest/usage.html).
+
 
 ### API Configuration
 
@@ -240,7 +246,7 @@ agent = ReActAgent(
 )
 ```
 
-Tracing is **disbled** by default (rather, a no-op tracer is used). You will need to explicitly enable it, as shown in the code snippet above. The screenshot below shows a sample trace of KodeAgent running a task on the Langfuse dashboard:
+Tracing is **disabled** by default (rather, a no-op tracer is used). You will need to explicitly enable it, as shown in the code snippet above. The screenshot below shows a sample trace of KodeAgent running a task on the Langfuse dashboard:
 
 <img width="80%" height="80%" alt="KodeAgent trace on Langfuse dashboard" src="https://github.com/user-attachments/assets/52530ccd-57dd-4be0-afe9-70cdab279a2e" />
 
