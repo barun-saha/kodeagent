@@ -28,8 +28,6 @@
    
    search_wikipedia
    
-   tool
-   
    transcribe_audio
    
    transcribe_youtube

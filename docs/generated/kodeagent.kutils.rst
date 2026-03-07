@@ -12,6 +12,8 @@
    :nosignatures:
 
    
+   build_tool_schema
+   
    call_llm
    
    clean_json_string
@@ -27,6 +29,8 @@
    is_it_url
    
    make_user_message
+   
+   parse_param_descriptions
    
    read_prompt
    

@@ -3,7 +3,6 @@ The FC agent uses native function calling to solve tasks. Some of the data struc
 reproduced here to keep this module self-contained and optimized.
 """
 
-import inspect
 import json
 import logging
 import re
@@ -51,16 +50,6 @@ class AgentResponse(TypedDict):
     """Optional metadata associated with the response."""
 
 
-DATA_TYPES = {
-    int: 'integer',
-    float: 'number',
-    str: 'string',
-    bool: 'boolean',
-    list: 'array',
-    dict: 'object',
-    Any: 'string',
-}
-
 FCA_SYSTEM_PROMPT = ku.read_prompt('system/function_calling.txt')
 
 
@@ -90,6 +79,7 @@ class FunctionCallingAgent:
         loop_detection_threshold: int = 3,
         litellm_params: dict | None = None,
         max_tool_result_chars: int = 3000,
+        full_docstring: bool = False,
     ):
         """Initialize the FunctionCallingAgent.
 
@@ -103,6 +93,8 @@ class FunctionCallingAgent:
             max_tool_result_chars: Maximum number of characters to store in chat history
              for each tool result. Longer results are truncated with a note. Full results
              are preserved separately for final answer preparation.
+            full_docstring: If True, include the full docstring in the tool schema.
+             If False, include only the first line. Default is False to save tokens.
         """
         self.model_name = model_name
         self.tools = tools or []
@@ -112,7 +104,12 @@ class FunctionCallingAgent:
         if 'final_answer' not in tool_names:
             self.tools.append(final_answer)
 
-        self.tool_schemas = [FunctionCallingAgent._build_tool_schema(fn) for fn in self.tools]
+        self.full_docstring: bool = full_docstring
+
+        self.tool_schemas = [
+            ku.build_tool_schema(fn, just_first_line=self.full_docstring, as_text=False)
+            for fn in self.tools
+        ]
         # Exclude final_answer from tool_map — it is executed directly via _execute_tool
         # but its result is extracted separately at the end of the run loop.
         self.tool_map = {fn.__name__: fn for fn in self.tools}
@@ -152,81 +149,6 @@ class FunctionCallingAgent:
             self.task.result = value
 
         return {'type': rtype, 'channel': channel, 'value': value, 'metadata': metadata}
-
-    @staticmethod
-    def _parse_param_descriptions(doc: str) -> dict[str, str]:
-        """Extract per-parameter descriptions from a docstring.
-
-        Supports Google-style (Args:) and Sphinx-style (:param name:) formats.
-
-        Args:
-            doc: The docstring to parse.
-
-        Returns:
-            A dictionary mapping parameter names to their descriptions.
-        """
-        param_docs: dict[str, str] = {}
-        if not doc:
-            return param_docs
-
-        # Google-style: Args: / Parameters: section
-        args_section = re.search(r'(?:Args|Parameters):\s*(.*)', doc, re.DOTALL | re.IGNORECASE)
-        if args_section:
-            args_text = args_section.group(1)
-            for line in args_text.split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
-                match = re.match(r'(\w+)\s*(?:\(.*?\))?\s*:\s*(.*)', line)
-                if match:
-                    param_docs[match.group(1)] = match.group(2).strip()
-
-        # Sphinx-style: :param name: description
-        if not param_docs:
-            for m in re.finditer(r':param\s+(\w+):\s*(.*)', doc):
-                param_docs[m.group(1)] = m.group(2).strip()
-
-        return param_docs
-
-    @staticmethod
-    def _build_tool_schema(fn: Callable) -> dict[str, Any]:
-        """Auto-generate an OpenAI-style tool schema from a Python function.
-
-        Args:
-            fn: The function to build a tool schema for.
-
-        Returns:
-            A dictionary representing the tool schema.
-        """
-        sig = inspect.signature(fn)
-        doc = inspect.getdoc(fn) or ''
-        param_docs = FunctionCallingAgent._parse_param_descriptions(doc)
-
-        params = {}
-        required = []
-
-        for name, param in sig.parameters.items():
-            param_type = DATA_TYPES.get(param.annotation, 'string')
-            description = param_docs.get(name, f'The "{name}" argument ({param_type}).')
-            params[name] = {'type': param_type, 'description': description}
-            if param.default is inspect.Parameter.empty:
-                required.append(name)
-
-        # Use first line only — SLMs lose signal in long descriptions
-        description = doc.splitlines()[0].strip() if doc else f'Function {fn.__name__}'
-
-        return {
-            'type': 'function',
-            'function': {
-                'name': fn.__name__,
-                'description': description,
-                'parameters': {
-                    'type': 'object',
-                    'properties': params,
-                    'required': required,
-                },
-            },
-        }
 
     def _validate_tool_args(self, name: str, args: dict[str, Any]) -> str | None:
         """Validate tool arguments against the schema.
@@ -381,8 +303,7 @@ class FunctionCallingAgent:
 
     @staticmethod
     def _extract_urls(text: str) -> list[str]:
-        """
-        Extract all URLs from a text string.
+        """Extract all URLs from a text string.
 
         Args:
             text: The input text to search for URLs.
@@ -744,7 +665,7 @@ async def main():
             dtools.transcribe_youtube,
             dtools.search_wikipedia,
         ],
-        litellm_params={'temperature': 0, 'timeout': 90},
+        litellm_params={'temperature': 2, 'timeout': 90},
     )
     print(f'Using model: {model_name}')
 

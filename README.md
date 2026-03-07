@@ -195,7 +195,7 @@ KodeAgent is under active development. Capabilities are limited. Use with cautio
 
 ## 🛠️ Tools
 
-KodeAgent comes with the following built-in [tools](src/kodeagent/tools.py):
+A tool in KodeAgent is just a regular (synchronous) Python function. KodeAgent comes with the following built-in [tools](src/kodeagent/tools.py):
 - **`calculator`**: A simple calculator tool to perform basic arithmetic operations. It imports the `ast`, `operator`, and `re` Python libraries.
 - **`download_file`**: A tool to download a file from a given URL. It imports the `requests`, `re`, `tempfile`, `pathlib`, and `urllib.parse` Python libraries.
 - **`extract_as_markdown`**: A tool to read file contents and return as Markdown using MarkItDown. It imports the `re`, `pathlib`, `urllib.parse`, and `markitdown` Python libraries.
@@ -209,20 +209,27 @@ KodeAgent comes with the following built-in [tools](src/kodeagent/tools.py):
 
 Check out the docstrings of these tools in the [tools.py](src/kodeagent/tools.py) module for more details.
 
-To add a new tool, use the `@tool` decorator from `kodeagent.tools` module. For example:
-```python
-from kodeagent import tool
+To add your own custom tools, simply define a Python function and pass it to the agent via the `tools` parameter. For example:
 
-@tool
-def my_tool(param1: str) -> str:
-    """Description of the tool.
-    Args:
-        param1 (str): Description of param1.
-    Returns:
-        str: Description of the return value.
+```python
+def my_custom_tool(text: str) -> str:
     """
-    # Tool implementation here
-    return 'result'
+    A custom tool that does something with the input text and returns a result.
+    
+    Args:
+        text (str): The input text to process.
+        
+    Returns:
+        str: The processed result.
+    """
+    return text
+
+agent = ReActAgent(
+    name='Custom Tool Agent',
+    model_name='gemini/gemini-2.5-flash-lite',
+    tools=[my_custom_tool],
+    max_iterations=5,
+)
 ```
 
 Module imports and all variables should be inside the tool function. If you're using `CodeActAgent`, KodeAgent will execute the tool function in isolation.
