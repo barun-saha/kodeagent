@@ -203,22 +203,24 @@ class FunctionCallingAgent:
             if name not in self.tool_map:
                 result = f'Error: Tool `{name}` is not defined.'
             elif name == FINAL_ANSWER_TOOL_NAME:
-                # Robust extraction for SLMs that might hallucinate arg keys
-                tool_result = args.get('result')
-                if tool_result is None and args:
-                    # Fallback to common synonyms
-                    for syn in ['answer', 'response', 'output', 'reply']:
-                        if syn in args:
-                            tool_result = args[syn]
-                            break
-                    else:
-                        # Final resort: join all values to avoid losing data
-                        tool_result = '\n'.join(f'{k}: {v}' for k, v in args.items())
-
-                if tool_result is None:
-                    result = 'Error: `final_answer` called without a result.'
+                # Robust extraction for SLMs that might hallucinate arg keys (relaxed validation)
+                if not isinstance(args, dict):
+                    result = (
+                        'Error: `final_answer` arguments must be a JSON object'
+                        ' with the key `result`.'
+                    )
                 else:
-                    result = str(tool_result)
+                    tool_result = None
+                    for key in ('result', 'answer', 'response', 'output', 'reply'):
+                        value = args.get(key)
+                        if value is not None:
+                            tool_result = value
+                            break
+
+                    if tool_result is None:
+                        result = 'Error: `final_answer` called without a result.'
+                    else:
+                        result = str(tool_result)
             else:
                 validation_error = self._validate_tool_args(name, args)
                 if validation_error:

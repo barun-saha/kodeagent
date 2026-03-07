@@ -622,9 +622,8 @@ def test_fca_robust_final_answer(fca_agent):
     tool_call.id = 'call_robust_4'
     tool_call.function.arguments = json.dumps({'thought': 'I found it', 'location': 'here'})
     result = fca_agent._execute_tool(tool_call)
-    # The current implementation joins them: 'thought: I found it\nlocation: here'
-    assert 'thought: I found it' in result['content']
-    assert 'location: here' in result['content']
+    assert 'Error:' in result['content']
+    assert 'called without a result' in result['content']
 
     # 5. Completely empty arguments - should still error
     tool_call.id = 'call_robust_5'
