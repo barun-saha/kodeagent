@@ -51,6 +51,7 @@ class AgentResponse(TypedDict):
 
 
 FCA_SYSTEM_PROMPT = ku.read_prompt('system/function_calling.txt')
+FINAL_ANSWER_TOOL_NAME = 'final_answer'
 
 
 def final_answer(result: str) -> str:
@@ -102,7 +103,7 @@ class FunctionCallingAgent:
 
         # Ensure final_answer is always available as a tool
         tool_names = [fn.__name__ for fn in self.tools]
-        if 'final_answer' not in tool_names:
+        if FINAL_ANSWER_TOOL_NAME not in tool_names:
             self.tools.append(final_answer)
 
         self.tool_schemas = [
@@ -553,7 +554,7 @@ class FunctionCallingAgent:
                     channel='tool',
                 )
 
-                if name == 'final_answer':
+                if name == FINAL_ANSWER_TOOL_NAME:
                     self.final_answer_found = True
 
             if self.final_answer_found:
@@ -594,7 +595,7 @@ class FunctionCallingAgent:
         # i.e. no final_answer tool message was found in history
         result = 'No response generated.'
         for msg in reversed(self.chat_history):
-            if msg.get('role') == 'tool' and msg.get('name') == 'final_answer':
+            if msg.get('role') == 'tool' and msg.get('name') == FINAL_ANSWER_TOOL_NAME:
                 # Use the full (untruncated) stored result if available
                 tool_call_id = msg.get('tool_call_id')
                 result = (
