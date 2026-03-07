@@ -15,63 +15,9 @@ from kodeagent.tools import (
     search_arxiv,
     search_web,
     search_wikipedia,
-    tool,
     transcribe_audio,
     transcribe_youtube,
 )
-
-
-class TestToolDecorator:
-    """Tests for the @tool decorator."""
-
-    def test_tool_decorator_adds_metadata(self):
-        """Test that @tool decorator adds required metadata."""
-
-        @tool
-        def sample_func(x: int, y: str) -> str:
-            """Sample function for testing."""
-            return f'{x}-{y}'
-
-        assert hasattr(sample_func, 'name')
-        assert hasattr(sample_func, 'description')
-        assert hasattr(sample_func, 'args_schema')
-        assert sample_func.name == 'sample_func'
-        assert sample_func.description == 'Sample function for testing.'
-
-    def test_tool_decorator_preserves_functionality(self):
-        """Test that decorated function still works correctly."""
-
-        @tool
-        def add(a: int, b: int) -> int:
-            """Add two numbers."""
-            return a + b
-
-        assert add(2, 3) == 5
-
-    def test_tool_decorator_rejects_async_functions(self):
-        """Test that @tool raises error for async functions."""
-        with pytest.raises(ValueError, match='async functions is not supported'):
-
-            @tool
-            async def async_func():
-                """Async function."""
-                pass
-
-    def test_tool_creates_pydantic_schema(self):
-        """Test that tool creates proper Pydantic schema for arguments."""
-
-        @tool
-        def func_with_args(name: str, age: int, active: bool = True) -> str:
-            """Function with multiple arguments."""
-            return f'{name}-{age}-{active}'
-
-        schema = func_with_args.args_schema
-        assert schema is not None
-        # Test that schema can validate correct inputs
-        validated = schema(name='John', age=30, active=False)
-        assert validated.name == 'John'
-        assert validated.age == 30
-        assert validated.active is False
 
 
 class TestCalculator:

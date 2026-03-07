@@ -117,7 +117,7 @@ class Agent(ABC):
         self.model_name: str = model_name
         self.work_dir = work_dir
 
-        self.tools = tools or []
+        self.tools: list[Callable] = tools or []
         self.filter_tools_for_task = filter_tools_for_task
         self.litellm_params: dict = litellm_params or {}
         self.persona = persona
@@ -125,7 +125,7 @@ class Agent(ABC):
         self.max_iterations = max_iterations
         self.max_retries = max_retries
 
-        self.tool_name_to_func = {t.name: t for t in (tools or [])}
+        self.tool_name_to_func = {fn.__name__: fn for fn in self.tools}
         self.tool_names = set(self.tool_name_to_func)
 
         self.task: Task | None = None
@@ -488,34 +488,18 @@ class Agent(ABC):
         """
         # Create a cache key based on the tools being described
         tools_to_describe = tools if tools is not None else self.tools
-        cache_key = frozenset(t.name for t in tools_to_describe)
+        cache_key = frozenset(t.__name__ for t in tools_to_describe)
 
         if cache_key in self._tool_descriptions_cache:
             return self._tool_descriptions_cache[cache_key]
 
         description = ''
-        filtered_tool_names = {t.name for t in tools_to_describe}
+        filtered_tool_names = {t.__name__ for t in tools_to_describe}
 
         for t in self.tools:
-            if t.name in filtered_tool_names:
-                description += f'\n### Tool: {t.name}\n'
-                description += f'**Description:** {t.description}\n'
-
-                # Extract and highlight required parameters
-                if hasattr(t, 'args_schema') and t.args_schema:
-                    schema = t.args_schema.model_json_schema()
-                    properties = schema.get('properties', {})
-                    required = schema.get('required', [])
-
-                    if properties:
-                        description += '\n**Parameters:**\n'
-                        for param_name, param_info in properties.items():
-                            param_type = param_info.get('type', 'any')
-                            is_required = param_name in required
-                            req_marker = '**REQUIRED**' if is_required else 'Optional'
-                            description += f'  - `{param_name}` ({param_type}): {req_marker}\n'
-
-                description += '\n---\n\n'
+            if t.__name__ in filtered_tool_names:
+                description += ku.build_tool_schema(t, just_first_line=False, as_text=True)
+                description += '\n---\n'
 
         self._tool_descriptions_cache[cache_key] = description
         return description
@@ -656,7 +640,7 @@ class ReActAgent(Agent):
         )
 
         if tools:
-            logger.info('Created agent: %s; tools: %s', name, [t.name for t in tools])
+            logger.info('Created agent: %s; tools: %s', name, [t.__name__ for t in tools])
 
         self._history_formatter = ReActHistoryFormatter()
 

@@ -152,15 +152,14 @@ async def _run_examples_async(
 
     if atype == 'codeact':
         agent = _make_code_agent()
-        await _run_with_agent(agent)
     elif atype == 'react':
         agent = _make_react_agent()
-        await _run_with_agent(agent)
     elif atype == 'fca':
         agent = _make_fca_agent()
-        await _run_with_agent(agent)
     else:
         raise ValueError(f'Unknown agent_type: {agent_type}')
+
+    await _run_with_agent(agent)
 
 
 async def run_examples(
@@ -183,7 +182,7 @@ async def run_examples(
 if __name__ == '__main__':
     os.environ['PYTHONUTF8'] = '1'
     # Simple CLI handling for demo purposes
-    selected_atype = 'fca'
+    selected_atype = 'react'
 
     if len(sys.argv) > 1:
         for arg in sys.argv[1:]:

@@ -377,7 +377,7 @@ class TestTracingIntegration:
     async def test_react_agent_act_tracing(self, mock_tracer_manager: MagicMock) -> None:
         """Verify ReActAgent._act creates spans for tool execution."""
         mock_tool = MagicMock()
-        mock_tool.name = 'tool1'
+        mock_tool.__name__ = 'tool1'
         mock_tool.return_value = 'result'
 
         agent = ReActAgent(name='test', model_name='m', tools=[mock_tool])

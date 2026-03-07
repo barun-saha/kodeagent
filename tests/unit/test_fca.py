@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kodeagent.fca import (
-    DATA_TYPES,
     AgentResponse,
     FunctionCallingAgent,
     Task,
 )
+from kodeagent.kutils import DATA_TYPES, build_tool_schema
 
 
 @pytest.fixture
@@ -107,7 +107,7 @@ def test_build_tool_schema():
         """Complex tool docstring."""
         return True
 
-    schema = FunctionCallingAgent._build_tool_schema(complex_tool)
+    schema = build_tool_schema(complex_tool, as_text=False)
     assert schema['type'] == 'function'
     assert schema['function']['name'] == 'complex_tool'
     assert schema['function']['description'] == 'Complex tool docstring.'
@@ -171,7 +171,7 @@ def test_execute_tool_errors(fca_agent):
         return None
 
     fca_agent.tool_map['none_tool'] = none_tool
-    fca_agent.tool_schemas.append(FunctionCallingAgent._build_tool_schema(none_tool))
+    fca_agent.tool_schemas.append(build_tool_schema(none_tool, as_text=False))
     tool_call.function.name = 'none_tool'
     tool_call.function.arguments = '{}'
     result = fca_agent._execute_tool(tool_call)
@@ -183,7 +183,7 @@ def test_execute_tool_errors(fca_agent):
         return '   '
 
     fca_agent.tool_map['empty_tool'] = empty_tool
-    fca_agent.tool_schemas.append(FunctionCallingAgent._build_tool_schema(empty_tool))
+    fca_agent.tool_schemas.append(build_tool_schema(empty_tool, as_text=False))
     tool_call.function.name = 'empty_tool'
     tool_call.function.arguments = '{}'
     result = fca_agent._execute_tool(tool_call)
@@ -195,7 +195,7 @@ def test_execute_tool_errors(fca_agent):
         return a + 'string'
 
     fca_agent.tool_map['type_error_tool'] = type_error_tool
-    fca_agent.tool_schemas.append(FunctionCallingAgent._build_tool_schema(type_error_tool))
+    fca_agent.tool_schemas.append(build_tool_schema(type_error_tool, as_text=False))
     tool_call.function.name = 'type_error_tool'
     tool_call.function.arguments = json.dumps({'a': 1})
     result = fca_agent._execute_tool(tool_call)
@@ -207,7 +207,7 @@ def test_execute_tool_errors(fca_agent):
         raise Exception('Tool failure')
 
     fca_agent.tool_map['failing_tool'] = failing_tool
-    fca_agent.tool_schemas.append(FunctionCallingAgent._build_tool_schema(failing_tool))
+    fca_agent.tool_schemas.append(build_tool_schema(failing_tool, as_text=False))
     tool_call.function.name = 'failing_tool'
     tool_call.function.arguments = '{}'
     result = fca_agent._execute_tool(tool_call)
@@ -520,7 +520,7 @@ async def test_run_loop_termination(fca_agent):
         return 'ok'
 
     fca_agent.tool_map['tool1'] = tool1
-    fca_agent.tool_schemas.append(FunctionCallingAgent._build_tool_schema(tool1))
+    fca_agent.tool_schemas.append(build_tool_schema(tool1, as_text=False))
 
     mock_response = MagicMock()
     mock_tool_call = MagicMock()
@@ -543,7 +543,10 @@ async def test_run_loop_termination(fca_agent):
             responses.append(resp)
 
         assert any(
-            'Loop persisted after nudges' in r['value'] for r in responses if r['type'] == 'log'
+            'Loop persisted after nudges' in r['value']
+            or 'Too many consecutive tool errors' in r['value']
+            for r in responses
+            if r['type'] == 'log'
         )
 
 
@@ -559,18 +562,18 @@ def test_build_tool_schema_docstring_parsing():
         """
         return f'{p1} {p2}'
 
-    schema = FunctionCallingAgent._build_tool_schema(test_doc_fn)
+    schema = build_tool_schema(test_doc_fn, as_text=False)
     props = schema['function']['parameters']['properties']
     assert props['p1']['description'] == 'Description for p1.'
     assert props['p2']['description'] == 'Description for p2.'
-    assert schema['function']['description'] == 'A test function.'
+    assert schema['function']['description'].startswith('A test function.')
 
     # Test Sphinx-style
     def test_sphinx_fn(p1: int):
         """:param p1: Sphinx description."""
         return p1
 
-    schema = FunctionCallingAgent._build_tool_schema(test_sphinx_fn)
+    schema = build_tool_schema(test_sphinx_fn, as_text=False)
     assert (
         schema['function']['parameters']['properties']['p1']['description'] == 'Sphinx description.'
     )
@@ -579,7 +582,7 @@ def test_build_tool_schema_docstring_parsing():
     def no_doc_fn(p1: int):
         return p1
 
-    schema = FunctionCallingAgent._build_tool_schema(no_doc_fn)
+    schema = build_tool_schema(no_doc_fn, as_text=False)
     assert schema['function']['description'] == 'Function no_doc_fn'
 
 

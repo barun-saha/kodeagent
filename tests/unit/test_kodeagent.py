@@ -29,7 +29,6 @@ from kodeagent.tools import (
     calculator,
     download_file,
     search_web,
-    tool,
 )
 
 MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
@@ -48,7 +47,6 @@ MOCK_LLM_RESPONSES = {
 }
 
 
-@tool
 def dummy_tool_one(param1: str) -> str:
     """Description for dummy tool one."""
     return f'tool one executed with {param1}'
@@ -232,7 +230,6 @@ async def test_react_agent_max_iterations_param(react_agent):
 async def test_react_agent_run_with_tool_error():
     """Test ReActAgent handling tool execution errors."""
 
-    @tool
     def broken_tool(param1: str) -> str:
         """A tool that always fails."""
         raise Exception('Tool error')
@@ -319,7 +316,7 @@ def test_get_tools_description_caching(react_agent):
     assert len(react_agent._tool_descriptions_cache) == 1
 
     # Grab the key
-    cache_key = frozenset(t.name for t in react_agent.tools)
+    cache_key = frozenset(t.__name__ for t in react_agent.tools)
     assert cache_key in react_agent._tool_descriptions_cache
 
     # Manually modify cache to prove it's being used
@@ -335,7 +332,7 @@ def test_get_tools_description_caching(react_agent):
     desc_subset = react_agent.get_tools_description(tools=subset)
     assert len(react_agent._tool_descriptions_cache) == 2
     assert desc_subset != 'CACHED_DESCRIPTION'
-    assert react_agent.tools[0].name in desc_subset
+    assert react_agent.tools[0].__name__ in desc_subset
 
 
 def test_clear_history(react_agent):

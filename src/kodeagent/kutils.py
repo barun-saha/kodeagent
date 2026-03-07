@@ -3,10 +3,12 @@ This module will be copied along with code for CodeAgent, so keep it minimum.
 """
 
 import base64
+import inspect
 import logging
 import mimetypes
 import os
 import re
+from collections.abc import Callable
 from typing import Any
 
 import litellm
@@ -23,6 +25,15 @@ from tenacity import (
 
 from .usage_tracker import UsageMetrics
 
+DATA_TYPES = {
+    int: 'integer',
+    float: 'number',
+    str: 'string',
+    bool: 'boolean',
+    list: 'array',
+    dict: 'object',
+    Any: 'string',
+}
 DEFAULT_MAX_LLM_RETRIES = 3
 LOGGERS_TO_SUPPRESS = [
     'asyncio',
@@ -433,3 +444,96 @@ def clean_json_string(json_str: str) -> str:
     json_str = json_str.replace("\\'", "'")  # Fix over-escaped single quotes
 
     return json_str.strip()
+
+
+def parse_param_descriptions(doc: str) -> dict[str, str]:
+    """Extract per-parameter descriptions from a docstring.
+
+    Supports Google-style (Args:) and Sphinx-style (:param name:) formats.
+
+    Args:
+        doc: The docstring to parse.
+
+    Returns:
+        A dictionary mapping parameter names to their descriptions.
+    """
+    param_docs: dict[str, str] = {}
+    if not doc:
+        return param_docs
+
+    # Google-style: Args: / Parameters: section
+    args_section = re.search(r'(?:Args|Parameters):\s*(.*)', doc, re.DOTALL | re.IGNORECASE)
+    if args_section:
+        args_text = args_section.group(1)
+        for line in args_text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            match = re.match(r'(\w+)\s*(?:\(.*?\))?\s*:\s*(.*)', line)
+            if match:
+                param_docs[match.group(1)] = match.group(2).strip()
+
+    # Sphinx-style: :param name: description
+    if not param_docs:
+        for m in re.finditer(r':param\s+(\w+):\s*(.*)', doc):
+            param_docs[m.group(1)] = m.group(2).strip()
+
+    return param_docs
+
+
+def build_tool_schema(
+    fn: Callable, just_first_line: bool = False, as_text: bool = True
+) -> dict[str, Any] | str:
+    """Auto-generate an OpenAI-style tool schema from a Python function.
+
+    Args:
+        fn: The function to build a tool schema for.
+        just_first_line: Whether to use only the first line of the docstring for the description.
+        as_text: Whether to return the schema as a formatted text instead of a dictionary.
+
+    Returns:
+        A dictionary representing the tool schema. Or a formatted text if `as_text` is True.
+    """
+    sig = inspect.signature(fn)
+    doc = inspect.getdoc(fn) or ''
+    param_docs = parse_param_descriptions(doc)
+
+    params = {}
+    required = []
+
+    for name, param in sig.parameters.items():
+        param_type = DATA_TYPES.get(param.annotation, 'string')
+        description = param_docs.get(name, f'The "{name}" argument ({param_type}).')
+        params[name] = {'type': param_type, 'description': description}
+        if param.default is inspect.Parameter.empty:
+            required.append(name)
+
+    if just_first_line:
+        # Use first line only — SLMs lose signal in long descriptions
+        description = doc.splitlines()[0].strip() if doc else f'Function {fn.__name__}'
+    else:
+        description = doc.strip() if doc else f'Function {fn.__name__}'
+
+    if not as_text:
+        return {
+            'type': 'function',
+            'function': {
+                'name': fn.__name__,
+                'description': description,
+                'parameters': {
+                    'type': 'object',
+                    'properties': params,
+                    'required': required,
+                },
+            },
+        }
+
+    # Format as a string for better readability in prompts (optional)
+    formatted_desc = f'### Tool: {fn.__name__}\n**Description:** {description}'
+    formatted_desc += '\n\n**Parameters:**\n'
+
+    for name, info in params.items():
+        req = '**REQUIRED**' if name in required else 'Optional'
+        formatted_desc += f'- `{name}` ({info["type"]}): {req}\n'
+
+    return formatted_desc

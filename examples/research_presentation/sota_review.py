@@ -4,10 +4,9 @@ Set `PEXEL_API_KEY` environment variable to use images in the slides.
 """
 
 from kodeagent import ReActAgent, print_response
-from kodeagent.tools import search_arxiv, tool
+from kodeagent.tools import search_arxiv
 
 
-@tool
 def generate_powerpoint_slide_deck(topic_or_contents: str) -> str:
     """Create a PowerPoint presentation (.pptx file) on the given topic and return the file path.
     `topic_or_contents` can be a short text describing a specific topic. Alternatively, it can
@@ -61,8 +60,5 @@ async def main():
 
 if __name__ == '__main__':
     import asyncio
-
-    if hasattr(asyncio, 'WindowsSelectorEventLoopPolicy'):
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     asyncio.run(main())

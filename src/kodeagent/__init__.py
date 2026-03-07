@@ -26,7 +26,6 @@ from .tools import (
     search_arxiv,
     search_web,
     search_wikipedia,
-    tool,
     transcribe_audio,
     transcribe_youtube,
 )
@@ -64,7 +63,6 @@ __all__ = [
     'search_arxiv',
     'search_web',
     'search_wikipedia',
-    'tool',
 ]
 
 

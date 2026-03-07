@@ -1,17 +1,10 @@
-"""This module defines the `tool` decorator and a set of built-in tools for KodeAgent.
+"""This module defines a set of built-in tools for KodeAgent.
 All tools import necessary dependencies within their function bodies to ensure they are
 self-contained and can operate in isolated environments. Similarly, all variables are declared
 locally within the functions.
 """
 
-import asyncio
-import inspect
-import textwrap
-from collections.abc import Callable
-from functools import wraps
 from typing import Any
-
-import pydantic as pyd
 
 DEFAULT_TOOLS_IMPORTS = [
     'ast',
@@ -36,46 +29,6 @@ DEFAULT_TOOLS_IMPORTS = [
 """List of default modules (stdlib and third-party) to be available in tools."""
 
 
-def tool(func: Callable) -> Callable:
-    """A decorator to convert any Python function into a tool with additional metadata.
-    Tooling based on async functions is not supported.
-
-    Args:
-        func (Callable): The function to be converted into a tool.
-
-    Returns:
-        Callable: The decorated function with additional metadata.
-    """
-    if asyncio.iscoroutinefunction(func):
-        raise ValueError(
-            'Tooling based on async functions is not supported. Please remove `async` from'
-            f' the signature of the `{func.__name__}` function or remove the `@tool` decorator.'
-        )
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-
-    signature = inspect.signature(func)
-    fields = {}
-
-    for name, param in signature.parameters.items():
-        if param.default is inspect.Parameter.empty:
-            # Required parameter: (Type, ...)
-            fields[name] = (param.annotation, ...)
-        else:
-            # Optional parameter: (Type, default_value)
-            fields[name] = (param.annotation, param.default)
-
-    # Add metadata to the function
-    wrapper.name = func.__name__
-    wrapper.description = textwrap.dedent(func.__doc__).strip() if func.__doc__ else ''
-    wrapper.args_schema = pyd.create_model(func.__name__, **fields)
-
-    return wrapper
-
-
-@tool
 def calculator(expression: str) -> float | None:
     """Evaluate a single arithmetic expression and return the numeric result.
     Call this tool once per arithmetic operation. Do NOT try to compute
@@ -144,7 +97,6 @@ def calculator(expression: str) -> float | None:
         return None
 
 
-@tool
 def search_web(query: str, max_results: int = 10) -> str:
     """Search the web using DuckDuckGo and return top results with titles and URLs.
     Use this to find current information, news, or general web content.
@@ -237,7 +189,6 @@ def search_web(query: str, max_results: int = 10) -> str:
         return f'ERROR: Search failed - {error_msg}'
 
 
-@tool
 def download_file(url: str, save_name: str | None = None, save_dir: str | None = None) -> dict:
     """Download a file from the internet and save it locally.
     Use this for downloading images, PDFs, data files, or any binary content.
@@ -451,7 +402,6 @@ def download_file(url: str, save_name: str | None = None, save_dir: str | None =
         return result
 
 
-@tool
 def extract_as_markdown(url_or_path: str, max_length: int | None = None) -> str:
     """Extract content from documents (PDF, DOCX, XLSX, PPTX) as Markdown text.
     Works with both URLs and local file paths.
@@ -636,7 +586,6 @@ def extract_as_markdown(url_or_path: str, max_length: int | None = None) -> str:
         return f'ERROR: {error_type} - {str(e)}'
 
 
-@tool
 def read_webpage(url: str, max_length: int = 50000) -> str:
     """Fetch and return the main text content from an HTML webpage as clean Markdown.
     Use this after search_web to read articles, blogs, or documentation.
@@ -861,7 +810,6 @@ def read_webpage(url: str, max_length: int = 50000) -> str:
         return f'ERROR: Unexpected error - {type(e).__name__}: {str(e)}'
 
 
-@tool
 def search_wikipedia(query: str, max_results: int | None = 3) -> str:
     """Search Wikipedia (only) and return the top search results as Markdown text.
     The input should be a search query. The output will contain the title, summary, and link
@@ -894,7 +842,6 @@ def search_wikipedia(query: str, max_results: int | None = 3) -> str:
         return f'DisambiguationError: Please select an option from {", ".join(de.options)}'
 
 
-@tool
 def search_arxiv(query: str, max_results: int = 5) -> str:
     """Search for academic papers on arXiv.org. The input is a search query.
     This tool is highly specialized and should be used exclusively for
@@ -936,7 +883,6 @@ def search_arxiv(query: str, max_results: int = 5) -> str:
         return f'An error occurred during the arXiv search: {str(e)}'
 
 
-@tool
 def transcribe_youtube(video_id: str) -> str:
     """Get the transcript or subtitles for a YouTube video by its video ID.
     The video ID is the part after '?v=' in the URL.
@@ -967,7 +913,6 @@ def transcribe_youtube(video_id: str) -> str:
     return transcript_text
 
 
-@tool
 def transcribe_audio(file_path: str) -> Any:
     """Convert audio files to text using OpenAI's Whisper model via Fireworks API.
     The input should be a path to an audio file (e.g., .mp3, .wav, .flac).
@@ -1002,10 +947,12 @@ def transcribe_audio(file_path: str) -> Any:
 
         return f'Audio transcription error: {response.status_code}: {response.text}'
     except ImportError:
-        return 'Audio transcription error: `requests` library not found. Please install it with `pip install requests`.'
+        return (
+            'Audio transcription error: `requests` library not found.'
+            ' Please install it with `pip install requests`.'
+        )
 
 
-@tool
 def generate_image(prompt: str, model_name: str) -> str:
     """Generate an image based on a text prompt using the specified model.
     It returns the image URL or the file path of the generated image.
