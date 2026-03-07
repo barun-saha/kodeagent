@@ -3,6 +3,7 @@ The FC agent uses native function calling to solve tasks. Some of the data struc
 reproduced here to keep this module self-contained and optimized.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -81,6 +82,7 @@ class FunctionCallingAgent:
         litellm_params: dict | None = None,
         max_tool_result_chars: int = 3000,
         one_line_doc: bool = True,
+        tool_timeout: float = 30.0,
     ):
         """Initialize the FunctionCallingAgent.
 
@@ -97,6 +99,8 @@ class FunctionCallingAgent:
             one_line_doc: If True, use only the first line of the tool's docstring for the schema.
              This can help reduce token usage for SLMs. If False, the full docstring is used,
              which may provide more context but at the cost of more tokens.
+            tool_timeout: Seconds to wait for a single tool call before cancelling it and
+             returning an error result. Default is 30.0.
         """
         self.model_name = model_name
         self.tools = tools or []
@@ -115,6 +119,7 @@ class FunctionCallingAgent:
         self.tool_map = {fn.__name__: fn for fn in self.tools}
 
         self.litellm_params = litellm_params
+        self.tool_timeout = tool_timeout
         self.system_prompt = system_prompt
         self.chat_history: list[dict[str, Any]] = []
 
@@ -184,7 +189,7 @@ class FunctionCallingAgent:
 
         return None
 
-    def _execute_tool(self, tool_call: Any) -> dict[str, str]:
+    async def _execute_tool(self, tool_call: Any) -> dict[str, str]:
         """Safely executes a specific tool call and returns the message object.
 
         Args:
@@ -226,7 +231,13 @@ class FunctionCallingAgent:
                 if validation_error:
                     result = validation_error
                 else:
-                    tool_result = self.tool_map[name](**args)
+                    fn = self.tool_map[name]
+                    loop = asyncio.get_running_loop()
+                    if asyncio.iscoroutinefunction(fn):
+                        coro = fn(**args)
+                    else:
+                        coro = loop.run_in_executor(None, lambda: fn(**args))
+                    tool_result = await asyncio.wait_for(coro, timeout=self.tool_timeout)
                     if tool_result is None:
                         result = (
                             f'Error: Tool `{name}` returned no result. '
@@ -244,6 +255,8 @@ class FunctionCallingAgent:
             result = 'Error: Model provided malformed JSON arguments.'
         except TypeError as e:
             result = f'Error: Wrong arguments passed to `{name}`: {str(e)}'
+        except asyncio.TimeoutError:
+            result = f'Error: Tool `{name}` timed out after {self.tool_timeout}s.'
         except Exception as e:
             result = f'Error executing `{name}`: {str(e)}'
 
@@ -551,7 +564,7 @@ class FunctionCallingAgent:
                         ),
                     }
                 else:
-                    tool_result_message = self._execute_tool(tool_call)
+                    tool_result_message = await self._execute_tool(tool_call)
                     raw_content = tool_result_message['content']
 
                     if not raw_content.startswith('Error:'):
