@@ -212,9 +212,17 @@ Check out the docstrings of these tools in the [tools.py](src/kodeagent/tools.py
 To add your own custom tools, simply define a Python function and pass it to the agent via the `tools` parameter. For example:
 
 ```python
-def my_custom_tool(input1, input2):
-    # Your tool logic here
-    return result
+def my_custom_tool(text: str) -> str:
+    """
+    A custom tool that does something with the input text and returns a result.
+    
+    Args:
+        text (str): The input text to process.
+        
+    Returns:
+        str: The processed result.
+    """
+    return text
 
 agent = ReActAgent(
     name='Custom Tool Agent',
