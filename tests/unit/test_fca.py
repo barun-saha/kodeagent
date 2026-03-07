@@ -122,21 +122,23 @@ def test_build_tool_schema():
     assert 'z' not in params['required']
 
 
-def test_execute_tool_success(fca_agent):
+@pytest.mark.asyncio
+async def test_execute_tool_success(fca_agent):
     """Test successful tool execution."""
     tool_call = MagicMock()
     tool_call.id = 'call_1'
     tool_call.function.name = 'dummy_tool'
     tool_call.function.arguments = json.dumps({'a': 10, 'b': 'hello'})
 
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert result['tool_call_id'] == 'call_1'
     assert result['role'] == 'tool'
     assert result['name'] == 'dummy_tool'
     assert 'Result: 10, hello' in result['content']
 
 
-def test_execute_tool_errors(fca_agent):
+@pytest.mark.asyncio
+async def test_execute_tool_errors(fca_agent):
     """Test tool execution error cases."""
     # 1. Undefined tool
     tool_call = MagicMock()
@@ -144,25 +146,25 @@ def test_execute_tool_errors(fca_agent):
     tool_call.function.name = 'non_existent_tool'
     tool_call.function.arguments = '{}'
 
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert 'Error: Tool `non_existent_tool` is not defined.' in result['content']
 
     # 2. Malformed JSON arguments
     tool_call.function.name = 'dummy_tool'
     tool_call.function.arguments = '{invalid_json}'
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert 'Error: Model provided malformed JSON arguments.' in result['content']
 
     # 3. Missing required arguments
     tool_call.function.name = 'dummy_tool'
     tool_call.function.arguments = '{}'
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert "Error: Missing required arguments for `dummy_tool`: ['a']." in result['content']
 
     # 4. Unexpected arguments
     tool_call.function.name = 'dummy_tool'
     tool_call.function.arguments = json.dumps({'a': 1, 'unexpected': True})
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert "Error: Unexpected arguments for `dummy_tool`: ['unexpected']." in result['content']
 
     # 5. None result handling
@@ -174,7 +176,7 @@ def test_execute_tool_errors(fca_agent):
     fca_agent.tool_schemas.append(build_tool_schema(none_tool, as_text=False))
     tool_call.function.name = 'none_tool'
     tool_call.function.arguments = '{}'
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert 'Error: Tool `none_tool` returned no result.' in result['content']
 
     # 6. Empty string result handling
@@ -186,7 +188,7 @@ def test_execute_tool_errors(fca_agent):
     fca_agent.tool_schemas.append(build_tool_schema(empty_tool, as_text=False))
     tool_call.function.name = 'empty_tool'
     tool_call.function.arguments = '{}'
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert 'Error: Tool `empty_tool` returned an empty result.' in result['content']
 
     # 7. TypeError during execution
@@ -198,7 +200,7 @@ def test_execute_tool_errors(fca_agent):
     fca_agent.tool_schemas.append(build_tool_schema(type_error_tool, as_text=False))
     tool_call.function.name = 'type_error_tool'
     tool_call.function.arguments = json.dumps({'a': 1})
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert 'Error: Wrong arguments passed to `type_error_tool`' in result['content']
 
     # 8. Exception during execution
@@ -210,14 +212,14 @@ def test_execute_tool_errors(fca_agent):
     fca_agent.tool_schemas.append(build_tool_schema(failing_tool, as_text=False))
     tool_call.function.name = 'failing_tool'
     tool_call.function.arguments = '{}'
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert 'Error executing `failing_tool`: Tool failure' in result['content']
 
     # 9. Tool with no schema (covers line 250)
     fca_agent.tool_map['no_schema_tool'] = lambda: 'ok from map'
     tool_call.function.name = 'no_schema_tool'
     tool_call.function.arguments = '{}'
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert 'ok from map' in result['content']
 
 
@@ -595,7 +597,8 @@ def test_build_tool_schema_docstring_parsing():
     assert schema['function']['description'] == 'Function no_doc_fn'
 
 
-def test_fca_robust_final_answer(fca_agent):
+@pytest.mark.asyncio
+async def test_fca_robust_final_answer(fca_agent):
     """Test robust final_answer handling for SLMs."""
     # 1. Extra arguments should be ignored
     tool_call = MagicMock()
@@ -603,32 +606,32 @@ def test_fca_robust_final_answer(fca_agent):
     tool_call.function.name = 'final_answer'
     tool_call.function.arguments = json.dumps({'result': 'Correct Answer', 'reason': 'Because...'})
 
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert result['content'] == 'Correct Answer'
 
     # 2. Missing 'result' but having a synonym ('answer')
     tool_call.id = 'call_robust_2'
     tool_call.function.arguments = json.dumps({'answer': 'Synonym Answer'})
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert result['content'] == 'Synonym Answer'
 
     # 3. Missing 'result' but having a synonym ('response')
     tool_call.id = 'call_robust_3'
     tool_call.function.arguments = json.dumps({'response': 'Another Synonym'})
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert result['content'] == 'Another Synonym'
 
     # 4. No result or synonym, but some arguments - fallback to joining all
     tool_call.id = 'call_robust_4'
     tool_call.function.arguments = json.dumps({'thought': 'I found it', 'location': 'here'})
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert 'Error:' in result['content']
     assert 'called without a result' in result['content']
 
     # 5. Completely empty arguments - should still error
     tool_call.id = 'call_robust_5'
     tool_call.function.arguments = '{}'
-    result = fca_agent._execute_tool(tool_call)
+    result = await fca_agent._execute_tool(tool_call)
     assert 'Error: `final_answer` called without a result.' in result['content']
 
 
