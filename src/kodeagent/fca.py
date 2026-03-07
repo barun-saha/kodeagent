@@ -202,6 +202,25 @@ class FunctionCallingAgent:
 
             if name not in self.tool_map:
                 result = f'Error: Tool `{name}` is not defined.'
+            elif name == FINAL_ANSWER_TOOL_NAME:
+                # Robust extraction for SLMs that might hallucinate arg keys (relaxed validation)
+                if not isinstance(args, dict):
+                    result = (
+                        'Error: `final_answer` arguments must be a JSON object'
+                        ' with the key `result`.'
+                    )
+                else:
+                    tool_result = None
+                    for key in ('result', 'answer', 'response', 'output', 'reply'):
+                        value = args.get(key)
+                        if value is not None:
+                            tool_result = value
+                            break
+
+                    if tool_result is None:
+                        result = 'Error: `final_answer` called without a result.'
+                    else:
+                        result = str(tool_result)
             else:
                 validation_error = self._validate_tool_args(name, args)
                 if validation_error:
@@ -345,9 +364,7 @@ class FunctionCallingAgent:
         else:
             task_description = f'## New Task:\n{task_desc}'
 
-        user_task_msg = ku.combine_user_messages(
-            ku.make_user_message(task_description, task_files)
-        )
+        user_task_msg = ku.combine_user_messages(ku.make_user_message(task_description, task_files))
         self.nudge_count = 0
         self.task = Task(description=task_desc, id=task_id, result=None, steps_taken=None)
         self.chat_history = [
@@ -686,12 +703,12 @@ async def main():
             [
                 'https://cdn.prod.website-files.com/61a05ff14c09ecacc06eec05'
                 '/66e8522cbe3d357b8434826a_ai-agents.jpg'
-            ]
+            ],
         ),
         (
             'Find the current stock price of NVIDIA & calculate how many shares'
             ' I can buy with $5000.',
-            None
+            None,
         ),
         (
             'Get the transcript of this YouTube video: https://www.youtube.com/watch?v=aircAruvnKk'
