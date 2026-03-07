@@ -107,7 +107,8 @@ class FunctionCallingAgent:
         self.full_docstring: bool = full_docstring
 
         self.tool_schemas = [
-            ku.build_tool_schema(fn, self.full_docstring, as_text=False) for fn in self.tools
+            ku.build_tool_schema(fn, just_first_line=self.full_docstring, as_text=False)
+            for fn in self.tools
         ]
         # Exclude final_answer from tool_map — it is executed directly via _execute_tool
         # but its result is extracted separately at the end of the run loop.
