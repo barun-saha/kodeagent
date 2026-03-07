@@ -79,7 +79,7 @@ class FunctionCallingAgent:
         loop_detection_threshold: int = 3,
         litellm_params: dict | None = None,
         max_tool_result_chars: int = 3000,
-        full_docstring: bool = False,
+        one_line_doc: bool = True,
     ):
         """Initialize the FunctionCallingAgent.
 
@@ -93,8 +93,9 @@ class FunctionCallingAgent:
             max_tool_result_chars: Maximum number of characters to store in chat history
              for each tool result. Longer results are truncated with a note. Full results
              are preserved separately for final answer preparation.
-            full_docstring: If True, include the full docstring in the tool schema.
-             If False, include only the first line. Default is False to save tokens.
+            one_line_doc: If True, use only the first line of the tool's docstring for the schema.
+             This can help reduce token usage for SLMs. If False, the full docstring is used,
+             which may provide more context but at the cost of more tokens.
         """
         self.model_name = model_name
         self.tools = tools or []
@@ -104,10 +105,8 @@ class FunctionCallingAgent:
         if 'final_answer' not in tool_names:
             self.tools.append(final_answer)
 
-        self.full_docstring: bool = full_docstring
-
         self.tool_schemas = [
-            ku.build_tool_schema(fn, just_first_line=self.full_docstring, as_text=False)
+            ku.build_tool_schema(fn, just_first_line=one_line_doc, as_text=False)
             for fn in self.tools
         ]
         # Exclude final_answer from tool_map — it is executed directly via _execute_tool
