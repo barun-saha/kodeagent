@@ -202,6 +202,23 @@ class FunctionCallingAgent:
 
             if name not in self.tool_map:
                 result = f'Error: Tool `{name}` is not defined.'
+            elif name == FINAL_ANSWER_TOOL_NAME:
+                # Robust extraction for SLMs that might hallucinate arg keys
+                tool_result = args.get('result')
+                if tool_result is None and args:
+                    # Fallback to common synonyms
+                    for syn in ['answer', 'response', 'output', 'reply']:
+                        if syn in args:
+                            tool_result = args[syn]
+                            break
+                    else:
+                        # Final resort: join all values to avoid losing data
+                        tool_result = '\n'.join(f'{k}: {v}' for k, v in args.items())
+
+                if tool_result is None:
+                    result = 'Error: `final_answer` called without a result.'
+                else:
+                    result = str(tool_result)
             else:
                 validation_error = self._validate_tool_args(name, args)
                 if validation_error:
@@ -345,9 +362,7 @@ class FunctionCallingAgent:
         else:
             task_description = f'## New Task:\n{task_desc}'
 
-        user_task_msg = ku.combine_user_messages(
-            ku.make_user_message(task_description, task_files)
-        )
+        user_task_msg = ku.combine_user_messages(ku.make_user_message(task_description, task_files))
         self.nudge_count = 0
         self.task = Task(description=task_desc, id=task_id, result=None, steps_taken=None)
         self.chat_history = [
@@ -686,12 +701,12 @@ async def main():
             [
                 'https://cdn.prod.website-files.com/61a05ff14c09ecacc06eec05'
                 '/66e8522cbe3d357b8434826a_ai-agents.jpg'
-            ]
+            ],
         ),
         (
             'Find the current stock price of NVIDIA & calculate how many shares'
             ' I can buy with $5000.',
-            None
+            None,
         ),
         (
             'Get the transcript of this YouTube video: https://www.youtube.com/watch?v=aircAruvnKk'

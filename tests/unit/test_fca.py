@@ -595,6 +595,44 @@ def test_build_tool_schema_docstring_parsing():
     assert schema['function']['description'] == 'Function no_doc_fn'
 
 
+def test_fca_robust_final_answer(fca_agent):
+    """Test robust final_answer handling for SLMs."""
+    # 1. Extra arguments should be ignored
+    tool_call = MagicMock()
+    tool_call.id = 'call_robust_1'
+    tool_call.function.name = 'final_answer'
+    tool_call.function.arguments = json.dumps({'result': 'Correct Answer', 'reason': 'Because...'})
+
+    result = fca_agent._execute_tool(tool_call)
+    assert result['content'] == 'Correct Answer'
+
+    # 2. Missing 'result' but having a synonym ('answer')
+    tool_call.id = 'call_robust_2'
+    tool_call.function.arguments = json.dumps({'answer': 'Synonym Answer'})
+    result = fca_agent._execute_tool(tool_call)
+    assert result['content'] == 'Synonym Answer'
+
+    # 3. Missing 'result' but having a synonym ('response')
+    tool_call.id = 'call_robust_3'
+    tool_call.function.arguments = json.dumps({'response': 'Another Synonym'})
+    result = fca_agent._execute_tool(tool_call)
+    assert result['content'] == 'Another Synonym'
+
+    # 4. No result or synonym, but some arguments - fallback to joining all
+    tool_call.id = 'call_robust_4'
+    tool_call.function.arguments = json.dumps({'thought': 'I found it', 'location': 'here'})
+    result = fca_agent._execute_tool(tool_call)
+    # The current implementation joins them: 'thought: I found it\nlocation: here'
+    assert 'thought: I found it' in result['content']
+    assert 'location: here' in result['content']
+
+    # 5. Completely empty arguments - should still error
+    tool_call.id = 'call_robust_5'
+    tool_call.function.arguments = '{}'
+    result = fca_agent._execute_tool(tool_call)
+    assert 'Error: `final_answer` called without a result.' in result['content']
+
+
 @pytest.mark.asyncio
 async def test_main_function():
     """Test main() function wrapper."""
