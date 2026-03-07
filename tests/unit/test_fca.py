@@ -322,13 +322,20 @@ async def test_run_init(fca_agent):
     assert fca_agent.chat_history[0]['content'] == 'Test prompt'
 
     # 2. Empty task error
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='Task description cannot be empty'):
         await fca_agent._run_init('', use_planning=False)
+
+    # 2b. Invalid task_files type (covers line 337)
+    with pytest.raises(ValueError, match='Task files must be a list'):
+        await fca_agent._run_init('task', task_files='not-a-list', use_planning=False)  # type: ignore
 
     # 3. Recurrent mode
     fca_agent.task = Task(id='1', description='prev', result='result', steps_taken=1)
     await fca_agent._run_init('new', use_planning=False, recurrent_mode=True)
-    assert '## Previous Task' in fca_agent.chat_history[1]['content']
+    # content is a list of blocks
+    user_msg_content = fca_agent.chat_history[1]['content']
+    assert isinstance(user_msg_content, list)
+    assert '## Previous Task' in user_msg_content[0]['text']
 
     # 4. With planning (mocking Planner)
     with patch('kodeagent.fca.Planner') as mock_planner_class:
@@ -342,11 +349,13 @@ async def test_run_init(fca_agent):
             for msg in fca_agent.chat_history
         )
 
-    # 5. URL injection
+    # 5. URL injection (covers lines 360-373)
     await fca_agent._run_init('Check https://example.com', use_planning=False)
+    # system, user (task), user (url nudge)
+    assert len(fca_agent.chat_history) == 3
     assert any(
         'The task contains the following URL(s)' in msg.get('content', '')
-        for msg in fca_agent.chat_history
+        for msg in fca_agent.chat_history[2:]
     )
 
 

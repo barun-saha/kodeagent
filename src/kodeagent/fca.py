@@ -51,6 +51,7 @@ class AgentResponse(TypedDict):
 
 
 FCA_SYSTEM_PROMPT = ku.read_prompt('system/function_calling.txt')
+FINAL_ANSWER_TOOL_NAME = 'final_answer'
 
 
 def final_answer(result: str) -> str:
@@ -102,7 +103,7 @@ class FunctionCallingAgent:
 
         # Ensure final_answer is always available as a tool
         tool_names = [fn.__name__ for fn in self.tools]
-        if 'final_answer' not in tool_names:
+        if FINAL_ANSWER_TOOL_NAME not in tool_names:
             self.tools.append(final_answer)
 
         self.tool_schemas = [
@@ -315,6 +316,7 @@ class FunctionCallingAgent:
     async def _run_init(
         self,
         task_desc: str,
+        task_files: list[str] | None = None,
         task_id: str | None = None,
         use_planning: bool = True,
         recurrent_mode: bool = False,
@@ -323,6 +325,7 @@ class FunctionCallingAgent:
 
         Args:
             task_desc: Task description.
+            task_files: Optional files for the task.
             task_id: Optional task ID.
             use_planning: If True, generate a simple plan at the beginning of the task.
             recurrent_mode: If True, the agent will continue to run on the same task
@@ -330,6 +333,8 @@ class FunctionCallingAgent:
         """
         if not task_desc or not task_desc.strip():
             raise ValueError('Task description cannot be empty!')
+        if task_files and not isinstance(task_files, list):
+            raise ValueError('Task files must be a list of file paths!')
 
         if recurrent_mode and self.task is not None:
             task_description = (
@@ -340,11 +345,14 @@ class FunctionCallingAgent:
         else:
             task_description = f'## New Task:\n{task_desc}'
 
+        user_task_msg = ku.combine_user_messages(
+            ku.make_user_message(task_description, task_files)
+        )
         self.nudge_count = 0
         self.task = Task(description=task_desc, id=task_id, result=None, steps_taken=None)
         self.chat_history = [
             {'role': 'system', 'content': self.system_prompt},
-            {'role': 'user', 'content': task_description},
+            *user_task_msg,
         ]
 
         urls = FunctionCallingAgent._extract_urls(task_desc)
@@ -450,6 +458,7 @@ class FunctionCallingAgent:
     async def run(
         self,
         task: str,
+        files: list[str] | None = None,
         max_iterations: int = 10,
         refine_final_answer: bool = True,
         use_planning: bool = True,
@@ -460,6 +469,7 @@ class FunctionCallingAgent:
 
         Args:
             task: Task description to process. Add URLs or file contents in the task description.
+            files: An optional list of files related to the task.
             max_iterations: Maximum number of iterations to run.
             refine_final_answer: If True, calls an additional SLM step to produce a
              clean final answer when the model exits without calling final_answer.
@@ -472,7 +482,7 @@ class FunctionCallingAgent:
         Yields:
             AgentResponse: Streaming log, step, and final responses.
         """
-        await self._run_init(task, use_planning=use_planning, recurrent_mode=recurrent_mode)
+        await self._run_init(task, files, use_planning=use_planning, recurrent_mode=recurrent_mode)
 
         n_turns = 0
         self.final_answer_found = False
@@ -553,7 +563,7 @@ class FunctionCallingAgent:
                     channel='tool',
                 )
 
-                if name == 'final_answer':
+                if name == FINAL_ANSWER_TOOL_NAME:
                     self.final_answer_found = True
 
             if self.final_answer_found:
@@ -594,7 +604,7 @@ class FunctionCallingAgent:
         # i.e. no final_answer tool message was found in history
         result = 'No response generated.'
         for msg in reversed(self.chat_history):
-            if msg.get('role') == 'tool' and msg.get('name') == 'final_answer':
+            if msg.get('role') == 'tool' and msg.get('name') == FINAL_ANSWER_TOOL_NAME:
                 # Use the full (untruncated) stored result if available
                 tool_call_id = msg.get('tool_call_id')
                 result = (
@@ -669,19 +679,31 @@ async def main():
     print(f'Using model: {model_name}')
 
     tasks = [
-        'What is 5 times 7?',
-        'What is this page about? https://en.wikipedia.org/wiki/Artificial_intelligence',
-        'Find the current stock price of NVIDIA & calculate how many shares I can buy with $5000.',
+        ('What is 5 times 7?', None),
+        ('What is this page about?', ['https://en.wikipedia.org/wiki/Artificial_intelligence']),
+        (
+            'Caption this image',
+            [
+                'https://cdn.prod.website-files.com/61a05ff14c09ecacc06eec05'
+                '/66e8522cbe3d357b8434826a_ai-agents.jpg'
+            ]
+        ),
+        (
+            'Find the current stock price of NVIDIA & calculate how many shares'
+            ' I can buy with $5000.',
+            None
+        ),
         (
             'Get the transcript of this YouTube video: https://www.youtube.com/watch?v=aircAruvnKk'
             '\nIdentify the main topic, then search Wikipedia for that topic and give me'
-            ' a brief summary of what Wikipedia says about it (give Wikipedia page link).'
+            ' a brief summary of what Wikipedia says about it (give Wikipedia page link).',
+            None,
         ),
     ]
 
-    for idx, task in enumerate(tasks, start=1):
+    for idx, (task, files) in enumerate(tasks, start=1):
         print(f'\nTask #{idx}: {task}')
-        async for response in agent.run(task, max_iterations=10, use_planning=False):
+        async for response in agent.run(task, files, max_iterations=10, use_planning=False):
             print(response)
 
         print(f'>>> {agent.task.result=}')
