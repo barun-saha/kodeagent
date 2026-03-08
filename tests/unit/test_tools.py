@@ -1132,7 +1132,7 @@ class TestSearchWikipedia:
 
     @patch('wikipedia.search')
     def test_search_wikipedia_disambiguation(self, mock_search):
-        """Test Wikipedia disambiguation error."""
+        """Test Wikipedia disambiguation error at search level."""
         from wikipedia.exceptions import DisambiguationError
 
         mock_search.side_effect = DisambiguationError(
@@ -1142,8 +1142,86 @@ class TestSearchWikipedia:
 
         result = search_wikipedia('Python')
 
-        assert 'DisambiguationError' in result
+        # The message has changed to the new format
+        assert 'Ambiguous query. Wikipedia suggests' in result
         assert 'Python (programming language)' in result
+        assert 'Python (genus)' in result
+
+    @patch('wikipedia.search')
+    @patch('wikipedia.page')
+    def test_search_wikipedia_inner_disambiguation_skip(self, mock_page, mock_search):
+        """Test that inner DisambiguationError skips and continues."""
+        from wikipedia.exceptions import DisambiguationError
+
+        mock_search.return_value = ['AmbiguousTitle', 'GoodTitle']
+
+        # First call to page() raises DisambiguationError, second succeeds
+        mock_page.side_effect = [
+            DisambiguationError('AmbiguousTitle', ['Option1', 'Option2']),
+            Mock(title='GoodTitle', url='http://good.com', summary='Good Summary'),
+        ]
+
+        result = search_wikipedia('test query')
+
+        assert 'GoodTitle' in result
+        assert 'Good Summary' in result
+        assert 'Option1' not in result  # Should not show options from inner skip
+
+    @patch('wikipedia.search')
+    @patch('wikipedia.page')
+    def test_search_wikipedia_inner_page_error_skip(self, mock_page, mock_search):
+        """Test that inner PageError skips and continues."""
+        from wikipedia.exceptions import PageError
+
+        mock_search.return_value = ['BadPage', 'GoodTitle']
+
+        # First call to page() raises PageError, second succeeds
+        mock_page.side_effect = [
+            PageError('BadPage'),
+            Mock(title='GoodTitle', url='http://good.com', summary='Good Summary'),
+        ]
+
+        result = search_wikipedia('test query')
+
+        assert 'GoodTitle' in result
+        assert 'Good Summary' in result
+
+    @patch('wikipedia.search')
+    @patch('wikipedia.page')
+    def test_search_wikipedia_no_unambiguous_results(self, mock_page, mock_search):
+        """Test fallback when all results are ambiguous (returns options)."""
+        from wikipedia.exceptions import DisambiguationError
+
+        mock_search.return_value = ['AmbiguousTitle']
+        mock_page.side_effect = DisambiguationError('AmbiguousTitle', ['Option1'])
+
+        result = search_wikipedia('test query')
+
+        assert 'Ambiguous query. Wikipedia suggests' in result
+        assert 'Option1' in result
+
+    @patch('wikipedia.search')
+    @patch('wikipedia.page')
+    def test_search_wikipedia_truly_no_unambiguous_results(self, mock_page, mock_search):
+        """Test fallback when all results have errors and no options captured."""
+        from wikipedia.exceptions import PageError
+
+        mock_search.return_value = ['BadPage']
+        mock_page.side_effect = PageError('BadPage')
+
+        result = search_wikipedia('test query')
+
+        assert 'No unambiguous results found' in result
+
+    @patch('wikipedia.search')
+    def test_search_wikipedia_generic_exception(self, mock_search):
+        """Test outer generic exception handler."""
+        mock_search.side_effect = Exception('Unexpected API Error')
+
+        result = search_wikipedia('test query')
+
+        assert 'Error searching Wikipedia' in result
+        assert 'Unexpected API Error' in result
 
     @patch('wikipedia.search')
     @patch('wikipedia.page')
