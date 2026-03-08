@@ -351,15 +351,6 @@ async def test_run_init(fca_agent):
             for msg in fca_agent.chat_history
         )
 
-    # 5. URL injection (covers lines 360-373)
-    await fca_agent._run_init('Check https://example.com', use_planning=False)
-    # system, user (task), user (url nudge)
-    assert len(fca_agent.chat_history) == 3
-    assert any(
-        'The task contains the following URL(s)' in msg.get('content', '')
-        for msg in fca_agent.chat_history[2:]
-    )
-
 
 @pytest.mark.asyncio
 async def test_run_main_loop(fca_agent):
@@ -652,3 +643,90 @@ async def test_main_function():
     with patch('kodeagent.fca.FunctionCallingAgent', return_value=mock_agent):
         await main()
         # Just ensure it runs without crashing
+
+
+@pytest.mark.asyncio
+async def test_run_llm_transient_error_retries(fca_agent):
+    """Test that a transient LLM error is retried up to 2 times before succeeding."""
+    mock_response = MagicMock()
+    mock_response.choices[0].message.tool_calls = None
+    mock_response.choices[0].message.content = 'Recovered answer'
+    mock_response.choices[0].message.model_dump.return_value = {
+        'role': 'assistant',
+        'content': 'Recovered answer',
+    }
+
+    # First call raises, second call succeeds
+    with patch('litellm.acompletion', side_effect=[RuntimeError('rate limit'), mock_response]):
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            responses = []
+            async for resp in fca_agent.run(
+                'Task', max_iterations=5, refine_final_answer=False, use_planning=False
+            ):
+                responses.append(resp)
+
+    log_values = [r['value'] for r in responses if r['type'] == 'log']
+    # A "1/3" warning must appear for the first failure
+    assert any('SLM call failed (1/3)' in v for v in log_values)
+    # The final answer must come from the successful second call
+    assert any(r['type'] == 'final' and r['value'] == 'Recovered answer' for r in responses)
+
+
+@pytest.mark.asyncio
+async def test_run_llm_hard_stop_after_three_failures(fca_agent):
+    """Test hard-stop when the LLM fails 3 consecutive times."""
+    with patch('litellm.acompletion', side_effect=RuntimeError('API down')):
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            responses = []
+            async for resp in fca_agent.run(
+                'Task', max_iterations=10, refine_final_answer=False, use_planning=False
+            ):
+                responses.append(resp)
+
+    log_values = [r['value'] for r in responses if r['type'] == 'log']
+    assert any('Too many consecutive SLM failures' in v for v in log_values)
+    # A final response is always yielded, even if it is the default fallback
+    assert any(r['type'] == 'final' for r in responses)
+    # n_turns must not have consumed the full max_iterations budget on LLM errors
+    assert fca_agent.task.steps_taken == 0
+
+
+@pytest.mark.asyncio
+async def test_prepare_final_answer_fallback_on_error(fca_agent):
+    """Test that _prepare_final_answer falls back to history on LLM failure."""
+    fca_agent.chat_history = [
+        {'role': 'system', 'content': 'sys'},
+        {'role': 'assistant', 'content': 'Partial work done so far'},
+    ]
+
+    with patch('litellm.acompletion', side_effect=RuntimeError('API unavailable')):
+        result = await fca_agent._prepare_final_answer()
+
+    assert result == 'Partial work done so far'
+
+
+@pytest.mark.asyncio
+async def test_prepare_final_answer_fallback_no_history(fca_agent):
+    """Test _prepare_final_answer returns default when history has no assistant message."""
+    fca_agent.chat_history = [{'role': 'system', 'content': 'sys'}]
+
+    with patch('litellm.acompletion', side_effect=RuntimeError('API unavailable')):
+        result = await fca_agent._prepare_final_answer()
+
+    assert result == 'No response generated due to SLM failure.'
+
+
+def test_is_error():
+    """Test robust error detection regex."""
+    from kodeagent.fca import FunctionCallingAgent as FCA
+
+    assert FCA._is_error('Error: failed') is True
+    assert FCA._is_error('ERROR: something broke') is True
+    assert FCA._is_error('*** ERROR: critical') is True
+    assert FCA._is_error('   error: prefix spaces') is True
+    assert FCA._is_error('*** Errror: typo') is True
+    assert FCA._is_error('errror') is True
+    assert FCA._is_error('This is not an error') is False
+    assert FCA._is_error('The process finished without errors') is False
+    assert FCA._is_error('') is False
+    assert FCA._is_error(None) is False  # type: ignore
