@@ -8,7 +8,7 @@ Starting from v0.10.0, KodeAgent uses a single `chat_history` member (a list of 
 
 - **API Compatibility**: The history is already in the format expected by most LLM APIs (e.g., OpenAI, Gemini, Anthropic), containing `role`, `content`, and optional `tool_calls`.
 - **Consistency**: There's no longer a "dual storage" paradigm to keep in sync, reducing complexity and potential for bugs.
-- **Provider Agnostic**: The history handles multimodal content and tool calls in a standard way across different LLM providers through LiteLLM.
+- **Provider Agnostic**: The history handles multimodal content and tool calls in a standard way across different LLM and SLM providers through LiteLLM.
 
 ## Structured Messaging & Formatters
 
