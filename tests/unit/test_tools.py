@@ -1387,13 +1387,21 @@ class TestTranscribeAudio:
 
         result = transcribe_audio('/path/to/audio.mp3')
 
-        assert result == {'text': 'Transcribed audio content'}
+        assert result == 'Transcribed audio content'
         mock_post.assert_called_once()
 
         # Verify API call parameters
         call_kwargs = mock_post.call_args[1]
         assert 'Authorization' in call_kwargs['headers']
         assert call_kwargs['headers']['Authorization'] == 'Bearer test_api_key'
+
+    @patch('os.getenv')
+    def test_transcribe_audio_no_api_key(self, mock_getenv):
+        """Test error when API key is missing."""
+        mock_getenv.return_value = None
+        result = transcribe_audio('/path/to/audio.mp3')
+        assert 'Error' in result
+        assert 'FIREWORKS_API_KEY' in result
 
     @patch('requests.post')
     @patch('builtins.open', new_callable=mock_open, read_data=b'audio data')
@@ -1414,6 +1422,62 @@ class TestTranscribeAudio:
     @patch('requests.post')
     @patch('builtins.open', new_callable=mock_open, read_data=b'audio data')
     @patch('os.getenv')
+    def test_transcribe_audio_empty_text(self, mock_getenv, mock_file, mock_post):
+        """Test handling of empty transcription text."""
+        mock_getenv.return_value = 'test_api_key'
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'text': ''}
+        mock_post.return_value = mock_response
+
+        result = transcribe_audio('/path/to/audio.mp3')
+
+        assert 'Error' in result
+        assert 'empty text' in result.lower()
+
+    @patch('os.getenv')
+    def test_transcribe_audio_file_not_found(self, mock_getenv):
+        """Test handling of FileNotFoundError."""
+        mock_getenv.return_value = 'test_api_key'
+        # builtins.open is not mocked here, so it should raise if path is invalid
+        # or we can explicitly patch it to raise
+        with patch('builtins.open', side_effect=FileNotFoundError()):
+            result = transcribe_audio('/nonexistent/file.mp3')
+            assert 'Error' in result
+            assert 'file not found' in result.lower()
+
+    @patch('requests.post')
+    @patch('builtins.open', new_callable=mock_open, read_data=b'audio data')
+    @patch('os.getenv')
+    def test_transcribe_audio_timeout(self, mock_getenv, mock_file, mock_post):
+        """Test handling of RequestTimeout."""
+        import requests
+
+        mock_getenv.return_value = 'test_api_key'
+        mock_post.side_effect = requests.exceptions.Timeout()
+
+        result = transcribe_audio('/path/to/audio.mp3')
+
+        assert 'Error' in result
+        assert 'timed out' in result.lower()
+
+    @patch('requests.post')
+    @patch('builtins.open', new_callable=mock_open, read_data=b'audio data')
+    @patch('os.getenv')
+    def test_transcribe_audio_generic_exception(self, mock_getenv, mock_file, mock_post):
+        """Test handling of generic Exception."""
+        mock_getenv.return_value = 'test_api_key'
+        mock_post.side_effect = Exception('Unexpected error')
+
+        result = transcribe_audio('/path/to/audio.mp3')
+
+        assert 'Error' in result
+        assert 'Exception' in result
+        assert 'Unexpected error' in result
+
+    @patch('requests.post')
+    @patch('builtins.open', new_callable=mock_open, read_data=b'audio data')
+    @patch('os.getenv')
     def test_transcribe_audio_correct_model(self, mock_getenv, mock_file, mock_post):
         """Test that correct model and parameters are used."""
         mock_getenv.return_value = 'test_api_key'
@@ -1429,11 +1493,18 @@ class TestTranscribeAudio:
         assert call_kwargs['data']['temperature'] == '0'
         assert call_kwargs['data']['vad_model'] == 'silero'
 
-    def test_transcribe_audio_import_error(self):
-        """Test audio transcription with ImportError."""
+    @patch('os.getenv')
+    def test_transcribe_audio_import_error(self, mock_getenv):
+        """Test audio transcription with ImportError (via generic catch)."""
+        mock_getenv.return_value = 'test_api_key'
+        # Since we use 'import requests' inside the function, we can mock it
+        # However, to avoid side effects in the test environment, we patch it
+        # only within the scope of this test.
         with patch.dict('sys.modules', {'requests': None}):
             result = transcribe_audio('/path/to/audio.mp3')
-            assert 'Audio transcription error' in result
+            # It should be caught by the generic Exception handler
+            assert 'error' in result.lower()
+            assert 'requests' in result.lower()
 
 
 class TestGenerateImage:

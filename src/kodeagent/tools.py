@@ -4,8 +4,6 @@ self-contained and can operate in isolated environments. Similarly, all variable
 locally within the functions.
 """
 
-from typing import Any
-
 DEFAULT_TOOLS_IMPORTS = [
     'ast',
     'operator',
@@ -838,9 +836,7 @@ def search_wikipedia(query: str, max_results: int = 3) -> str:
         for title in results:
             try:
                 page = wikipedia.page(title, auto_suggest=False)
-                markdown_results.append(
-                    f'### [{page.title}]({page.url})\n{page.summary}'
-                )
+                markdown_results.append(f'### [{page.title}]({page.url})\n{page.summary}')
             except wikipedia.exceptions.DisambiguationError as de:
                 # Capture options from first disambiguation hit for fallback message
                 if disambiguation_options is None:
@@ -943,44 +939,58 @@ def transcribe_youtube(video_id: str) -> str:
     return transcript_text
 
 
-def transcribe_audio(file_path: str) -> Any:
-    """Convert audio files to text using OpenAI's Whisper model via Fireworks API.
+def transcribe_audio(file_path: str) -> str:
+    """Convert audio files to text using Fireworks AI Whisper API.
     The input should be a path to an audio file (e.g., .mp3, .wav, .flac).
-    The audio file should be in a format that Whisper supports.
 
     Args:
         file_path: Local file system path to the audio file.
 
     Returns:
-        The transcript of the audio file as text.
+        The transcript of the audio file as text, or an error message.
     """
     import os
 
+    api_key = os.getenv('FIREWORKS_API_KEY')
+    if not api_key:
+        return 'Error: FIREWORKS_API_KEY environment variable is not set.'
+
     try:
         import requests
+    except ImportError:
+        return (
+            'Audio transcription error: `requests` library not found.'
+            ' Please install it with `pip install requests`.'
+        )
 
+    try:
         with open(file_path, 'rb') as f:
             response = requests.post(
-                'https://audio-turbo.us-virginia-1.direct.fireworks.ai/v1/audio/transcriptions',
-                headers={'Authorization': f'Bearer {os.getenv("FIREWORKS_API_KEY")}'},
+                'https://audio-turbo.api.fireworks.ai/v1/audio/transcriptions',
+                headers={'Authorization': f'Bearer {api_key}'},
                 files={'file': f},
                 data={
                     'model': 'whisper-v3-turbo',
                     'temperature': '0',
                     'vad_model': 'silero',
                 },
-                timeout=15,
+                timeout=30,
             )
 
         if response.status_code == 200:
-            return response.json()
+            text = response.json().get('text', '').strip()
+            if not text:
+                return 'Error: Transcription succeeded but returned empty text.'
+            return text
 
         return f'Audio transcription error: {response.status_code}: {response.text}'
-    except ImportError:
-        return (
-            'Audio transcription error: `requests` library not found.'
-            ' Please install it with `pip install requests`.'
-        )
+
+    except FileNotFoundError:
+        return f'Error: Audio file not found: {file_path}'
+    except requests.exceptions.Timeout:
+        return 'Error: Request timed out after 30s. Audio file may be too large.'
+    except Exception as e:
+        return f'Error: {type(e).__name__}: {str(e)}'
 
 
 def generate_image(prompt: str, model_name: str) -> str:
