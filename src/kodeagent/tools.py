@@ -810,9 +810,17 @@ def read_webpage(url: str, max_length: int = 20000) -> str:
         return f'ERROR: Unexpected error - {type(e).__name__}: {str(e)}'
 
 
-def search_wikipedia(query: str, max_results: int | None = 3) -> str:
+def search_wikipedia(query: str, max_results: int = 3) -> str:
     """Search Wikipedia (only) and return the top search results as Markdown text.
-    ...
+    The input should be a search query. The output will contain the title, summary,
+    and link to the Wikipedia page.
+
+    Args:
+        query: The search query string.
+        max_results: The max. no. of search results to consider (default 3).
+
+    Returns:
+        The search results in Markdown format.
     """
     try:
         import wikipedia
@@ -820,37 +828,44 @@ def search_wikipedia(query: str, max_results: int | None = 3) -> str:
         return '`wikipedia` was not found! Please run `pip install wikipedia`'
 
     try:
-        # auto_suggest=False prevents the library from silently rerouting
-        # queries to wrong articles via fuzzy matching
         results = wikipedia.search(query, results=max_results)
         if not results:
             return 'No results found! Try a less restrictive/shorter query.'
 
         markdown_results = []
+        disambiguation_options: list[str] | None = None
+
         for title in results:
             try:
-                # auto_suggest=False here too — critical for exact title lookup
                 page = wikipedia.page(title, auto_suggest=False)
-                markdown_results.append(f'### [{page.title}]({page.url})\n{page.summary}')
-            except wikipedia.exceptions.DisambiguationError:
-                # Skip ambiguous titles and try the next result
-                # rather than failing the whole query
+                markdown_results.append(
+                    f'### [{page.title}]({page.url})\n{page.summary}'
+                )
+            except wikipedia.exceptions.DisambiguationError as de:
+                # Capture options from first disambiguation hit for fallback message
+                if disambiguation_options is None:
+                    disambiguation_options = de.options[:5]
                 continue
             except wikipedia.exceptions.PageError:
                 continue
 
         if not markdown_results:
+            if disambiguation_options:
+                options_str = ', '.join(disambiguation_options)
+                return (
+                    f'Ambiguous query. Wikipedia suggests these specific topics: {options_str}.'
+                    ' Please retry with one of these exact terms as the search query.'
+                )
             return (
-                'No unambiguous results found.'
-                ' Try a more specific query, e.g. "artificial neural network"'
-                ' instead of "neural networks".'
+                'No unambiguous results found. Try a more specific query, e.g.,'
+                ' "artificial neural network" instead of "neural networks".'
             )
 
         return '\n\n'.join(markdown_results)
 
     except wikipedia.exceptions.DisambiguationError as de:
-        # Outer catch for search-level disambiguation
-        # Return the options so the model can pick a more specific query
+        # Outer catch: triggered when wikipedia.search() itself raises disambiguation
+        # before returning a results list; less common but possible
         options_str = ', '.join(de.options[:5])
         return (
             f'Ambiguous query. Wikipedia suggests these specific topics: {options_str}.'

@@ -1189,11 +1189,25 @@ class TestSearchWikipedia:
     @patch('wikipedia.search')
     @patch('wikipedia.page')
     def test_search_wikipedia_no_unambiguous_results(self, mock_page, mock_search):
-        """Test fallback when all results are ambiguous or have errors."""
+        """Test fallback when all results are ambiguous (returns options)."""
         from wikipedia.exceptions import DisambiguationError
 
         mock_search.return_value = ['AmbiguousTitle']
         mock_page.side_effect = DisambiguationError('AmbiguousTitle', ['Option1'])
+
+        result = search_wikipedia('test query')
+
+        assert 'Ambiguous query. Wikipedia suggests' in result
+        assert 'Option1' in result
+
+    @patch('wikipedia.search')
+    @patch('wikipedia.page')
+    def test_search_wikipedia_truly_no_unambiguous_results(self, mock_page, mock_search):
+        """Test fallback when all results have errors and no options captured."""
+        from wikipedia.exceptions import PageError
+
+        mock_search.return_value = ['BadPage']
+        mock_page.side_effect = PageError('BadPage')
 
         result = search_wikipedia('test query')
 
