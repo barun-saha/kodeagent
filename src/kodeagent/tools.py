@@ -402,7 +402,7 @@ def download_file(url: str, save_name: str | None = None, save_dir: str | None =
         return result
 
 
-def extract_as_markdown(url_or_path: str, max_length: int | None = None) -> str:
+def extract_as_markdown(url_or_path: str, max_length: int = 20000) -> str:
     """Extract content from documents (PDF, DOCX, XLSX, PPTX) as Markdown text.
     Works with both URLs and local file paths.
 
@@ -472,18 +472,17 @@ def extract_as_markdown(url_or_path: str, max_length: int | None = None) -> str:
     supported_formats = {'.pdf', '.docx', '.xlsx', '.pptx'}
     if file_ext not in supported_formats:
         return (
-            f"ERROR: Unsupported file format '{file_ext}'\n"
+            f'ERROR: Unsupported file format `{file_ext}`\n'
             f'Supported formats: {", ".join(supported_formats)}\n\n'
-            f"For HTML web pages, use 'read_webpage' instead.\n"
-            f"For other files, use 'download_file' first."
+            'For webpages use `read_webpage`. For other file types, no extraction tool'
+            ' is available. Use `download_file` to download the file first.'
         )
 
     # Validate max_length
-    if max_length is not None:
-        if max_length < 100:
-            max_length = 100
-        elif max_length > 1000000:
-            max_length = 1000000  # Cap at 1M chars
+    if max_length < 100:
+        max_length = 100
+    elif max_length > 1000000:
+        max_length = 1000000  # Cap at 1M chars
 
     try:
         # Initialize MarkItDown
@@ -501,8 +500,8 @@ def extract_as_markdown(url_or_path: str, max_length: int | None = None) -> str:
                 return (
                     'ERROR: Access forbidden (403) when trying to download from URL.\n'
                     'The server is blocking automated access.\n\n'
-                    'Solution: Use `download_file` tool first to save it locally, '
-                    'then use this tool with the local file path.'
+                    'Solution: Use `download_file` tool first to save it locally,'
+                    ' then use this tool with the local file path.'
                 )
             if '404' in error_str or 'not found' in error_str:
                 return f'ERROR: File not found (404) at URL: {url_or_path}'
@@ -586,14 +585,14 @@ def extract_as_markdown(url_or_path: str, max_length: int | None = None) -> str:
         return f'ERROR: {error_type} - {str(e)}'
 
 
-def read_webpage(url: str, max_length: int = 50000) -> str:
+def read_webpage(url: str, max_length: int = 20000) -> str:
     """Fetch and return the main text content from an HTML webpage as clean Markdown.
     Use this after search_web to read articles, blogs, or documentation.
     For PDF, DOCX, or XLSX files, use `extract_as_markdown` tool instead.
 
     Args:
         url: The complete URL of the webpage (must start with http:// or https://).
-        max_length: Maximum characters to return (default 50000).
+        max_length: Maximum characters to return (default 20000).
 
     Returns:
         Clean webpage content as Markdown text, or an error message.
@@ -634,7 +633,8 @@ def read_webpage(url: str, max_length: int = 50000) -> str:
         ext = next(ext for ext in doc_extensions if path_lower.endswith(ext))
         return (
             f'ERROR: URL points to a document file ({ext}), not a webpage.\n'
-            'Use `extract_as_markdown` tool instead for document files.'
+            'Use `extract_as_markdown` tool instead for document files. Try `download_file`'
+            ' to verify the file can be accessed and downloaded.'
         )
 
     # Validate max_length
@@ -812,15 +812,7 @@ def read_webpage(url: str, max_length: int = 50000) -> str:
 
 def search_wikipedia(query: str, max_results: int | None = 3) -> str:
     """Search Wikipedia (only) and return the top search results as Markdown text.
-    The input should be a search query. The output will contain the title, summary, and link
-    to the Wikipedia page.
-
-    Args:
-        query: The search query string.
-        max_results: The max. no. of search results to consider (default 3).
-
-    Returns:
-        The search results in Markdown format.
+    ...
     """
     try:
         import wikipedia
@@ -828,18 +820,44 @@ def search_wikipedia(query: str, max_results: int | None = 3) -> str:
         return '`wikipedia` was not found! Please run `pip install wikipedia`'
 
     try:
+        # auto_suggest=False prevents the library from silently rerouting
+        # queries to wrong articles via fuzzy matching
         results = wikipedia.search(query, results=max_results)
         if not results:
             return 'No results found! Try a less restrictive/shorter query.'
 
         markdown_results = []
         for title in results:
-            page = wikipedia.page(title)
-            markdown_results.append(f'### [{page.title}]({page.url})\n{page.summary}')
+            try:
+                # auto_suggest=False here too — critical for exact title lookup
+                page = wikipedia.page(title, auto_suggest=False)
+                markdown_results.append(f'### [{page.title}]({page.url})\n{page.summary}')
+            except wikipedia.exceptions.DisambiguationError:
+                # Skip ambiguous titles and try the next result
+                # rather than failing the whole query
+                continue
+            except wikipedia.exceptions.PageError:
+                continue
+
+        if not markdown_results:
+            return (
+                'No unambiguous results found.'
+                ' Try a more specific query, e.g. "artificial neural network"'
+                ' instead of "neural networks".'
+            )
 
         return '\n\n'.join(markdown_results)
+
     except wikipedia.exceptions.DisambiguationError as de:
-        return f'DisambiguationError: Please select an option from {", ".join(de.options)}'
+        # Outer catch for search-level disambiguation
+        # Return the options so the model can pick a more specific query
+        options_str = ', '.join(de.options[:5])
+        return (
+            f'Ambiguous query. Wikipedia suggests these specific topics: {options_str}.'
+            ' Please retry with one of these exact terms as the search query.'
+        )
+    except Exception as e:
+        return f'Error searching Wikipedia: {str(e)}'
 
 
 def search_arxiv(query: str, max_results: int = 5) -> str:
@@ -901,10 +919,7 @@ def transcribe_youtube(video_id: str) -> str:
         transcript = YouTubeTranscriptApi().fetch(video_id)
         transcript_text = ' '.join([item.text for item in transcript.snippets])
     except yt_errors.TranscriptsDisabled:
-        transcript_text = (
-            '*** ERROR: Could not retrieve a transcript for the video -- subtitles appear to be'
-            ' disabled for this video, so this tool cannot help, unfortunately.'
-        )
+        return '*** ERROR: Subtitles are disabled for this video. Cannot retrieve transcript.'
     except yt_errors.NoTranscriptFound:
         return '*** ERROR: No transcript found for this video.'
     except Exception as e:
