@@ -3,7 +3,7 @@
 The following sections provide an overview of how to use KodeAgent to create and run intelligent agents capable of performing various tasks using LLMs and tools.
 
 
-## Run Tasks
+## ReAct and CodeAct Agents
 
 Using KodeAgent, you can create a ReAct agent and run a task like this:
 
@@ -73,20 +73,31 @@ from kodeagent import FunctionCallingAgent, search_web, calculator, print_respon
 agent = FunctionCallingAgent(
     model_name='ollama/qwen3:4b-instruct-2507-fp16',
     tools=[search_web, calculator],
-    litellm_params={'temperature': 0}
+    litellm_params={'temperature': 0, 'timeout': 90}  # Required for robust tool use with SLMs
 )
 
 async for response in agent.run('Calculate the market cap of Apple'):
     print_response(response, only_final=True)
 ```
 
-Note: Unlike the other two agents, `FunctionCallingAgent` does not take a `files` argument; instead, copy the files or URLs to the task description.
-
 ### Key Features
 - **Lightweight**: Minimal overhead, ideal for models with at least 4B parameters.
 - **Native Tooling**: Leverages the model's built-in tool-calling interface.
 - **Final Answer Tool**: Automatically includes a `final_answer` pseudo-tool to ensure structured outputs from smaller models.
 - **Nudge Mechanism**: Includes built-in loop detection and "nudges" to prevent smaller models from getting stuck.
+- **Graceful Fallback**: If the model finishes without a final answer tool call, the agent uses a summary step to produce a clear final response.
+
+Function-calling agent may not work with every SLM. Our experiemnts reveal that it works well with models having 4B parameters or more. When possible, use q8 or higher quantization. In particular, `FunctionCallingAgent` has been tested with:
+- qwen3:8b-q8_0
+- qwen3:4b-instruct-2507-fp16
+- granite4:7b-a1b-h
+- phi4-mini:3.8b-q8_0
+- ministral-3:8b-instruct-2512-q8_0
+
+Try out this [Colab notebook](https://colab.research.google.com/drive/1c7RMTCcSYrO7wZgB25bLX9QenDgVDmAP?usp=sharing) to see it in action.
+
+The agent may not work with reasoning/thinking models. They often produce answers without any tool calls.
+
 
 
 ## Choosing the Right Agent

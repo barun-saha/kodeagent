@@ -334,6 +334,22 @@ class FunctionCallingAgent:
         return False
 
     @staticmethod
+    def _is_error(text: str) -> bool:
+        """Robustly detect if a string represents an error message.
+
+        Matches variations like "Error:", "*** ERROR:", "errrror", etc.
+
+        Args:
+            text: Input string to check.
+
+        Returns:
+            True if it starts with an error indicator, False otherwise.
+        """
+        if not text:
+            return False
+        return bool(re.match(r'^\s*(?:\*+\s*)?err+or\b', text, re.IGNORECASE))
+
+    @staticmethod
     def _extract_urls(text: str) -> list[str]:
         """Extract all URLs from a text string.
 
@@ -343,7 +359,7 @@ class FunctionCallingAgent:
         Returns:
             A list of URLs found in the text.
         """
-        return re.findall(r'https?://\S+', text)
+        return re.findall(r'https?://[^\s<>"\')\],]+', text)
 
     async def _run_init(
         self,
@@ -384,23 +400,6 @@ class FunctionCallingAgent:
             {'role': 'system', 'content': self.system_prompt},
             *user_task_msg,
         ]
-
-        urls = FunctionCallingAgent._extract_urls(task_desc)
-        if urls:
-            url_list = '\n'.join(f'- {url}' for url in urls)
-            self.chat_history.append(
-                {
-                    'role': 'user',
-                    'content': (
-                        'The task contains the following URL(s):\n'
-                        f'{url_list}\n\n'
-                        'If the task requires knowing the content of these pages,'
-                        ' use `read_webpage` to fetch them before answering.'
-                        ' Do not answer from memory about the content of these pages.'
-                    ),
-                }
-            )
-            logger.info('URL pre-injection: %d URL(s) detected, read_webpage required.', len(urls))
 
         if use_planning:
             planner = Planner(
@@ -496,17 +495,20 @@ class FunctionCallingAgent:
         loop_threshold: int = 3,
     ) -> AsyncIterator[AgentResponse]:
         """Main loop for the agent to process input and execute tools until finished.
+        If an SLM call fails, it tries up to 3 times with a backoff before terminating.
 
         Args:
             task: Task description to process. Add URLs or file contents in the task description.
             files: An optional list of files related to the task.
-            max_iterations: Maximum number of iterations to run.
+            max_iterations: Maximum number of iterations to run. Failed SLM retries do
+            not count against this budget — only successful reasoning steps do.
             refine_final_answer: If True, calls an additional SLM step to produce a
-             clean final answer when the model exits without calling final_answer.
-             Recommended for models <=4B that may not use final_answer reliably.
+            clean final answer when the model exits without calling final_answer.
+            Recommended for models <=4B that may not use final_answer reliably.
+            Note: not invoked after a hard-stop due to repeated SLM failures.
             use_planning: If True, generate a simple plan at the beginning of the task.
             recurrent_mode: If True, the agent continues from the previous task result,
-             allowing for multi-turn workflows.
+            allowing for multi-turn workflows.
             loop_threshold: Number of consecutive same tool calls before triggering loop detection.
 
         Yields:
@@ -520,6 +522,11 @@ class FunctionCallingAgent:
         executed_tool_calls: dict[tuple[str, str], str] = {}
         self.full_tool_results: dict[str, str] = {}  # keyed by tool_call_id for exact lookup
 
+        # Hard-stop flag set when SLM fails 3 consecutive times.
+        # Prevents _prepare_final_answer from issuing a further LLM call
+        # against an already-failing model.
+        llm_hard_stop = False
+
         yield self.response(
             rtype='log', value=f'Solving task: `{self.task.description}`', channel='run'
         )
@@ -529,13 +536,51 @@ class FunctionCallingAgent:
             n_turns += 1
             yield self.response(rtype='log', channel='run', value=f'* Executing step {n_turns}')
 
-            response = await litellm.acompletion(
-                model=self.model_name,
-                messages=self.chat_history,
-                tools=self.tool_schemas,
-                tool_choice='auto',
-                **(self.litellm_params or {}),
-            )
+            # --- Inner retry loop for transient SLM failures ---
+            # Failed attempts do NOT consume outer-loop iterations (n_turns is not
+            # incremented here; it was incremented once above for this reasoning step).
+            response = None
+            consecutive_llm_errors = 0
+            while consecutive_llm_errors < 3:
+                try:
+                    response = await litellm.acompletion(
+                        model=self.model_name,
+                        messages=self.chat_history,
+                        tools=self.tool_schemas,
+                        tool_choice='auto',
+                        **(self.litellm_params or {}),
+                    )
+                    # Success — exit the retry loop
+                    break
+                except Exception as e:
+                    consecutive_llm_errors += 1
+                    logger.error(
+                        'SLM call failed (attempt %d/3) on turn %d: %s',
+                        consecutive_llm_errors,
+                        turn + 1,
+                        e,
+                    )
+                    yield self.response(
+                        rtype='log',
+                        value=f'SLM call failed ({consecutive_llm_errors}/3): {e}',
+                        channel='run',
+                    )
+                    if consecutive_llm_errors >= 3:
+                        logger.error('Too many consecutive SLM failures. Terminating.')
+                        yield self.response(
+                            rtype='log',
+                            value='Too many consecutive SLM failures. Terminating.',
+                            channel='run',
+                        )
+                        llm_hard_stop = True
+                        break
+                    # Non-blocking backoff before next attempt
+                    await asyncio.sleep(5 * consecutive_llm_errors)
+
+            # Hard-stop: exit the outer loop without falling through to
+            # _prepare_final_answer — the model is not responding.
+            if llm_hard_stop:
+                break
 
             message = response.choices[0].message
             self.chat_history.append(message.model_dump())
@@ -567,19 +612,19 @@ class FunctionCallingAgent:
                     tool_result_message = await self._execute_tool(tool_call)
                     raw_content = tool_result_message['content']
 
-                    if not raw_content.startswith('Error:'):
+                    if not self._is_error(raw_content):
                         # Populate deduplication cache with the raw result
                         executed_tool_calls[call_key] = raw_content
                         # Store full result keyed by tool_call_id for exact per-call lookup
                         self.full_tool_results[tool_call.id] = raw_content
-                        # Truncate/summarise for history
+                        # Truncate for history
                         tool_result_message = {
                             **tool_result_message,
                             'content': self._maybe_truncate(raw_content),
                         }
 
-                # Track consecutive errors for early exit
-                if tool_result_message['content'].startswith('Error:'):
+                # Track consecutive tool errors for early exit
+                if self._is_error(tool_result_message['content']):
                     consecutive_errors += 1
                 else:
                     consecutive_errors = 0
@@ -611,9 +656,6 @@ class FunctionCallingAgent:
 
             loop_detected = self._detect_tool_loop(nudge_hard_stop=loop_threshold)
             if loop_detected:
-                # Hard-stop: nudge_count was already >= loop_threshold, so the method
-                # returned True without incrementing — nudge_count stays at loop_threshold.
-                # Nudge path: _detect_tool_loop incremented nudge_count before returning.
                 if self.nudge_count >= loop_threshold:
                     logger.error('Loop persisted after nudges. Terminating for safety.')
                     yield self.response(
@@ -629,9 +671,9 @@ class FunctionCallingAgent:
 
         self.task.steps_taken = n_turns
 
-        # Prefer the final_answer tool result if present
-        # for...else: the else block runs only if the loop completed without hitting break
-        # i.e. no final_answer tool message was found in history
+        # Prefer the final_answer tool result if present.
+        # for...else: the else block runs only if no break was hit, i.e. no
+        # final_answer tool message was found in history.
         result = 'No response generated.'
         for msg in reversed(self.chat_history):
             if msg.get('role') == 'tool' and msg.get('name') == FINAL_ANSWER_TOOL_NAME:
@@ -642,8 +684,9 @@ class FunctionCallingAgent:
                 ) or msg['content']
                 break
         else:
-            # Fall back to last assistant text content
-            if refine_final_answer:
+            # Do not invoke _prepare_final_answer after an LLM hard-stop —
+            # the model is already unresponsive and a further call would also fail.
+            if not llm_hard_stop and refine_final_answer:
                 result = await self._prepare_final_answer()
             else:
                 for msg in reversed(self.chat_history):
@@ -655,35 +698,45 @@ class FunctionCallingAgent:
 
     async def _prepare_final_answer(self) -> str:
         """Summarise the conversation into a clean final answer via a separate SLM call.
+        In case of error, it will return the last assistant message. If unable to do so,
+        it will return a generic message.
 
         Used as a fallback when the model exits the loop without calling final_answer,
-        which is common for models <=4B. Formats the full conversation history as
+        which is common for models <= 4B. Formats the full conversation history as
         plain text and asks the model to produce a concise response.
 
         Returns:
             A user-readable string summarising the result.
         """
         formatted_history = self._format_history_as_text()
-        response = await litellm.acompletion(
-            model=self.model_name,
-            messages=[
-                {
-                    'role': 'system',
-                    'content': (
-                        'You are a helpful assistant. Based on the conversation history '
-                        "below, provide a clear and concise final answer to the user's task."
-                    ),
-                },
-                {
-                    'role': 'user',
-                    'content': f'Conversation history:\n{formatted_history}',
-                },
-            ],
-            **(self.litellm_params or {}),
-        )
-        final_answer_text = (response.choices[0].message.content or '').strip()
-        logger.debug('Raw _prepare_final_answer response: %s', final_answer_text)
-        return final_answer_text
+        try:
+            response = await litellm.acompletion(
+                model=self.model_name,
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': (
+                            'You are a helpful assistant. Based on the conversation history '
+                            "below, provide a clear and concise final answer to the user's task."
+                        ),
+                    },
+                    {
+                        'role': 'user',
+                        'content': f'Conversation history:\n{formatted_history}',
+                    },
+                ],
+                **(self.litellm_params or {}),
+            )
+            final_answer_text = (response.choices[0].message.content or '').strip()
+            logger.debug('Raw _prepare_final_answer response: %s', final_answer_text)
+            return final_answer_text
+        except Exception as e:
+            logger.error('_prepare_final_answer SLM call failed: %s', e)
+            # Fall back to the last assistant text message already in history
+            for msg in reversed(self.chat_history):
+                if msg.get('role') == 'assistant' and msg.get('content'):
+                    return msg['content']
+            return 'No response generated due to SLM failure.'
 
 
 async def main():
@@ -704,6 +757,7 @@ async def main():
             dtools.transcribe_youtube,
             dtools.search_wikipedia,
         ],
+        # Temp = 2 to make Gemini "creative"; set to 0 for SLMs
         litellm_params={'temperature': 2, 'timeout': 90},
     )
     print(f'Using model: {model_name}')
@@ -742,6 +796,4 @@ async def main():
 
 
 if __name__ == '__main__':
-    import asyncio
-
     asyncio.run(main())

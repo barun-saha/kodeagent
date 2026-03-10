@@ -1,5 +1,6 @@
 """Unit tests for the FunctionCallingAgent in fca.py."""
 
+import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -351,15 +352,6 @@ async def test_run_init(fca_agent):
             for msg in fca_agent.chat_history
         )
 
-    # 5. URL injection (covers lines 360-373)
-    await fca_agent._run_init('Check https://example.com', use_planning=False)
-    # system, user (task), user (url nudge)
-    assert len(fca_agent.chat_history) == 3
-    assert any(
-        'The task contains the following URL(s)' in msg.get('content', '')
-        for msg in fca_agent.chat_history[2:]
-    )
-
 
 @pytest.mark.asyncio
 async def test_run_main_loop(fca_agent):
@@ -652,3 +644,270 @@ async def test_main_function():
     with patch('kodeagent.fca.FunctionCallingAgent', return_value=mock_agent):
         await main()
         # Just ensure it runs without crashing
+
+
+@pytest.mark.asyncio
+async def test_run_llm_transient_error_retries(fca_agent):
+    """Test that a transient LLM error is retried up to 2 times before succeeding."""
+    mock_response = MagicMock()
+    mock_response.choices[0].message.tool_calls = None
+    mock_response.choices[0].message.content = 'Recovered answer'
+    mock_response.choices[0].message.model_dump.return_value = {
+        'role': 'assistant',
+        'content': 'Recovered answer',
+    }
+
+    # First call raises, second call succeeds
+    with patch('litellm.acompletion', side_effect=[RuntimeError('rate limit'), mock_response]):
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            responses = []
+            async for resp in fca_agent.run(
+                'Task', max_iterations=5, refine_final_answer=False, use_planning=False
+            ):
+                responses.append(resp)
+
+    log_values = [r['value'] for r in responses if r['type'] == 'log']
+    # A "1/3" warning must appear for the first failure
+    assert any('SLM call failed (1/3)' in v for v in log_values)
+    # The final answer must come from the successful second call
+    assert any(r['type'] == 'final' and r['value'] == 'Recovered answer' for r in responses)
+
+
+@pytest.mark.asyncio
+async def test_run_llm_hard_stop_after_three_failures(fca_agent):
+    """Test hard-stop when the LLM fails 3 consecutive times."""
+    with patch('litellm.acompletion', side_effect=RuntimeError('API down')):
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            responses = []
+            async for resp in fca_agent.run(
+                'Task', max_iterations=10, refine_final_answer=False, use_planning=False
+            ):
+                responses.append(resp)
+
+    log_values = [r['value'] for r in responses if r['type'] == 'log']
+    assert any('Too many consecutive SLM failures' in v for v in log_values)
+    # A final response is always yielded, even if it is the default fallback
+    assert any(r['type'] == 'final' for r in responses)
+    # n_turns must not have consumed the full max_iterations budget on LLM errors
+    # It will be 1 because the turn is incremented at the start of the loop
+    assert fca_agent.task.steps_taken == 1
+
+
+@pytest.mark.asyncio
+async def test_prepare_final_answer_fallback_on_error(fca_agent):
+    """Test that _prepare_final_answer falls back to history on LLM failure."""
+    fca_agent.chat_history = [
+        {'role': 'system', 'content': 'sys'},
+        {'role': 'assistant', 'content': 'Partial work done so far'},
+    ]
+
+    with patch('litellm.acompletion', side_effect=RuntimeError('API unavailable')):
+        result = await fca_agent._prepare_final_answer()
+
+    assert result == 'Partial work done so far'
+
+
+@pytest.mark.asyncio
+async def test_prepare_final_answer_fallback_no_history(fca_agent):
+    """Test _prepare_final_answer returns default when history has no assistant message."""
+    fca_agent.chat_history = [{'role': 'system', 'content': 'sys'}]
+
+    with patch('litellm.acompletion', side_effect=RuntimeError('API unavailable')):
+        result = await fca_agent._prepare_final_answer()
+
+    assert result == 'No response generated due to SLM failure.'
+
+
+def test_is_error():
+    """Test robust error detection regex."""
+    from kodeagent.fca import FunctionCallingAgent as FCA
+
+    assert FCA._is_error('Error: failed') is True
+    assert FCA._is_error('ERROR: something broke') is True
+    assert FCA._is_error('*** ERROR: critical') is True
+    assert FCA._is_error('   error: prefix spaces') is True
+    assert FCA._is_error('*** Errror: typo') is True
+    assert FCA._is_error('errror') is True
+    assert FCA._is_error('This is not an error') is False
+    assert FCA._is_error('The process finished without errors') is False
+    assert FCA._is_error('') is False
+    assert FCA._is_error(None) is False  # type: ignore
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_async_function(fca_agent):
+    """Test executing an async tool function."""
+
+    async def async_tool(x: int) -> str:
+        return f'Async: {x}'
+
+    fca_agent.tool_map['async_tool'] = async_tool
+    tool_call = MagicMock()
+    tool_call.id = 'async_1'
+    tool_call.function.name = 'async_tool'
+    tool_call.function.arguments = json.dumps({'x': 42})
+
+    result = await fca_agent._execute_tool(tool_call)
+    assert result['content'] == 'Async: 42'
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_timeout(fca_agent):
+    """Test tool execution timeout handling."""
+
+    async def slow_tool():
+        await asyncio.sleep(2)
+        return 'too slow'
+
+    fca_agent.tool_map['slow_tool'] = slow_tool
+    fca_agent.tool_timeout = 0.1
+    tool_call = MagicMock()
+    tool_call.id = 'slow_1'
+    tool_call.function.name = 'slow_tool'
+    tool_call.function.arguments = '{}'
+
+    result = await fca_agent._execute_tool(tool_call)
+    assert 'timed out after 0.1s' in result['content']
+
+
+@pytest.mark.asyncio
+async def test_run_tool_deduplication_reached(fca_agent):
+    """Test that deduplication logic in run loop is exercised."""
+    mock_response = MagicMock()
+    mock_tool_call = MagicMock()
+    mock_tool_call.id = 'dedup_1'
+    mock_tool_call.function.name = 'dummy_tool'
+    mock_tool_call.function.arguments = json.dumps({'a': 1})
+    mock_response.choices[0].message.tool_calls = [mock_tool_call]
+    mock_response.choices[0].message.model_dump.return_value = {
+        'role': 'assistant',
+        'tool_calls': [
+            {'id': 'dedup_1', 'function': {'name': 'dummy_tool', 'arguments': '{"a": 1}'}}
+        ],
+    }
+
+    mock_response_final = MagicMock()
+    mock_response_final.choices[0].message.tool_calls = None
+    mock_response_final.choices[0].message.content = 'Done'
+    mock_response_final.choices[0].message.model_dump.return_value = {
+        'role': 'assistant',
+        'content': 'Done',
+    }
+
+    # Same tool call twice, then final answer
+    # Use separate mock objects to avoid any crosstalk
+    mock_response_2 = MagicMock()
+    mock_response_2.choices[0].message.tool_calls = [mock_tool_call]
+    mock_response_2.choices[0].message.model_dump.return_value = {
+        'role': 'assistant',
+        'tool_calls': [
+            {'id': 'dedup_1', 'function': {'name': 'dummy_tool', 'arguments': '{"a": 1}'}}
+        ],
+    }
+
+    with patch(
+        'litellm.acompletion', side_effect=[mock_response, mock_response_2, mock_response_final]
+    ):
+        responses = []
+        async for resp in fca_agent.run(
+            'Task', max_iterations=5, refine_final_answer=False, use_planning=False
+        ):
+            responses.append(resp)
+
+    # Check for deduplication message in logs
+    log_values = [r['value'] for r in responses if r['type'] == 'log']
+    assert any('already called `dummy_tool`' in v for v in log_values)
+
+
+def test_format_history_as_text_unknown_role(fca_agent):
+    """Test _format_history_as_text with an unknown role."""
+    fca_agent.chat_history = [
+        {'role': 'system', 'content': 'sys'},
+        {'role': 'ghost', 'content': 'invisible'},
+    ]
+    formatted = fca_agent._format_history_as_text()
+    assert 'invisible' not in formatted
+
+
+@pytest.mark.asyncio
+async def test_run_early_exit_on_loop_detected(fca_agent):
+    """Test that the loop terminates when a loop is detected and persists."""
+    mock_response = MagicMock()
+    mock_tool_call = MagicMock()
+    mock_tool_call.id = 'loop_1'
+    mock_tool_call.function.name = 'dummy_tool'
+    mock_tool_call.function.arguments = json.dumps({'a': 1})
+    mock_response.choices[0].message.tool_calls = [mock_tool_call]
+    mock_response.choices[0].message.model_dump.return_value = {
+        'role': 'assistant',
+        'tool_calls': [
+            {'id': 'loop_1', 'function': {'name': 'dummy_tool', 'arguments': '{"a": 1}'}}
+        ],
+    }
+
+    with patch('litellm.acompletion', return_value=mock_response):
+        # Force nudge_count to threshold
+        fca_agent.nudge_count = 3
+        responses = []
+        async for resp in fca_agent.run(
+            'Task', max_iterations=10, loop_threshold=3, use_planning=False
+        ):
+            responses.append(resp)
+
+    log_values = [r['value'] for r in responses if r['type'] == 'log']
+    assert any('Loop persisted after nudges. Terminating for safety.' in v for v in log_values)
+
+
+@pytest.mark.asyncio
+async def test_prepare_final_answer_no_content(fca_agent):
+    """Test _prepare_final_answer when LLM returns no content."""
+    fca_agent.chat_history = [{'role': 'user', 'content': 'test'}]
+
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = None
+
+    with patch('litellm.acompletion', return_value=mock_response):
+        result = await fca_agent._prepare_final_answer()
+        assert result == ''
+
+
+@pytest.mark.asyncio
+async def test_fca_final_answer_hallucinated_keys_relaxed_validation(fca_agent):
+    """Test final_answer tool with hallucinated argument keys."""
+    tool_call = MagicMock()
+    tool_call.id = 'hallucinated_1'
+    tool_call.function.name = 'final_answer'
+
+    # Model hallucinations common synonym keys
+    tool_call.function.arguments = json.dumps({'output': 'I did it!'})
+    result = await fca_agent._execute_tool(tool_call)
+    assert result['content'] == 'I did it!'
+
+    tool_call.function.arguments = json.dumps({'reply': 'Roger that'})
+    result = await fca_agent._execute_tool(tool_call)
+    assert result['content'] == 'Roger that'
+
+
+def test_extract_urls():
+    """Test URL extraction utility."""
+    from kodeagent.fca import FunctionCallingAgent as FCA
+
+    text = 'Check https://example.com and http://test.org/path'
+    urls = FCA._extract_urls(text)
+    assert set(urls) == {'https://example.com', 'http://test.org/path'}
+
+
+def test_format_history_as_text_missing_assistant_content(fca_agent):
+    """Test history formatting when assistant message has no content (only tool calls)."""
+    mock_tool_call = MagicMock()
+    mock_tool_call.function.name = 'tool1'
+
+    fca_agent.chat_history = [
+        {'role': 'system', 'content': 'sys'},
+        {'role': 'assistant', 'tool_calls': [mock_tool_call]},
+    ]
+    formatted = fca_agent._format_history_as_text()
+    assert 'Assistant' in formatted
+    assert '[Called tools: tool1]' in formatted
+    # Should not have "Assistant: None" or similar
+    assert 'Assistant: ' in formatted

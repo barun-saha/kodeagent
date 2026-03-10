@@ -1220,7 +1220,7 @@ class TestSearchWikipedia:
 
         result = search_wikipedia('test query')
 
-        assert 'Error searching Wikipedia' in result
+        assert 'ERROR:' in result
         assert 'Unexpected API Error' in result
 
     @patch('wikipedia.search')
@@ -1400,7 +1400,7 @@ class TestTranscribeAudio:
         """Test error when API key is missing."""
         mock_getenv.return_value = None
         result = transcribe_audio('/path/to/audio.mp3')
-        assert 'Error' in result
+        assert 'ERROR' in result
         assert 'FIREWORKS_API_KEY' in result
 
     @patch('requests.post')
@@ -1443,7 +1443,7 @@ class TestTranscribeAudio:
         # or we can explicitly patch it to raise
         with patch('builtins.open', side_effect=FileNotFoundError()):
             result = transcribe_audio('/nonexistent/file.mp3')
-            assert 'Error' in result
+            assert 'ERROR' in result
             assert 'file not found' in result.lower()
 
     @patch('requests.post')
@@ -1458,7 +1458,7 @@ class TestTranscribeAudio:
 
         result = transcribe_audio('/path/to/audio.mp3')
 
-        assert 'Error' in result
+        assert 'ERROR' in result
         assert 'timed out' in result.lower()
 
     @patch('requests.post')
@@ -1471,7 +1471,7 @@ class TestTranscribeAudio:
 
         result = transcribe_audio('/path/to/audio.mp3')
 
-        assert 'Error' in result
+        assert 'ERROR' in result
         assert 'Exception' in result
         assert 'Unexpected error' in result
 
@@ -1561,7 +1561,7 @@ class TestGenerateImage:
 
         result = generate_image('test prompt', model_name='test-model')
 
-        assert 'Error' in result
+        assert 'ERROR' in result
         assert 'No image data' in result
 
     @patch('litellm.image_generation')
@@ -1573,7 +1573,7 @@ class TestGenerateImage:
 
         result = generate_image('test prompt', model_name='test-model')
 
-        assert 'Error: Image generation returned no data' in result
+        assert 'ERROR: Image generation returned no data' in result
 
     @patch('litellm.image_generation')
     def test_generate_image_no_data_attribute(self, mock_image_gen):
@@ -1592,7 +1592,7 @@ class TestGenerateImage:
         mock_image_gen.return_value = NoDataResponse()
 
         result = generate_image('test prompt', model_name='test-model')
-        assert 'Error: Image generation failed' in result
+        assert 'ERROR: Image generation failed' in result
 
     @patch('litellm.image_generation')
     def test_generate_image_exception(self, mock_image_gen):
