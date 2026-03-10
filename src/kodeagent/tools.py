@@ -864,11 +864,11 @@ def search_wikipedia(query: str, max_results: int = 3) -> str:
         # before returning a results list; less common but possible
         options_str = ', '.join(de.options[:5])
         return (
-            f'Ambiguous query. Wikipedia suggests these specific topics: {options_str}.'
+            f'ERROR: Ambiguous query. Wikipedia suggests these specific topics: {options_str}.'
             ' Please retry with one of these exact terms as the search query.'
         )
     except Exception as e:
-        return f'Error searching Wikipedia: {str(e)}'
+        return f'ERROR: While searching Wikipedia: {str(e)}'
 
 
 def search_arxiv(query: str, max_results: int = 5) -> str:
@@ -909,7 +909,7 @@ def search_arxiv(query: str, max_results: int = 5) -> str:
         return output
 
     except Exception as e:
-        return f'An error occurred during the arXiv search: {str(e)}'
+        return f'ERROR: An error occurred during the arXiv search: {str(e)}'
 
 
 def transcribe_youtube(video_id: str) -> str:
@@ -953,13 +953,13 @@ def transcribe_audio(file_path: str) -> str:
 
     api_key = os.getenv('FIREWORKS_API_KEY')
     if not api_key:
-        return 'Error: FIREWORKS_API_KEY environment variable is not set.'
+        return 'ERROR: FIREWORKS_API_KEY environment variable is not set.'
 
     try:
         import requests
     except ImportError:
         return (
-            'Audio transcription error: `requests` library not found.'
+            'ERROR: Audio transcription error: `requests` library not found.'
             ' Please install it with `pip install requests`.'
         )
 
@@ -983,14 +983,14 @@ def transcribe_audio(file_path: str) -> str:
                 return 'Error: Transcription succeeded but returned empty text.'
             return text
 
-        return f'Audio transcription error: {response.status_code}: {response.text}'
+        return f'ERROR: Audio transcription error: {response.status_code}: {response.text}'
 
     except FileNotFoundError:
-        return f'Error: Audio file not found: {file_path}'
+        return f'ERROR: Audio file not found: {file_path}'
     except requests.exceptions.Timeout:
-        return 'Error: Request timed out after 30s. Audio file may be too large.'
+        return 'ERROR: Request timed out after 30s. Audio file may be too large.'
     except Exception as e:
-        return f'Error: {type(e).__name__}: {str(e)}'
+        return f'ERROR: {type(e).__name__}: {str(e)}'
 
 
 def generate_image(prompt: str, model_name: str) -> str:
@@ -1015,7 +1015,7 @@ def generate_image(prompt: str, model_name: str) -> str:
         # Check for empty data list
         if not response.data or len(response.data) == 0:
             return (
-                'Error: Image generation returned no data. The API may have rejected '
+                'ERROR: Image generation returned no data. The API may have rejected '
                 'the prompt or encountered an error.'
             )
 
@@ -1032,9 +1032,9 @@ def generate_image(prompt: str, model_name: str) -> str:
                 f.write(base64.b64decode(image_data.b64_json))
             return os.path.abspath(file_path)
 
-        return 'Error: No image data (URL or Base64) found in response.'
+        return 'ERROR: No image data (URL or Base64) found in response.'
     except Exception as ex:
-        return f'Error: Image generation failed: {ex}'
+        return f'ERROR: Image generation failed: {ex}'
 
 
 if __name__ == '__main__':
