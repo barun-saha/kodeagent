@@ -894,8 +894,7 @@ def test_extract_urls():
 
     text = 'Check https://example.com and http://test.org/path'
     urls = FCA._extract_urls(text)
-    assert 'https://example.com' in urls
-    assert 'http://test.org/path' in urls
+    assert set(urls) == {'https://example.com', 'http://test.org/path'}
 
 
 def test_format_history_as_text_missing_assistant_content(fca_agent):
