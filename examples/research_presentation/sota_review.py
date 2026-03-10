@@ -29,7 +29,7 @@ def generate_powerpoint_slide_deck(topic_or_contents: str) -> str:
 
     # Gemini API key is set via env variable
     slide_generator = SlideDeckAI(
-        model='[gg]gemini-2.0-flash-lite',  # SlideDeckAI uses a different model naming convention
+        model='[gg]gemini-2.5-flash-lite',  # SlideDeckAI uses a different model naming convention
         topic=topic_or_contents,
     )
     pptx_path = slide_generator.generate()
@@ -43,7 +43,7 @@ async def main():
     agent = ReActAgent(
         name='SOTA Review Presenter',
         description='Creates a slide deck reviewing the state-of-the-art research on any topic.',
-        model_name='gemini/gemini-2.0-flash-lite',  # 'gpt-4.1-mini'
+        model_name='gemini/gemini-2.5-flash-lite',  # 'gpt-4.1-mini'
         tools=[search_arxiv, generate_powerpoint_slide_deck],
         max_iterations=5,
     )
