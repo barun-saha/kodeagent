@@ -57,14 +57,19 @@ FINAL_ANSWER_TOOL_NAME = 'final_answer'
 
 def final_answer(result: str) -> str:
     """Provide the final answer to the user's task and end the conversation.
+    Always call this tool when you have enough information to answer.
 
     Args:
-        result: The final answer or result of the task.
+        result: The final answer as plain text.
 
     Returns:
-        The final answer text in user-readable format.
+        The result string unchanged.
     """
-    return result
+    if isinstance(result, dict):
+        return '\n\n'.join(str(v) for v in result.values())
+    if isinstance(result, list):
+        return '\n\n'.join(str(item) for item in result)
+    return str(result) if not isinstance(result, str) else result
 
 
 class FunctionCallingAgent:
@@ -224,6 +229,11 @@ class FunctionCallingAgent:
 
                     if tool_result is None:
                         result = 'Error: `final_answer` called without a result.'
+                    elif isinstance(tool_result, (dict, list)):
+                        try:
+                            result = json.dumps(tool_result, ensure_ascii=False, indent=2)
+                        except (TypeError, ValueError):
+                            result = str(tool_result)
                     else:
                         result = str(tool_result)
             else:
@@ -248,6 +258,11 @@ class FunctionCallingAgent:
                             f'Error: Tool `{name}` returned an empty result. '
                             'The query may have returned no data.'
                         )
+                    elif isinstance(tool_result, (dict, list)):
+                        try:
+                            result = json.dumps(tool_result, ensure_ascii=False, indent=2)
+                        except (TypeError, ValueError):
+                            result = str(tool_result)
                     else:
                         result = str(tool_result)
 
