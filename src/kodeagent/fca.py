@@ -222,7 +222,7 @@ class FunctionCallingAgent:
                     )
                 else:
                     tool_result = None
-                    for key in ('result', 'answer', 'response', 'output', 'reply'):
+                    for key in ('result', 'reason', 'answer', 'response', 'output', 'reply'):
                         value = args.get(key)
                         if value is not None:
                             tool_result = value
