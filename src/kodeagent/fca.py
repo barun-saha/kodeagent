@@ -60,12 +60,13 @@ def final_answer(result: str) -> str:
     Always call this tool when you have enough information to answer.
 
     Args:
-        result: The final answer as plain text.
+        result: The final answer or result of the task.
 
     Returns:
-        The result string unchanged.
+        The final answer text in user-readable format.
     """
     if isinstance(result, dict):
+        # Drop keys, combine the values
         return '\n\n'.join(str(v) for v in result.values())
     if isinstance(result, list):
         return '\n\n'.join(str(item) for item in result)
