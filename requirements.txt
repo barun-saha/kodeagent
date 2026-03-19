@@ -1,9 +1,9 @@
-litellm~=1.82.2
+litellm~=1.82.4
 pydantic~=2.12.5
-python-dotenv~=1.2.1
-e2b-code-interpreter~=2.4.1
+python-dotenv~=1.2.2
+e2b-code-interpreter~=2.5.0
 requests~=2.32.5
-json_repair~=0.58.5
+json_repair~=0.58.6
 tenacity~=9.1.4
 aiohttp~=3.13.3
 protobuf~=6.33.5
