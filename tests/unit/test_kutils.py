@@ -446,13 +446,11 @@ def test_make_user_message_with_urls(mock_head, mock_get):
 
 
 @patch('os.path.isfile')
-@patch('mimetypes.guess_type')
-def test_make_user_message_with_local_files(mock_mime, mock_isfile):
+def test_make_user_message_with_local_files(mock_isfile):
     """Test message creation with local files."""
     mock_isfile.return_value = True
 
     # Test with text file
-    mock_mime.return_value = ('text/plain', None)
     m = mock_open(read_data='Hello from file')
     with patch('builtins.open', m):
         message = make_user_message('Read this file', files=['test.txt'])
@@ -461,13 +459,6 @@ def test_make_user_message_with_local_files(mock_mime, mock_isfile):
     assert len(content) == 2
     assert 'Hello from file' in content[1]['text']
 
-    # Test with binary file
-    mock_mime.return_value = ('application/pdf', None)
-    message = make_user_message('Check this PDF', files=['doc.pdf'])
-
-    content = message[0]['content']
-    assert len(content) == 2
-    assert 'Input file:' in content[1]['text']
 
 
 @patch('os.path.isfile')
@@ -496,20 +487,19 @@ def test_make_user_message_error_handling():
     """Test error handling in message creation."""
     # We mock os.path.isfile and mimetypes.guess_type at the function level
     with patch('os.path.isfile', return_value=True) as mock_isfile:
-        with patch('mimetypes.guess_type') as mock_guess_type:
-            # Test file read error
-            mock_guess_type.side_effect = Exception('Read error')
-            message = make_user_message('Test errors', files=['error.txt'])
-            # Should only have the original message
-            assert len(message[0]['content']) == 1
+        with patch('builtins.open', mock_open(read_data='content')):
+            # Test file that exists but read throws an error (simulated via Exception)
+            # We mock the open to raise on read
+            with patch('builtins.open', side_effect=Exception('Read error')):
+                message = make_user_message('Test errors', files=['error.txt'])
+                # Should have original message + fallback path (len 2)
+                assert len(message[0]['content']) == 2
+                assert 'Input file: error.txt' in message[0]['content'][1]['text']
 
             # Test with nonexistent file
             mock_isfile.return_value = False
-            mock_guess_type.side_effect = None  # Reset the side effect for the next test
             message = make_user_message('Test missing file', files=['missing.txt'])
             assert len(message[0]['content']) == 1
-
-
 @patch('os.path.isfile')
 def test_make_user_message_complex_scenario(mock_isfile):
     """Test message creation with mixed content types."""
@@ -606,21 +596,20 @@ def test_make_user_message_local_image_no_mime_type(mock_mime, mock_isfile):
 
 
 @patch('os.path.isfile', return_value=True)
-@patch('mimetypes.guess_type', return_value=('text/plain', None))
-def test_make_user_message_text_file_read_error(mock_mime, mock_isfile):
-    """Test reading a text file that raises an error (e.g., encoding) and falls back to path only."""
+def test_make_user_message_text_file_read_error(mock_isfile):
+    """Test reading a text file that raises a Unicode error and falls back to path only."""
 
-    # Mock open to raise an exception on read
+    # Mock open to raise a UnicodeDecodeError on read
     def raising_open(*args, **kwargs):
         mock_file = MagicMock()
-        # Mock read to raise a Unicode error
         mock_file.__enter__.return_value.read.side_effect = UnicodeDecodeError(
             'utf-8', b'\x80', 0, 1, 'invalid start byte'
         )
         return mock_file
 
     with patch('builtins.open', raising_open):
-        with patch.object(logger, 'error') as mock_log:
+        # The new code logs UnicodeDecodeError as debug, not error
+        with patch.object(logger, 'debug') as mock_log:
             message = make_user_message('Read this bad file', files=['bad.txt'])
 
             content = message[0]['content']
@@ -629,6 +618,35 @@ def test_make_user_message_text_file_read_error(mock_mime, mock_isfile):
             assert content[1]['type'] == 'text'
             assert content[1]['text'] == 'Input file: bad.txt'
             mock_log.assert_called_once()
+
+
+@patch('os.path.isfile', return_value=True)
+def test_make_user_message_large_file(mock_isfile):
+    """Test that a file larger than MAX_FILE_CONTENT_LENGTH is not inlined."""
+    large_content = 'A' * 6000  # Threshold is 5000
+    m = mock_open(read_data=large_content)
+    with patch('builtins.open', m):
+        with patch.object(logger, 'warning') as mock_warn:
+            message = make_user_message('Large file', files=['large.txt'])
+            
+            content = message[0]['content']
+            assert len(content) == 2
+            assert 'file too large to include inline' in content[1]['text']
+            assert '(6000 chars)' not in content[1]['text'] # chars in log, not message
+            mock_warn.assert_called_once()
+
+
+@patch('os.path.isfile', return_value=True)
+def test_make_user_message_unregistered_extension(mock_isfile):
+    """Test that files with unregistered extensions are still inlined if text."""
+    # We don't even patch mimetypes because it's not used in the text branch
+    m = mock_open(read_data='col1,col2\nval1,val2')
+    with patch('builtins.open', m):
+        message = make_user_message('Read CSV', files=['data.csv'])
+        
+        content = message[0]['content']
+        assert len(content) == 2
+        assert 'col1,col2' in content[1]['text']
 
 
 # Edge case: make_user_message with empty file list
@@ -641,11 +659,11 @@ def test_make_user_message_empty_files():
 
 # Edge case: make_user_message with unknown MIME type
 @patch('os.path.isfile', return_value=True)
-@patch('mimetypes.guess_type', return_value=(None, None))
-def test_make_user_message_unknown_mime(mock_mime, mock_isfile):
-    """Test make_user_message with a file of unknown MIME type."""
-    msg = make_user_message('unknown mime', files=['file.unknown'])
-    assert any('Input file:' in c['text'] for c in msg[0]['content'] if c['type'] == 'text')
+def test_make_user_message_fallback_any_text(mock_isfile):
+    """Test make_user_message with any file that exists."""
+    with patch('builtins.open', mock_open(read_data='some content')):
+        msg = make_user_message('unknown mime', files=['file.unknown'])
+        assert any('File file.unknown content' in c['text'] for c in msg[0]['content'] if c['type'] == 'text')
 
 
 # Edge case: make_user_message with invalid file path
