@@ -460,7 +460,6 @@ def test_make_user_message_with_local_files(mock_isfile):
     assert 'Hello from file' in content[1]['text']
 
 
-
 @patch('os.path.isfile')
 @patch('mimetypes.guess_type')
 def test_make_user_message_with_images(mock_mime, mock_isfile):
@@ -500,6 +499,8 @@ def test_make_user_message_error_handling():
             mock_isfile.return_value = False
             message = make_user_message('Test missing file', files=['missing.txt'])
             assert len(message[0]['content']) == 1
+
+
 @patch('os.path.isfile')
 def test_make_user_message_complex_scenario(mock_isfile):
     """Test message creation with mixed content types."""
@@ -628,11 +629,11 @@ def test_make_user_message_large_file(mock_isfile):
     with patch('builtins.open', m):
         with patch.object(logger, 'warning') as mock_warn:
             message = make_user_message('Large file', files=['large.txt'])
-            
+
             content = message[0]['content']
             assert len(content) == 2
             assert 'file too large to include inline' in content[1]['text']
-            assert '(6000 chars)' not in content[1]['text'] # chars in log, not message
+            assert '(6000 chars)' not in content[1]['text']  # chars in log, not message
             mock_warn.assert_called_once()
 
 
@@ -643,7 +644,7 @@ def test_make_user_message_unregistered_extension(mock_isfile):
     m = mock_open(read_data='col1,col2\nval1,val2')
     with patch('builtins.open', m):
         message = make_user_message('Read CSV', files=['data.csv'])
-        
+
         content = message[0]['content']
         assert len(content) == 2
         assert 'col1,col2' in content[1]['text']
@@ -663,7 +664,11 @@ def test_make_user_message_fallback_any_text(mock_isfile):
     """Test make_user_message with any file that exists."""
     with patch('builtins.open', mock_open(read_data='some content')):
         msg = make_user_message('unknown mime', files=['file.unknown'])
-        assert any('File file.unknown content' in c['text'] for c in msg[0]['content'] if c['type'] == 'text')
+        assert any(
+            'File file.unknown content' in c['text']
+            for c in msg[0]['content']
+            if c['type'] == 'text'
+        )
 
 
 # Edge case: make_user_message with invalid file path

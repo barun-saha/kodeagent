@@ -916,24 +916,21 @@ def test_format_history_as_text_missing_assistant_content(fca_agent):
 def test_final_answer_data_structures():
     """Test final_answer helper with various data structures."""
     from kodeagent.fca import final_answer
-    
+
     # Dict input (line 70)
     d_input = {'a': 1, 'b': 'two'}
     assert final_answer(d_input) == '1\n\ntwo'
-    
+
     # List input (line 72)
     l_input = ['first', 42, {'nested': 'value'}]
-    assert final_answer(l_input) == 'first\n\n42\n\n{\'nested\': \'value\'}'
+    assert final_answer(l_input) == "first\n\n42\n\n{'nested': 'value'}"
 
 
 def test_fca_init_with_final_answer():
     """Test __init__ when final_answer is already in the tools list (line 116 jump)."""
     from kodeagent.fca import final_answer
-    
-    agent = FunctionCallingAgent(
-        model_name='test',
-        tools=[final_answer]
-    )
+
+    agent = FunctionCallingAgent(model_name='test', tools=[final_answer])
     # final_answer should be present exactly once
     assert len([t for t in agent.tools if t.__name__ == 'final_answer']) == 1
 
@@ -945,7 +942,7 @@ async def test_execute_tool_final_answer_non_dict_args(fca_agent):
     tool_call.id = 'fa_err_1'
     tool_call.function.name = 'final_answer'
     tool_call.function.arguments = '"just a string"'
-    
+
     result = await fca_agent._execute_tool(tool_call)
     assert 'Error: `final_answer` arguments must be a JSON object' in result['content']
 
@@ -964,6 +961,7 @@ async def test_execute_tool_complex_json_results(fca_agent):
     # 2. Regular tool with list result
     def list_tool():
         return [1, 2, 3]
+
     fca_agent.tool_map['list_tool'] = list_tool
     fca_agent.tool_schemas.append(build_tool_schema(list_tool, as_text=False))
     tool_call.id = 'c2'
@@ -978,8 +976,10 @@ async def test_execute_tool_complex_json_results(fca_agent):
     class Unserializable:
         def __repr__(self):
             return '<Unserializable>'
+
     def bad_tool():
         return [Unserializable()]
+
     fca_agent.tool_map['bad_tool'] = bad_tool
     fca_agent.tool_schemas.append(build_tool_schema(bad_tool, as_text=False))
     tool_call.id = 'c3'
@@ -994,15 +994,18 @@ async def test_execute_tool_json_dumps_failure_branches(fca_agent):
     """Test JSON formatting failure branches (lines 237 and 266)."""
     # Prepare arguments BEFORE patching
     fa_args = json.dumps({'result': {'a': 1}})
-    
+
     # Patch the local import in fca.py
-    with patch('kodeagent.fca.json.dumps', side_effect=TypeError('Object for type Unserializable is not JSON serializable')):
+    with patch(
+        'kodeagent.fca.json.dumps',
+        side_effect=TypeError('Object for type Unserializable is not JSON serializable'),
+    ):
         # 1. Trigger line 237 (final_answer)
         tool_call = MagicMock()
         tool_call.id = 'fa_fail'
         tool_call.function.name = 'final_answer'
         tool_call.function.arguments = fa_args
-        
+
         result = await fca_agent._execute_tool(tool_call)
         # result['content'] should be str(tool_result) -> "{'a': 1}"
         assert "{'a': 1}" in result['content']
@@ -1010,12 +1013,13 @@ async def test_execute_tool_json_dumps_failure_branches(fca_agent):
         # 2. Trigger line 266 (regular tool)
         def some_tool():
             return {'b': 2}
+
         fca_agent.tool_map['some_tool'] = some_tool
         fca_agent.tool_schemas.append(build_tool_schema(some_tool, as_text=False))
         tool_call.id = 'tool_fail'
         tool_call.function.name = 'some_tool'
         tool_call.function.arguments = '{}'
-        
+
         result = await fca_agent._execute_tool(tool_call)
         assert "{'b': 2}" in result['content']
 
@@ -1024,14 +1028,15 @@ def test_detect_tool_loop_no_available_tools(fca_agent):
     """Test loop detection nudge when no other tools are available (line 340 jump)."""
     # Force tool_map to only have final_answer
     from kodeagent.fca import final_answer
+
     fca_agent.tool_map = {'final_answer': final_answer}
-    
+
     fca_agent.chat_history = [
         {'role': 'assistant', 'tool_calls': [{'function': {'name': 'final_answer'}}]},
         {'role': 'assistant', 'tool_calls': [{'function': {'name': 'final_answer'}}]},
         {'role': 'assistant', 'tool_calls': [{'function': {'name': 'final_answer'}}]},
     ]
-    
+
     assert fca_agent._detect_tool_loop() is True
     nudge = fca_agent.chat_history[-1]['content']
     assert 'Loop detected' in nudge
@@ -1058,12 +1063,15 @@ async def test_run_turn_increment_coverage(fca_agent):
     mock_response = MagicMock()
     mock_response.choices[0].message.tool_calls = None
     mock_response.choices[0].message.content = 'Done'
-    mock_response.choices[0].message.model_dump.return_value = {'role': 'assistant', 'content': 'Done'}
-    
+    mock_response.choices[0].message.model_dump.return_value = {
+        'role': 'assistant',
+        'content': 'Done',
+    }
+
     with patch('litellm.acompletion', return_value=mock_response):
         responses = []
         async for resp in fca_agent.run('Task', use_planning=False):
             responses.append(resp)
-        
+
         assert fca_agent.task.steps_taken == 1
         assert any('* Executing step 1' in r['value'] for r in responses if r['type'] == 'log')
