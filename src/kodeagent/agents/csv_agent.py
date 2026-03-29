@@ -7,8 +7,10 @@ and produces a structured list of narrative-ready findings.
 import contextvars
 import json
 import logging
+import math
 import os
 import warnings
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pandas as pd
@@ -18,6 +20,7 @@ load_dotenv()
 
 from .. import kutils as ku
 from ..kodeagent import ReActAgent
+from ..models import AgentResponse
 
 logger = logging.getLogger(__name__)
 
@@ -162,17 +165,27 @@ def get_summary_stats(columns: str) -> str:
         if len(series) == 0:
             results[col] = 'No numeric values found'
             continue
+
+        # Compute statistics and convert NaN to None for JSON serialization
+        mean_val = float(series.mean())
+        median_val = float(series.median())
+        std_val = float(series.std())
+        min_val = float(series.min())
+        max_val = float(series.max())
+        p25_val = float(series.quantile(0.25))
+        p75_val = float(series.quantile(0.75))
+
         results[col] = {
-            'mean': round(float(series.mean()), 2),
-            'median': round(float(series.median()), 2),
-            'std': round(float(series.std()), 2),
-            'min': round(float(series.min()), 2),
-            'max': round(float(series.max()), 2),
-            'p25': round(float(series.quantile(0.25)), 2),
-            'p75': round(float(series.quantile(0.75)), 2),
+            'mean': round(mean_val, 2) if not math.isnan(mean_val) else None,
+            'median': round(median_val, 2) if not math.isnan(median_val) else None,
+            'std': round(std_val, 2) if not math.isnan(std_val) else None,
+            'min': round(min_val, 2) if not math.isnan(min_val) else None,
+            'max': round(max_val, 2) if not math.isnan(max_val) else None,
+            'p25': round(p25_val, 2) if not math.isnan(p25_val) else None,
+            'p75': round(p75_val, 2) if not math.isnan(p75_val) else None,
             'missing': int(df[col].isna().sum()),
         }
-    return json.dumps(results, default=str)
+    return json.dumps(results, allow_nan=False, default=str)
 
 
 def get_value_counts(column: str, top_n: int = 10) -> str:
@@ -191,6 +204,15 @@ def get_value_counts(column: str, top_n: int = 10) -> str:
         return df
     if column not in df.columns:
         return f'Column "{column}" not found'
+
+    # Validate and coerce top_n parameter
+    try:
+        top_n = int(top_n)
+    except (ValueError, TypeError):
+        return f'Error: top_n must be a valid integer, got: {top_n}'
+
+    if top_n <= 0:
+        return f'Error: top_n must be greater than 0, got: {top_n}'
 
     vc = df[column].value_counts().head(top_n)
     total = len(df)
@@ -236,6 +258,8 @@ def find_trends(numeric_column: str, time_column: str) -> str:
             df_copy[time_column] = pd.to_datetime(
                 df_copy[time_column], format='mixed', errors='coerce'
             )
+        # Drop rows with NaT (invalid dates) before sorting
+        df_copy = df_copy.dropna(subset=[time_column])
         sorted_df = df_copy.sort_values(time_column)
         values = pd.to_numeric(sorted_df[numeric_column], errors='coerce').dropna().values
 
@@ -347,23 +371,28 @@ def compare_groups(numeric_column: str, category_column: str) -> str:
             * 100
         )
 
+        # Convert NaN values to None for JSON serialization
+        top_avg_val = float(grouped['mean'].iloc[0])
+        bottom_avg_val = float(grouped['mean'].iloc[-1])
+        pct_diff_val = float(pct_diff)
+
         result = {
             'numeric_column': numeric_column,
             'category_column': category_column,
             'top_category': str(top),
-            'top_avg': round(float(grouped['mean'].iloc[0]), 2),
+            'top_avg': round(top_avg_val, 2) if not math.isnan(top_avg_val) else None,
             'bottom_category': str(bottom),
-            'bottom_avg': round(float(grouped['mean'].iloc[-1]), 2),
-            'pct_difference': round(float(pct_diff), 1),
+            'bottom_avg': round(bottom_avg_val, 2) if not math.isnan(bottom_avg_val) else None,
+            'pct_difference': round(pct_diff_val, 1) if not math.isnan(pct_diff_val) else None,
             'all_groups': {
                 str(k): {
-                    'avg': round(float(v['mean']), 2),
+                    'avg': round(float(v['mean']), 2) if not math.isnan(float(v['mean'])) else None,
                     'count': int(v['count']),
                 }
                 for k, v in grouped.iterrows()
             },
         }
-        return json.dumps(result, default=str)
+        return json.dumps(result, allow_nan=False, default=str)
 
     except Exception as e:
         return f'Error comparing groups: {str(e)}'
@@ -447,6 +476,15 @@ def sample_rows(filter_column: str, filter_value: str, n: int = 5) -> str:
     if filter_column not in df.columns:
         return f'Column "{filter_column}" not found'
 
+    # Validate and coerce n parameter
+    try:
+        n = int(n)
+    except (ValueError, TypeError):
+        return f'Error: n must be a valid integer, got: {n}'
+
+    if n <= 0:
+        return f'Error: n must be greater than 0, got: {n}'
+
     n = min(n, 20)
     try:
         mask = df[filter_column].astype(str).str.contains(str(filter_value), case=False, na=False, regex=False)
@@ -508,15 +546,18 @@ class CSVAnalysisAgent(ReActAgent):
         if 'tools' in kwargs:
             tools.extend(kwargs.pop('tools'))
 
+        # Pop system_prompt from kwargs to avoid duplicate keyword argument
+        system_prompt = kwargs.pop('system_prompt', CSV_ANALYST_SYSTEM_PROMPT)
+
         super().__init__(
             name=name,
             model_name=model_name,
             tools=tools,
-            system_prompt=CSV_ANALYST_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             **kwargs,
         )
 
-    async def pre_run(self) -> None:
+    async def pre_run(self) -> AsyncIterator[AgentResponse]:
         """Pre-run hook to auto-load CSV files and yield initialization logs."""
         # Reset the per-agent DataFrame state
         _agent_df_storage.set(None)
@@ -566,21 +607,21 @@ async def main() -> None:
     task = (
         'Analyse this CSV dataset and find the most interesting patterns for a data story.\n\n'
         'Your final answer MUST be a valid JSON object with this exact structure:\n\n'
-        '{{\n'
+        '{\n'
         '  "dataset_summary": "one sentence describing the dataset",\n'
-        '  "has_time_dimension": true or false,\n'
+        '  "has_time_dimension": true,\n'
         '  "findings": [\n'
-        '    {{\n'
-        '      "type": "trend|anomaly|correlation|comparison|distribution",\n'
-        '      "severity": 0.0-1.0,\n'
+        '    {\n'
+        '      "type": "trend",\n'
+        '      "severity": 0.8,\n'
         '      "description": "plain language finding",\n'
         '      "columns_involved": ["col1"],\n'
-        '      "data_slice": {{"key": "value"}}\n'
-        '    }}\n'
+        '      "data_slice": {"key": "value"}\n'
+        '    }\n'
         '  ],\n'
         '  "boring": false,\n'
         '  "boring_message": null\n'
-        '}}\n\n'
+        '}\n\n'
         'Return ONLY the JSON object. No prose, no markdown, no explanation.'
     )
     task_files = [args.csv_path]
