@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import warnings
+from typing import Any
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -448,7 +449,7 @@ def sample_rows(filter_column: str, filter_value: str, n: int = 5) -> str:
 
     n = min(n, 20)
     try:
-        mask = df[filter_column].astype(str).str.contains(str(filter_value), case=False, na=False)
+        mask = df[filter_column].astype(str).str.contains(str(filter_value), case=False, na=False, regex=False)
         subset = df[mask].head(n)
         if len(subset) == 0:
             return f'No rows found where {filter_column} contains "{filter_value}"'
@@ -481,8 +482,8 @@ class CSVAnalysisAgent(ReActAgent):
         self,
         name: str = 'CSV Analyst',
         model_name: str = 'gemini/gemini-2.0-flash-lite',
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         """Initialize the CSVAnalysisAgent.
 
         Args:
@@ -515,8 +516,11 @@ class CSVAnalysisAgent(ReActAgent):
             **kwargs,
         )
 
-    async def pre_run(self):
+    async def pre_run(self) -> None:
         """Pre-run hook to auto-load CSV files and yield initialization logs."""
+        # Reset the per-agent DataFrame state
+        _agent_df_storage.set(None)
+
         # Auto-load the first available CSV file if provided
         if self.task and self.task.files:
             for file_path in self.task.files:
@@ -533,16 +537,17 @@ class CSVAnalysisAgent(ReActAgent):
                             ),
                             channel='run',
                         )
+                        break
                     except Exception as e:
                         logger.error('Failed to auto-load CSV %s: %s', file_path, e)
-                    break
+                        continue
 
         # Yield from super class pre_run
         async for response in super().pre_run():
             yield response
 
 
-async def main():
+async def main() -> None:
     """Example usage of the CSVAnalysisAgent."""
     import argparse
 
@@ -579,10 +584,6 @@ async def main():
         'Return ONLY the JSON object. No prose, no markdown, no explanation.'
     )
     task_files = [args.csv_path]
-
-    # Quick demo message layout
-    msg = ku.make_user_message('Test', task_files)
-    print(msg)
 
     async for response in agent.run(task, files=task_files):
         print(response)

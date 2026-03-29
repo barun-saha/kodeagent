@@ -28,7 +28,7 @@ async def main():
     task = 'Carefully analyze this CSV file in detail. Report the key trends, anomalies, and insights.'
     
     async for response in agent.run(task, files=[dataset_url]):
-        if response['type'] == 'final_answer':
+        if response['type'] == 'final':
             print(f'\nResult: {response["value"]}')
 
 if __name__ == '__main__':
@@ -62,7 +62,7 @@ Directs the agent to craft a human-readable narrative based on findings.
 
 #### 3. Structured JSON Reporting
 Useful for automated pipelines where the agent's output needs to be parsed by other systems.
-> "Analyse this CSV dataset and find the most interesting patterns. Your final answer MUST be a valid JSON object with the following structure:
+> "Analyze this CSV dataset and find the most interesting patterns. Your final answer MUST be a valid JSON object with the following structure:
 > ```json
 > {{
 >   "dataset_summary": "one sentence describing the dataset",
