@@ -14,6 +14,7 @@ Please select a section below or choose a version in the bottom-left corner.
 
    installation.md
    usage.md
+   specialized_agents.md
    observability.md
 
 .. toctree::
