@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from ..kodeagent import ReActAgent
 from .. import kutils as ku
+from ..kodeagent import ReActAgent
 
 logger = logging.getLogger(__name__)
 

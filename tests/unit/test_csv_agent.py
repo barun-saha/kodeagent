@@ -42,7 +42,20 @@ def mock_df():
                 '2023-01-11',
                 '2023-01-12',
             ],
-            'sales': [100, 150, 120, 200, 300, 130, 140, 160, 180, 200, 1000, 240], # Contains one extreme outlier (1000)
+            'sales': [
+                100,
+                150,
+                120,
+                200,
+                300,
+                130,
+                140,
+                160,
+                180,
+                200,
+                1000,
+                240,
+            ],  # Contains one extreme outlier (1000)
             'category': ['A', 'A', 'B', 'B', 'A', 'C', 'A', 'B', 'C', 'A', 'C', 'B'],
         }
     )
@@ -130,7 +143,7 @@ def test_get_summary_stats(loaded_df):
 
     result_missing = get_summary_stats('missing')
     assert 'not found' in result_missing
-    
+
     result_non_numeric = get_summary_stats('category')
     assert 'No numeric values found' in result_non_numeric
 
@@ -145,7 +158,7 @@ def test_get_value_counts(loaded_df):
     """Test categorical distribution value counts."""
     result = get_value_counts('category')
     assert '"value": "A"' in result
-    
+
     # Missing column
     result_missing = get_value_counts('missing')
     assert 'not found' in result_missing
@@ -170,12 +183,13 @@ def test_find_trends(loaded_df):
 
 def test_find_trends_edge_cases(clear_storage, mock_df):
     assert 'Error: DataFrame' in find_trends('sales', 'date')
-    
+
     _agent_df_storage.set(mock_df.head(3))
     assert 'Not enough data points' in find_trends('sales', 'date')
-    
+
     _agent_df_storage.set(None)
-    
+
+
 @patch('src.kodeagent.agents.csv_agent.pd.to_datetime')
 def test_find_trends_exception(mock_dt, loaded_df):
     mock_dt.side_effect = Exception('Mock failure')
@@ -191,13 +205,13 @@ def test_find_anomalies(loaded_df):
 
 def test_find_anomalies_edge_cases(clear_storage, mock_df):
     assert 'Error' in find_anomalies('sales')
-    
+
     _agent_df_storage.set(mock_df)
     assert 'not found' in find_anomalies('missing')
-    
+
     _agent_df_storage.set(mock_df.head(5))
     assert 'Not enough data' in find_anomalies('sales')
-    
+
     df_zero_var = mock_df.copy()
     df_zero_var['const'] = 50
     _agent_df_storage.set(df_zero_var)
@@ -210,13 +224,15 @@ def test_compare_groups(loaded_df):
     result = compare_groups('sales', 'category')
     assert 'top_category' in result
     assert '"C": {"avg": 436.67' in result  # Because "C" has the 1000
-    
+
     assert 'not found' in compare_groups('missing', 'category')
     assert 'not found' in compare_groups('sales', 'missing')
 
+
 def test_compare_groups_edge_cases(clear_storage):
     assert 'Error' in compare_groups('sales', 'category')
-    
+
+
 @patch('src.kodeagent.agents.csv_agent.pd.to_numeric')
 def test_compare_groups_exception(mock_tonumeric, loaded_df):
     mock_tonumeric.side_effect = Exception('Aggregation fail')
@@ -228,11 +244,14 @@ def test_find_correlations(loaded_df):
     result = find_correlations('sales,id')
     assert 'strong_correlations' in result
 
+
 def test_find_correlations_edge_cases(clear_storage):
     assert 'Error' in find_correlations('sales,id')
-    
+
+
 def test_find_correlations_missing_cols(loaded_df):
     assert 'Need at least 2 valid columns' in find_correlations('sales,missing')
+
 
 @patch('src.kodeagent.agents.csv_agent.pd.to_numeric')
 def test_find_correlations_exception(mock_numeric, loaded_df):
@@ -244,7 +263,7 @@ def test_sample_rows(loaded_df):
     """Test dynamic query execution over text categories."""
     result = sample_rows('category', 'A')
     assert '"category":"A"' in result
-    
+
     assert 'No rows found' in sample_rows('category', 'Z')
 
 
@@ -253,9 +272,11 @@ def test_sample_rows_missing(loaded_df):
     result = sample_rows('missing_col', 'A')
     assert 'not found' in result
 
+
 def test_sample_rows_uninitialized(clear_storage):
     assert 'Error' in sample_rows('category', 'A')
-    
+
+
 @patch('src.kodeagent.agents.csv_agent.pd.Series.str.contains')
 def test_sample_rows_exception(mock_contains, loaded_df):
     mock_contains.side_effect = Exception('String error')
@@ -287,8 +308,9 @@ async def test_agent_pre_run_autoload(mock_df, clear_storage):
 async def test_agent_pre_run_no_csv(clear_storage):
     """Test CSVAnalysisAgent skips non-CSV properties when loading contexts."""
     agent = CSVAnalysisAgent(
-        model_name='gemini/gemini-2.0-flash-lite', litellm_params={'api_key': 'dummy'},
-        tools=[get_df_schema] # Extends default tools list line 783
+        model_name='gemini/gemini-2.0-flash-lite',
+        litellm_params={'api_key': 'dummy'},
+        tools=[get_df_schema],  # Extends default tools list line 783
     )
     # mock agent task
     agent.task = MagicMock()
@@ -298,18 +320,21 @@ async def test_agent_pre_run_no_csv(clear_storage):
         pass
 
     assert _agent_df_storage.get() is None
-    
+
+
 @pytest.mark.asyncio
 async def test_main_execution():
     """Test main function instantiates and executes cleanly."""
-    from src.kodeagent.agents.csv_agent import main
     import sys
-    
+
+    from src.kodeagent.agents.csv_agent import main
+
     with patch.object(sys, 'argv', ['csv_agent.py', 'test.csv']):
+
         async def mock_run_coro(self, *args, **kwargs):
             self.task = MagicMock()
             self.task.result = 'dummy_result'
             yield {'type': 'log', 'value': 'done'}
-            
+
         with patch('src.kodeagent.agents.csv_agent.CSVAnalysisAgent.run', new=mock_run_coro):
             await main()
