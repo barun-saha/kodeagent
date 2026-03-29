@@ -34,7 +34,11 @@ _agent_df_storage: contextvars.ContextVar[pd.DataFrame | None] = contextvars.Con
 
 
 def _get_df() -> pd.DataFrame | str:
-    """Retrieve the loaded DataFrame, or return an error string."""
+    """Retrieve the loaded DataFrame, or return an error string.
+
+    Returns:
+        The loaded DataFrame or an error message if not found.
+    """
     df = _agent_df_storage.get()
     if df is None:
         return 'Error: DataFrame not loaded. You must call init_df_for_analysis first.'
@@ -64,6 +68,9 @@ def init_df_for_analysis(csv_file_path: str) -> str:
 def get_df_schema() -> str:
     """Get the schema of the dataset: column names, types, cardinality,
     sample values, and missing value counts. Always call this first.
+
+    Returns:
+        A JSON string containing the dataset schema and summary.
     """
     df = _get_df()
     if isinstance(df, str):
@@ -98,6 +105,9 @@ def assess_column(column: str) -> str:
 
     Args:
         column: The column name to assess.
+
+    Returns:
+        A text assessment with judgment and reasoning about the column.
     """
     df = _get_df()
     if isinstance(df, str):
@@ -134,6 +144,9 @@ def get_summary_stats(columns: str) -> str:
 
     Args:
         columns: Comma-separated column names, e.g. "price,quantity,age"
+
+    Returns:
+        A JSON string with summary statistics for the requested columns.
     """
     df = _get_df()
     if isinstance(df, str):
@@ -168,6 +181,9 @@ def get_value_counts(column: str, top_n: int = 10) -> str:
     Args:
         column: The column name to analyse.
         top_n: Number of top values to return (default 10).
+
+    Returns:
+        A JSON string with the frequency distribution.
     """
     df = _get_df()
     if isinstance(df, str):
@@ -200,6 +216,9 @@ def find_trends(numeric_column: str, time_column: str) -> str:
     Args:
         numeric_column: The numeric column to analyse.
         time_column: The time/date column to use as x-axis.
+
+    Returns:
+        A JSON string or error message describing the detected trend.
     """
     df = _get_df()
     if isinstance(df, str):
@@ -256,6 +275,9 @@ def find_anomalies(column: str) -> str:
 
     Args:
         column: The numeric column to check for anomalies.
+
+    Returns:
+        A JSON string or error message detailing detected outliers.
     """
     df = _get_df()
     if isinstance(df, str):
@@ -295,6 +317,9 @@ def compare_groups(numeric_column: str, category_column: str) -> str:
     Args:
         numeric_column: The numeric column to compare.
         category_column: The categorical column to group by.
+
+    Returns:
+        A JSON string comparing statistical metrics across groups.
     """
     df = _get_df()
     if isinstance(df, str):
@@ -350,6 +375,9 @@ def find_correlations(columns: str) -> str:
     Args:
         columns: Comma-separated column names to correlate,
                     e.g. "sales,profit,units"
+
+    Returns:
+        A JSON string listing strong statistical correlations.
     """
     df = _get_df()
     if isinstance(df, str):
@@ -408,6 +436,9 @@ def sample_rows(filter_column: str, filter_value: str, n: int = 5) -> str:
         filter_column: Column to filter on.
         filter_value: Value to match (string comparison).
         n: Number of rows to return (default 5, max 20).
+
+    Returns:
+        A JSON string containing the sample rows.
     """
     df = _get_df()
     if isinstance(df, str):
@@ -431,15 +462,19 @@ class CSVAnalysisAgent(ReActAgent):
 
     Examples:
         Using a local file:
-            agent = CSVAnalysisAgent()
-            # Pass the file path (or URL) directly as a task file
-            async for response in agent.run(task, files=['/path/to/data.csv']):
-                pass
+            .. code-block:: python
+
+                agent = CSVAnalysisAgent()
+                # Pass the file path (or URL) directly as a task file
+                async for response in agent.run(task, files=['/path/to/data.csv']):
+                    pass
 
         Using a URL:
-            agent = CSVAnalysisAgent()
-            async for response in agent.run(task, files=['https://example.com/data.csv']):
-                pass
+            .. code-block:: python
+
+                agent = CSVAnalysisAgent()
+                async for response in agent.run(task, files=['https://example.com/data.csv']):
+                    pass
     """
 
     def __init__(
@@ -516,11 +551,11 @@ async def main():
     args = parser.parse_args()
 
     agent = CSVAnalysisAgent(
-        model_name='gemini/gemini-2.0-flash-lite',
+        model_name='gemini/gemini-2.5-flash-lite',
         description='An agent that analyzes CSV files.',
         litellm_params={'api_key': os.getenv('GOOGLE_API_KEY')},
         max_iterations=15,
-        tracing_type='langsmith',
+        # tracing_type='langsmith',
     )
 
     task = (
