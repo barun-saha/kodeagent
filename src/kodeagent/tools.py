@@ -908,6 +908,15 @@ def search_arxiv(query: str, max_results: int = 5) -> str:
 
         return output
 
+    except ImportError:
+        # Patch to 0.12.1
+        msg = (
+            'ERROR: An error occurred: the required library `arxiv` not installed.'
+            ' Install with: `pip install arxiv`'
+            '\nYou may need to relax the version of requests lib and reinstall.'
+        )
+        print(msg)
+        return msg
     except Exception as e:
         return f'ERROR: An error occurred during the arXiv search: {str(e)}'
 
