@@ -35,6 +35,8 @@ DATA_TYPES = {
     Any: 'string',
 }
 DEFAULT_MAX_LLM_RETRIES = 3
+# Max characters of file content to inline in a user message
+MAX_FILE_CONTENT_LENGTH = 5_000
 LOGGERS_TO_SUPPRESS = [
     'asyncio',
     'cookie_store',
@@ -345,37 +347,52 @@ def make_user_message(text_content: str, files: list[str] | None = None) -> list
                 if is_it_url(item):
                     content.append({'type': 'text', 'text': f'File URL: {item}'})
                 elif os.path.isfile(item):
+                    # Attempt to read the file as UTF-8 text.
+                    # UnicodeDecodeError is the reliable signal that a file is binary —
+                    # more robust than mimetypes.guess_type(), which is extension-based,
+                    # unreliable on Windows (e.g. .csv often has no registered MIME type),
+                    # and returns None for any unknown extension.
                     try:
-                        mime_type, _ = mimetypes.guess_type(item)
-                        if mime_type and (
-                            'text' in mime_type
-                            or mime_type in ('application/json', 'application/xml')
-                        ):
-                            try:
-                                with open(item, encoding='utf-8') as f:
-                                    file_content = f.read()
-                                content.append(
-                                    {
-                                        'type': 'text',
-                                        'text': f'File {item} content:\n{file_content}',
-                                    }
-                                )
-                            except Exception:
-                                logger.error(
-                                    'Error reading text file `%s`...will fallback to path only',
-                                    item,
-                                )
-                                content.append({'type': 'text', 'text': f'Input file: {item}'})
+                        with open(item, encoding='utf-8') as f:
+                            file_content = f.read()
+                        if len(file_content) <= MAX_FILE_CONTENT_LENGTH:
+                            content.append(
+                                {
+                                    'type': 'text',
+                                    'text': f'File {item} content:\n{file_content}',
+                                }
+                            )
                         else:
-                            # Non-text or unknown types: include only the path reference
-                            content.append({'type': 'text', 'text': f'Input file: {item}'})
+                            logger.warning(
+                                'File `%s` content (%d chars) exceeds the %d-char threshold '
+                                '— including path reference only.',
+                                item,
+                                len(file_content),
+                                MAX_FILE_CONTENT_LENGTH,
+                            )
+                            content.append(
+                                {
+                                    'type': 'text',
+                                    'text': (
+                                        f'Input file: {item} (file too large to include inline;'
+                                        ' read it directly from the path)'
+                                    ),
+                                }
+                            )
+                    except UnicodeDecodeError:
+                        # Binary file — include only the path reference
+                        logger.debug(
+                            'File `%s` is not valid UTF-8 text (binary?) — including path only.',
+                            item,
+                        )
+                        content.append({'type': 'text', 'text': f'Input file: {item}'})
                     except Exception:
                         logger.error(
-                            'Error guessing MIME type for local file %s...will ignore it',
+                            'Error reading file `%s`...will fallback to path only',
                             item,
                             exc_info=True,
                         )
-                        # content.append({'type': 'text', 'text': f'Input file: {item}'})
+                        content.append({'type': 'text', 'text': f'Input file: {item}'})
                 else:
                     logger.error('Invalid file path or URL: %s...will ignore it', item)
 

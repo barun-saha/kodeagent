@@ -16,7 +16,7 @@
 </a>
 
 
-KodeAgent is a frameworkless, minimalistic approach to building AI agents. Written in ~3 KLOC (~2.2K statements) of pure Python, KodeAgent is designed to be the robust reasoning core inside your larger system, not the entire platform.
+KodeAgent is a frameworkless, minimalistic approach to building AI agents. KodeAgent is designed to be the robust reasoning core inside your larger system, not the entire platform.
 
 ![KodeAgent Demo](https://raw.githubusercontent.com/barun-saha/kodeagent/refs/heads/main/assets/demo.gif)
 
@@ -130,6 +130,24 @@ async for response in agent.run('What is 123 * 456?'):
 
 Use this [Colab notebook](https://colab.research.google.com/drive/1c7RMTCcSYrO7wZgB25bLX9QenDgVDmAP?usp=sharing) to run function-calling agent with several SLMs (uses T4 GPU).
 
+
+### Task-Specific Agents
+
+KodeAgent provides specialized agent classes for common tasks, such as `CSVAnalysisAgent` for automated data exploration:
+
+```python
+from kodeagent.agents import CSVAnalysisAgent
+
+agent = CSVAnalysisAgent(model_name='gemini/gemini-2.0-flash-lite')
+# Auto-loads CSV from URL/path and performs automated analysis
+async for response in agent.run(
+    'Analyze the trends',
+    files=['https://raw.githubusercontent.com/mwaskom/seaborn-data/master/penguins.csv']
+):
+    pass
+```
+
+Check out the [CSVAnalysisAgent documentation](https://kodeagent.readthedocs.io/en/latest/specialized_agents.html) for more details.
 
 ### Memory(less)
 
