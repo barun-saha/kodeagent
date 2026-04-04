@@ -1234,6 +1234,12 @@ class TestSearchWikipedia:
 
         mock_search.assert_called_once_with('test', results=2)
 
+    def test_search_wikipedia_import_error(self):
+        """Test Wikipedia search with ImportError."""
+        with patch.dict('sys.modules', {'wikipedia': None}):
+            result = search_wikipedia('test')
+            assert '`wikipedia` was not found' in result
+
 
 class TestTranscribeYoutube:
     """Tests for the transcribe_youtube tool."""
@@ -1600,9 +1606,3 @@ class TestSearchArxiv:
         with patch.dict('sys.modules', {'arxiv': None}):
             result = search_arxiv('test')
             assert 'An error occurred' in result
-
-    def test_search_wikipedia_import_error(self):
-        """Test Wikipedia search with ImportError."""
-        with patch.dict('sys.modules', {'wikipedia': None}):
-            result = search_wikipedia('test')
-            assert '`wikipedia` was not found' in result
