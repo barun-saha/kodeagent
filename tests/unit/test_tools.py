@@ -1235,86 +1235,6 @@ class TestSearchWikipedia:
         mock_search.assert_called_once_with('test', results=2)
 
 
-class TestSearchArxiv:
-    """Tests for the search_arxiv tool."""
-
-    @patch('arxiv.Client')
-    def test_search_arxiv_success(self, mock_client):
-        """Test successful arXiv search."""
-        mock_result = Mock()
-        mock_result.title = 'Test Paper'
-        mock_result.pdf_url = 'https://arxiv.org/pdf/1234.5678'
-        mock_result.summary = 'This is a test paper.'
-        mock_result.published = Mock()
-        mock_result.published.strftime.return_value = '2024-01-01'
-
-        mock_author = Mock()
-        mock_author.name = 'John Doe'
-        mock_result.authors = [mock_author]
-
-        mock_client.return_value.results.return_value = [mock_result]
-
-        result = search_arxiv('machine learning')
-
-        assert 'Test Paper' in result
-        assert 'John Doe' in result
-        assert 'This is a test paper.' in result
-        assert '2024-01-01' in result
-
-    @patch('arxiv.Client')
-    def test_search_arxiv_no_results(self, mock_client):
-        """Test arXiv search with no results."""
-        mock_client.return_value.results.return_value = []
-
-        result = search_arxiv('nonexistent topic')
-
-        assert 'No results found' in result
-
-    @patch('arxiv.Client')
-    def test_search_arxiv_multiple_authors(self, mock_client):
-        """Test arXiv result with multiple authors."""
-        mock_result = Mock()
-        mock_result.title = 'Multi-author Paper'
-        mock_result.pdf_url = 'https://arxiv.org/pdf/1234.5678'
-        mock_result.summary = 'Summary'
-        mock_result.published = Mock()
-        mock_result.published.strftime.return_value = '2024-01-01'
-
-        mock_author1 = Mock()
-        mock_author1.name = 'John Doe'
-        mock_author2 = Mock()
-        mock_author2.name = 'Jane Smith'
-        mock_result.authors = [mock_author1, mock_author2]
-
-        mock_client.return_value.results.return_value = [mock_result]
-
-        result = search_arxiv('test')
-
-        assert 'John Doe, Jane Smith' in result
-
-    @patch('arxiv.Client')
-    def test_search_arxiv_exception_handling(self, mock_client):
-        """Test arXiv search exception handling."""
-        mock_client.side_effect = Exception('API Error')
-
-        result = search_arxiv('test')
-
-        assert 'error occurred' in result.lower()
-        assert 'API Error' in result
-
-    def test_search_arxiv_import_error(self):
-        """Test arXiv search with ImportError."""
-        with patch.dict('sys.modules', {'arxiv': None}):
-            result = search_arxiv('test')
-            assert 'An error occurred' in result
-
-    def test_search_wikipedia_import_error(self):
-        """Test Wikipedia search with ImportError."""
-        with patch.dict('sys.modules', {'wikipedia': None}):
-            result = search_wikipedia('test')
-            assert '`wikipedia` was not found' in result
-
-
 class TestTranscribeYoutube:
     """Tests for the transcribe_youtube tool."""
 
@@ -1604,3 +1524,85 @@ class TestGenerateImage:
         assert 'Error' in result
         assert 'Image generation failed' in result
         assert 'API Error' in result
+
+
+# Skip all arXiv-related tests if the 'arxiv' package is not installed
+try:
+    import arxiv
+    HAS_ARXIV = True
+except ImportError:
+    HAS_ARXIV = False
+
+@pytest.mark.skipif(not HAS_ARXIV, reason='arxiv library is not installed')
+class TestSearchArxiv:
+    """Tests for the search_arxiv tool."""
+
+    @patch('arxiv.Client')
+    def test_search_arxiv_success(self, mock_client):
+        """Test successful arXiv search."""
+        mock_result = Mock()
+        mock_result.title = 'Test Paper'
+        mock_result.pdf_url = 'https://arxiv.org/pdf/1234.5678'
+        mock_result.summary = 'This is a test paper.'
+        mock_result.published = Mock()
+        mock_result.published.strftime.return_value = '2024-01-01'
+
+        mock_author = Mock()
+        mock_author.name = 'John Doe'
+        mock_result.authors = [mock_author]
+        mock_client.return_value.results.return_value = [mock_result]
+        result = search_arxiv('machine learning')
+
+        assert 'Test Paper' in result
+        assert 'John Doe' in result
+        assert 'This is a test paper.' in result
+        assert '2024-01-01' in result
+
+    @patch('arxiv.Client')
+    def test_search_arxiv_no_results(self, mock_client):
+        """Test arXiv search with no results."""
+        mock_client.return_value.results.return_value = []
+        result = search_arxiv('nonexistent topic')
+
+        assert 'No results found' in result
+
+    @patch('arxiv.Client')
+    def test_search_arxiv_multiple_authors(self, mock_client):
+        """Test arXiv result with multiple authors."""
+        mock_result = Mock()
+        mock_result.title = 'Multi-author Paper'
+        mock_result.pdf_url = 'https://arxiv.org/pdf/1234.5678'
+        mock_result.summary = 'Summary'
+        mock_result.published = Mock()
+        mock_result.published.strftime.return_value = '2024-01-01'
+
+        mock_author1 = Mock()
+        mock_author1.name = 'John Doe'
+        mock_author2 = Mock()
+        mock_author2.name = 'Jane Smith'
+        mock_result.authors = [mock_author1, mock_author2]
+        mock_client.return_value.results.return_value = [mock_result]
+        result = search_arxiv('test')
+
+        assert 'John Doe, Jane Smith' in result
+
+    @patch('arxiv.Client')
+    def test_search_arxiv_exception_handling(self, mock_client):
+        """Test arXiv search exception handling."""
+        mock_client.side_effect = Exception('API Error')
+        result = search_arxiv('test')
+
+        assert 'error occurred' in result.lower()
+        assert 'API Error' in result
+
+    def test_search_arxiv_import_error(self):
+        """Test arXiv search with ImportError."""
+        with patch.dict('sys.modules', {'arxiv': None}):
+            result = search_arxiv('test')
+            assert 'An error occurred' in result
+
+    def test_search_wikipedia_import_error(self):
+        """Test Wikipedia search with ImportError."""
+        with patch.dict('sys.modules', {'wikipedia': None}):
+            result = search_wikipedia('test')
+            assert '`wikipedia` was not found' in result
