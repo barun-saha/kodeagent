@@ -224,6 +224,8 @@ A tool in KodeAgent is just a regular (synchronous) Python function. KodeAgent c
 
 Check out the docstrings of these tools in the [tools.py](src/kodeagent/tools.py) module for more details.
 
+Note: v0.12.1 has diabled installation of `arxiv` by default since that requires an older `requests` version. If you want to use `search_arxiv` tool, please install `arxiv` separately with `pip install arxiv`. Similarly, `transcribe_audio` tool requires `requests` library. If you need a tool to work with Arxiv, manually install it with `pip install arxiv`.
+
 To add your own custom tools, simply define a Python function and pass it to the agent via the `tools` parameter. For example:
 
 ```python
