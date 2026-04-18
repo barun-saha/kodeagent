@@ -5,7 +5,7 @@ e2b-code-interpreter~=2.5.0
 requests~=2.33.1
 json_repair~=0.58.6
 tenacity~=9.1.4
-aiohttp~=3.13.3
+aiohttp~=3.13.4
 protobuf~=6.33.5
 h11~=0.16.0
 
@@ -19,7 +19,7 @@ beautifulsoup4~=4.14.3
 markitdown[pdf, docx, xlsx]~=0.1.5
 youtube-transcript-api~=1.2.4
 wikipedia~=1.4.0
-# arxiv~=2.4.1  # Disabled because it requires an older version of requests
+arxiv~=3.0.0
 urllib3~=2.6.3
 
 # Observability
