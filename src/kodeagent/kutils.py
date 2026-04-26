@@ -45,13 +45,17 @@ LOGGERS_TO_SUPPRESS = [
     'hpack',
     'httpx',
     'httpcore',
+    'hyper_utils',
+    'h2',
     'langfuse',
     'LiteLLM',
     'litellm',
     'openai',
     'pdfminer',
     'primp',
+    'reqwest',
     'rquest',
+    'rustls',
     'urllib3',
     'urllib3.connectionpool',
 ]
@@ -329,12 +333,10 @@ def make_user_message(text_content: str, files: list[str] | None = None) -> list
                             mime_type = 'application/octet-stream'
 
                         mime_type = mime_type if mime_type else 'application/octet-stream'
-                        content.append(
-                            {
-                                'type': 'image_url',
-                                'image_url': {'url': f'data:{mime_type};base64,{encoded_image}'},
-                            }
-                        )
+                        content.append({
+                            'type': 'image_url',
+                            'image_url': {'url': f'data:{mime_type};base64,{encoded_image}'},
+                        })
                     except FileNotFoundError:
                         logger.error('Image file not found: %s...will ignore it', item)
                     except Exception as e:
@@ -356,12 +358,10 @@ def make_user_message(text_content: str, files: list[str] | None = None) -> list
                         with open(item, encoding='utf-8') as f:
                             file_content = f.read()
                         if len(file_content) <= MAX_FILE_CONTENT_LENGTH:
-                            content.append(
-                                {
-                                    'type': 'text',
-                                    'text': f'File {item} content:\n{file_content}',
-                                }
-                            )
+                            content.append({
+                                'type': 'text',
+                                'text': f'File {item} content:\n{file_content}',
+                            })
                         else:
                             logger.warning(
                                 'File `%s` content (%d chars) exceeds the %d-char threshold '
@@ -370,15 +370,13 @@ def make_user_message(text_content: str, files: list[str] | None = None) -> list
                                 len(file_content),
                                 MAX_FILE_CONTENT_LENGTH,
                             )
-                            content.append(
-                                {
-                                    'type': 'text',
-                                    'text': (
-                                        f'Input file: {item} (file too large to include inline;'
-                                        ' read it directly from the path)'
-                                    ),
-                                }
-                            )
+                            content.append({
+                                'type': 'text',
+                                'text': (
+                                    f'Input file: {item} (file too large to include inline;'
+                                    ' read it directly from the path)'
+                                ),
+                            })
                     except UnicodeDecodeError:
                         # Binary file — include only the path reference
                         logger.debug(
