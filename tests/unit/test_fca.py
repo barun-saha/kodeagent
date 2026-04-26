@@ -7,11 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kodeagent.fca import (
-    AgentResponse,
-    FunctionCallingAgent,
-    Task,
-)
+from kodeagent.fca import FunctionCallingAgent
+from kodeagent.models import AgentResponse, Task
 from kodeagent.kutils import DATA_TYPES, build_tool_schema
 
 
@@ -52,11 +49,11 @@ def test_data_types():
 
 def test_task_initialization():
     """Test Task class initialization."""
-    task = Task(id='123', description='Test task', result=None, steps_taken=None)
+    task = Task(id='123', description='Test task', result=None, steps_taken=0)
     assert task.id == '123'
     assert task.description == 'Test task'
     assert task.result is None
-    assert task.steps_taken is None
+    assert task.steps_taken == 0
     assert task.files is None
 
 
@@ -87,7 +84,7 @@ def test_fca_initialization(fca_agent):
 
 def test_fca_response_method(fca_agent):
     """Test the response method."""
-    fca_agent.task = Task(id='1', description='test', result=None, steps_taken=None)
+    fca_agent.task = Task(id='1', description='test', result=None, steps_taken=0)
 
     # Test step response
     resp = fca_agent.response('step', 'working')
@@ -244,17 +241,19 @@ def test_detect_tool_loop(fca_agent):
     assert 'Loop detected' in fca_agent.chat_history[-1]['content']
 
     # Loop continues - nudge 2
-    fca_agent.chat_history.append(
-        {'role': 'assistant', 'tool_calls': [{'function': {'name': 'tool1'}}]}
-    )
+    fca_agent.chat_history.append({
+        'role': 'assistant',
+        'tool_calls': [{'function': {'name': 'tool1'}}],
+    })
     assert fca_agent._detect_tool_loop() is True
     assert fca_agent.nudge_count == 2
     assert '[CRITICAL: STOP REPEATING]' in fca_agent.chat_history[-1]['content']
 
     # Loop persists - termination signal
-    fca_agent.chat_history.append(
-        {'role': 'assistant', 'tool_calls': [{'function': {'name': 'tool1'}}]}
-    )
+    fca_agent.chat_history.append({
+        'role': 'assistant',
+        'tool_calls': [{'function': {'name': 'tool1'}}],
+    })
     assert fca_agent._detect_tool_loop() is True
     assert fca_agent.nudge_count == 2  # Doesn't increment beyond 2 in the loop itself
 
