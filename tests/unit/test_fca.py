@@ -7,11 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kodeagent.fca import (
-    AgentResponse,
-    FunctionCallingAgent,
-    Task,
-)
+from kodeagent.fca import FunctionCallingAgent
+from kodeagent.models import AgentResponse, Task
 from kodeagent.kutils import DATA_TYPES, build_tool_schema
 
 
@@ -244,17 +241,19 @@ def test_detect_tool_loop(fca_agent):
     assert 'Loop detected' in fca_agent.chat_history[-1]['content']
 
     # Loop continues - nudge 2
-    fca_agent.chat_history.append(
-        {'role': 'assistant', 'tool_calls': [{'function': {'name': 'tool1'}}]}
-    )
+    fca_agent.chat_history.append({
+        'role': 'assistant',
+        'tool_calls': [{'function': {'name': 'tool1'}}],
+    })
     assert fca_agent._detect_tool_loop() is True
     assert fca_agent.nudge_count == 2
     assert '[CRITICAL: STOP REPEATING]' in fca_agent.chat_history[-1]['content']
 
     # Loop persists - termination signal
-    fca_agent.chat_history.append(
-        {'role': 'assistant', 'tool_calls': [{'function': {'name': 'tool1'}}]}
-    )
+    fca_agent.chat_history.append({
+        'role': 'assistant',
+        'tool_calls': [{'function': {'name': 'tool1'}}],
+    })
     assert fca_agent._detect_tool_loop() is True
     assert fca_agent.nudge_count == 2  # Doesn't increment beyond 2 in the loop itself
 
