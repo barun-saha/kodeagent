@@ -80,8 +80,8 @@ class Agent(ABC):
 
     def __init__(
         self,
-        name: str,
         model_name: str,
+        name: str | None = None,
         description: str | None = None,
         tools: list[Callable] | None = None,
         litellm_params: dict | None = None,
@@ -96,8 +96,8 @@ class Agent(ABC):
         """Create an agent.
 
         Args:
-            name: The name of the agent.
             model_name: The (LiteLLM) model name to use.
+            name: Optional name of the agent.
             description: Optional brief description about the agent.
             tools: An optional list of tools available to the agent.
             litellm_params: LiteLLM parameters.
@@ -610,9 +610,9 @@ class ReActAgent(Agent):
 
     def __init__(
         self,
-        name: str,
         model_name: str,
         tools: list,
+        name: str | None = None,
         description: str | None = None,
         litellm_params: dict | None = None,
         persona: str | None = None,
@@ -1284,13 +1284,11 @@ class ReActAgent(Agent):
                         tool_call_id = self._get_last_tool_call_id()
 
                         # Always use role='tool' for tool results
-                        self.add_to_history(
-                            {
-                                'role': 'tool',
-                                'content': str(result),
-                                'tool_call_id': tool_call_id,
-                            }
-                        )
+                        self.add_to_history({
+                            'role': 'tool',
+                            'content': str(result),
+                            'tool_call_id': tool_call_id,
+                        })
 
                         act_span.update(
                             status='success',
@@ -1332,9 +1330,11 @@ class ReActAgent(Agent):
                         tool_call_id = self._get_last_tool_call_id()
 
                         # Use role='tool' for tool errors too
-                        self.add_to_history(
-                            {'role': 'tool', 'content': result, 'tool_call_id': tool_call_id}
-                        )
+                        self.add_to_history({
+                            'role': 'tool',
+                            'content': result,
+                            'tool_call_id': tool_call_id,
+                        })
                         yield self.response(
                             rtype='step',
                             value=result,
@@ -1471,10 +1471,10 @@ class CodeActAgent(ReActAgent):
 
     def __init__(
         self,
-        name: str,
         model_name: str,
         run_env: CODE_ENV_NAMES,
         tools: list[Callable] | None = None,
+        name: str | None = None,
         description: str | None = None,
         litellm_params: dict | None = None,
         persona: str | None = None,
