@@ -45,7 +45,7 @@ LOGGERS_TO_SUPPRESS = [
     'hpack',
     'httpx',
     'httpcore',
-    'hyper_utils',
+    'hyper_util',
     'h2',
     'langfuse',
     'LiteLLM',
