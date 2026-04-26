@@ -11,6 +11,7 @@ import uuid
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
+from dataclasses import KW_ONLY, dataclass, field
 from datetime import datetime
 from json import JSONDecodeError
 from typing import Any, ClassVar
@@ -72,95 +73,74 @@ MAX_RESPONSE_PARSING_ATTEMPTS = 3
 MAX_TASK_FILES = 10
 
 
+@dataclass
 class Agent(ABC):
     """An abstract agent. Base class for all types of agents."""
+
+    model_name: str
+    _: KW_ONLY
+    name: str | None = None
+    description: str | None = None
+    tools: list[Callable] = field(default_factory=list)
+    litellm_params: dict = field(default_factory=dict)
+    persona: str | None = None
+    system_prompt: str | None = None
+    max_iterations: int = 20
+    filter_tools_for_task: bool = False
+    max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES
+    work_dir: str | None = None
+    tracing_type: TRACING_TYPES | None = None
+
+    # Internal state (not in __init__)
+    id: uuid.UUID = field(init=False)
+    tool_name_to_func: dict[str, Callable] = field(init=False)
+    tool_names: set[str] = field(init=False)
+    task: Task | None = field(init=False, default=None)
+    chat_history: list[dict] = field(init=False, default_factory=list)
+    usage_tracker: UsageTracker = field(init=False, default_factory=UsageTracker)
+    tracer_manager: tracer.AbstractTracerManager = field(init=False)
+    current_trace: tracer.AbstractObservation | None = field(init=False, default=None)
+    planner: Planner | None = field(init=False, default=None)
+    observer: Observer = field(init=False)
+    is_visual_model: bool = field(init=False)
+    task_output_files: list[str] = field(init=False, default_factory=list)
+
+    msg_idx_of_new_task: int = field(init=False, default=0)
+    final_answer_found: bool = field(init=False, default=False)
+
+    _history_formatter: HistoryFormatter | None = field(init=False, default=None)
+    _tool_descriptions_cache: dict[frozenset[str], str] = field(init=False, default_factory=dict)
 
     response_format_class: ClassVar[type[pyd.BaseModel]] = ChatMessage
     HISTORY_TRUNCATE_CHARS: ClassVar[int] = 1000
 
-    def __init__(
-        self,
-        model_name: str,
-        name: str | None = None,
-        description: str | None = None,
-        tools: list[Callable] | None = None,
-        litellm_params: dict | None = None,
-        persona: str | None = None,
-        system_prompt: str | None = None,
-        max_iterations: int = 20,
-        filter_tools_for_task: bool = False,
-        max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
-        work_dir: str | None = None,
-        tracing_type: TRACING_TYPES | None = None,
-    ):
-        """Create an agent.
-
-        Args:
-            model_name: The (LiteLLM) model name to use.
-            name: Optional name of the agent.
-            description: Optional brief description about the agent.
-            tools: An optional list of tools available to the agent.
-            litellm_params: LiteLLM parameters.
-            persona: Optional persona for the agent. If provided, this gets added to
-             the system prompt.
-            system_prompt: Optional system prompt for the agent. If not provided, default is used.
-             This is mutually exclusive with persona.
-            max_iterations: The max iterations an agent can perform to solve a task.
-            filter_tools_for_task: Whether the tools should be filtered for a task. Unused.
-            max_retries: Maximum number of retries for LLM calls.
-            work_dir: Optional local workspace directory.
-            tracing_type: Type of tracing to use.
-        """
+    def __post_init__(self):
+        """Initialize the agent's internal state after fields are set."""
         self.id = uuid.uuid4()
-        self.name: str = name
-        self.description = description
-        self.model_name: str = model_name
-        self.work_dir = work_dir
-
-        self.tools: list[Callable] = tools or []
-        self.filter_tools_for_task = filter_tools_for_task
-        self.litellm_params: dict = litellm_params or {}
-        self.persona = persona
-        self.system_prompt = system_prompt
-        self.max_iterations = max_iterations
-        self.max_retries = max_retries
-
         self.tool_name_to_func = {fn.__name__: fn for fn in self.tools}
         self.tool_names = set(self.tool_name_to_func)
 
-        self.task: Task | None = None
-        self.chat_history: list[dict] = []
+        # Tracing initialization
+        self.tracer_manager = create_tracer_manager(self.tracing_type)
 
-        self._history_formatter: HistoryFormatter | None = None
-        self._tool_descriptions_cache: dict[frozenset[str], str] = {}
-
-        self.msg_idx_of_new_task: int = 0
-        self.final_answer_found = False
-
-        self.usage_tracker = UsageTracker()
-
-        # Tracing
-        self.tracer_manager: tracer.AbstractTracerManager = create_tracer_manager(tracing_type)
-        self.current_trace: tracer.AbstractObservation | None = None
-
-        self.planner: Planner | None = Planner(
-            model_name=model_name,
-            litellm_params=litellm_params,
+        # Components initialization
+        self.planner = Planner(
+            model_name=self.model_name,
+            litellm_params=self.litellm_params,
             max_retries=self.max_retries,
             usage_tracker=self.usage_tracker,
             tracer_manager=self.tracer_manager,
         )
         self.observer = Observer(
-            model_name=model_name,
-            litellm_params=litellm_params,
+            model_name=self.model_name,
+            litellm_params=self.litellm_params,
             tool_names=self.tool_names,
             max_retries=self.max_retries,
             usage_tracker=self.usage_tracker,
             tracer_manager=self.tracer_manager,
         )
 
-        self.is_visual_model: bool = llm_vision_support([model_name])[0] or False
-        self.task_output_files: list[str] = []
+        self.is_visual_model = llm_vision_support([self.model_name])[0] or False
 
     def __str__(self):
         """String representation of the agent."""
@@ -603,44 +583,21 @@ class Agent(ABC):
         }
 
 
+@dataclass
 class ReActAgent(Agent):
     """Reasoning and Acting agent with thought-action-observation loop."""
 
+    _: KW_ONLY
+    system_prompt: str = REACT_SYSTEM_PROMPT
+
     response_format_class: ClassVar[type[pyd.BaseModel]] = ReActChatMessage
 
-    def __init__(
-        self,
-        model_name: str,
-        tools: list,
-        name: str | None = None,
-        description: str | None = None,
-        litellm_params: dict | None = None,
-        persona: str | None = None,
-        system_prompt: str | None = None,
-        max_iterations: int = 20,
-        filter_tools_for_task: bool = False,
-        max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
-        work_dir: str | None = None,
-        tracing_type: TRACING_TYPES | None = None,
-    ):
-        """Create a ReAct agent."""
-        super().__init__(
-            name=name,
-            model_name=model_name,
-            tools=tools,
-            litellm_params=litellm_params,
-            description=description,
-            persona=persona,
-            system_prompt=system_prompt or REACT_SYSTEM_PROMPT,
-            max_iterations=max_iterations,
-            filter_tools_for_task=filter_tools_for_task,
-            max_retries=max_retries,
-            work_dir=work_dir,
-            tracing_type=tracing_type,
-        )
+    def __post_init__(self):
+        """Perform ReAct-specific setup."""
+        super().__post_init__()
 
-        if tools:
-            logger.info('Created agent: %s; tools: %s', name, [t.__name__ for t in tools])
+        if self.tools:
+            logger.info('Created agent: %s; tools: %s', self.name, [t.__name__ for t in self.tools])
 
         self._history_formatter = ReActHistoryFormatter()
 
@@ -1284,11 +1241,13 @@ class ReActAgent(Agent):
                         tool_call_id = self._get_last_tool_call_id()
 
                         # Always use role='tool' for tool results
-                        self.add_to_history({
-                            'role': 'tool',
-                            'content': str(result),
-                            'tool_call_id': tool_call_id,
-                        })
+                        self.add_to_history(
+                            {
+                                'role': 'tool',
+                                'content': str(result),
+                                'tool_call_id': tool_call_id,
+                            }
+                        )
 
                         act_span.update(
                             status='success',
@@ -1330,11 +1289,13 @@ class ReActAgent(Agent):
                         tool_call_id = self._get_last_tool_call_id()
 
                         # Use role='tool' for tool errors too
-                        self.add_to_history({
-                            'role': 'tool',
-                            'content': result,
-                            'tool_call_id': tool_call_id,
-                        })
+                        self.add_to_history(
+                            {
+                                'role': 'tool',
+                                'content': result,
+                                'tool_call_id': tool_call_id,
+                            }
+                        )
                         yield self.response(
                             rtype='step',
                             value=result,
@@ -1464,67 +1425,43 @@ class ReActAgent(Agent):
         )
 
 
+@dataclass
 class CodeActAgent(ReActAgent):
     """CodeAct agent using Thought-Code-Observation loop."""
 
+    _: KW_ONLY
+    run_env: CODE_ENV_NAMES = 'host'
+    allowed_imports: list[str] | None = None
+    pip_packages: str | None = None
+    timeout: int = 30
+    env_vars_to_set: dict[str, str] | None = None
+    system_prompt: str = CODE_ACT_SYSTEM_PROMPT
+
     response_format_class: ClassVar[type[pyd.BaseModel]] = CodeActChatMessage
 
-    def __init__(
-        self,
-        model_name: str,
-        run_env: CODE_ENV_NAMES,
-        tools: list[Callable] | None = None,
-        name: str | None = None,
-        description: str | None = None,
-        litellm_params: dict | None = None,
-        persona: str | None = None,
-        system_prompt: str | None = None,
-        max_iterations: int = 20,
-        allowed_imports: list[str] | None = None,
-        pip_packages: str | None = None,
-        timeout: int = 30,
-        env_vars_to_set: dict[str, str] | None = None,
-        filter_tools_for_task: bool = False,
-        max_retries: int = ku.DEFAULT_MAX_LLM_RETRIES,
-        work_dir: str | None = None,
-        tracing_type: TRACING_TYPES | None = None,
-    ):
+    def __post_init__(self):
         """Initialize CodeAct agent."""
-        super().__init__(
-            name=name,
-            model_name=model_name,
-            tools=tools,
-            litellm_params=litellm_params,
-            max_iterations=max_iterations,
-            persona=persona,
-            system_prompt=system_prompt or CODE_ACT_SYSTEM_PROMPT,
-            description=description,
-            filter_tools_for_task=filter_tools_for_task,
-            max_retries=max_retries,
-            work_dir=work_dir,
-            tracing_type=tracing_type,
-        )
+        super().__post_init__()
+
         self._history_formatter = CodeActHistoryFormatter()
         self.tools_source_code: str = 'from typing import *\n\n'
 
-        if tools:
+        if self.tools:
             for t in self.tools:
                 self.tools_source_code += inspect.getsource(t).replace('@tool\n', '', 1) + '\n'
 
-        self.pip_packages = pip_packages
+        if not self.allowed_imports:
+            self.allowed_imports = []
 
-        if not allowed_imports:
-            allowed_imports = []
-
-        self.allowed_imports = allowed_imports + ['datetime', 'typing', 'mimetypes']
+        self.allowed_imports = self.allowed_imports + ['datetime', 'typing', 'mimetypes']
         self.code_runner = CodeRunner(
-            env=run_env,
+            env=self.run_env,
             allowed_imports=self.allowed_imports,
-            model_name=model_name,
-            pip_packages=pip_packages,
-            timeout=timeout,
-            env_vars_to_set=env_vars_to_set,
-            litellm_params=litellm_params,
+            model_name=self.model_name,
+            pip_packages=self.pip_packages,
+            timeout=self.timeout,
+            env_vars_to_set=self.env_vars_to_set,
+            litellm_params=self.litellm_params,
             work_dir=self.work_dir,
             usage_tracker=self.usage_tracker,
             tool_names=self.tool_names,

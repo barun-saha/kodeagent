@@ -1535,9 +1535,11 @@ class TestGenerateImage:
 # Skip all arXiv-related tests if the 'arxiv' package is not installed
 try:
     import arxiv
+
     HAS_ARXIV = True
 except ImportError:
     HAS_ARXIV = False
+
 
 @pytest.mark.skipif(not HAS_ARXIV, reason='arxiv library is not installed')
 class TestSearchArxiv:
