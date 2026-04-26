@@ -2543,15 +2543,13 @@ async def test_record_thought_adds_missing_role(react_agent):
     Covers line: parsed_json['role'] = 'assistant'  # Add role BEFORE validation
     """
     # JSON response missing strict 'role' field
-    response_no_role = json.dumps(
-        {
-            'thought': 'I will calculate 2+2',
-            'action': 'calculator',
-            'args': {'expression': '2+2'},
-            'task_successful': False,
-            'final_answer': None,
-        }
-    )
+    response_no_role = json.dumps({
+        'thought': 'I will calculate 2+2',
+        'action': 'calculator',
+        'args': {'expression': '2+2'},
+        'task_successful': False,
+        'final_answer': None,
+    })
 
     # Patch _chat to return our specific JSON string
     with patch.object(react_agent, '_chat', return_value=response_no_role):
@@ -2638,7 +2636,7 @@ async def test_pre_run_error_propagation(mock_agent):
 async def test_agent_abstract_properties():
     """Test Agent abstract base class properties."""
     # concrete implementation needed for testing abstract class properties
-    agent = ReActAgent('Test', 'model', [])
+    agent = ReActAgent(model_name='model', tools=[])
 
     # Test current_plan property when planner is empty
     agent.planner = None
