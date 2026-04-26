@@ -8,47 +8,16 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
 import litellm
 
 from . import kutils as ku
 from . import tools as dtools
+from .models import AgentResponse, Task
 from .orchestrator import Planner
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class Task:
-    """Represents a task for the agent to solve. A simplified version for SLMs."""
-
-    id: str | None
-    """Optional unique identifier for the task."""
-    description: str
-    """Text description of the task to be solved."""
-    result: str | None
-    """Final result or answer after solving the task."""
-    steps_taken: int | None
-    """Number of steps taken by the agent to solve the task."""
-    files: None = None
-    """Unused placeholder only for compatibility with Planner."""
-
-
-class AgentResponse(TypedDict):
-    """Streaming response sent by an agent in the course of solving a task.
-    This class is reproduced here to keep this module self-contained and optimized.
-    """
-
-    type: Literal['step', 'final', 'log']
-    """Type of the response: 'step', 'final', or 'log'."""
-    channel: str | None
-    """Optional channel name for the response."""
-    value: Any
-    """Value of the response, varies by type."""
-    metadata: dict[str, Any] | None
-    """Optional metadata associated with the response."""
 
 
 FCA_SYSTEM_PROMPT = ku.read_prompt('system/function_calling.txt')
@@ -411,7 +380,10 @@ class FunctionCallingAgent:
 
         user_task_msg = ku.combine_user_messages(ku.make_user_message(task_description, task_files))
         self.nudge_count = 0
-        self.task = Task(description=task_desc, id=task_id, result=None, steps_taken=None)
+        task_kwargs: dict = {'description': task_desc}
+        if task_id is not None:
+            task_kwargs['id'] = task_id
+        self.task = Task(**task_kwargs)
         self.chat_history = [
             {'role': 'system', 'content': self.system_prompt},
             *user_task_msg,
@@ -424,12 +396,10 @@ class FunctionCallingAgent:
             )
             await planner.create_plan(task=self.task, agent_type='fca')
             formatted_plan = planner.get_formatted_plan()
-            self.chat_history.append(
-                {
-                    'role': 'user',
-                    'content': f'Here is a plan for this task:\n{formatted_plan}',
-                }
-            )
+            self.chat_history.append({
+                'role': 'user',
+                'content': f'Here is a plan for this task:\n{formatted_plan}',
+            })
             logger.info('Task plan:\n%s\n', formatted_plan)
 
     def _format_history_as_text(self) -> str:

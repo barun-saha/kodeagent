@@ -52,11 +52,11 @@ def test_data_types():
 
 def test_task_initialization():
     """Test Task class initialization."""
-    task = Task(id='123', description='Test task', result=None, steps_taken=None)
+    task = Task(id='123', description='Test task', result=None, steps_taken=0)
     assert task.id == '123'
     assert task.description == 'Test task'
     assert task.result is None
-    assert task.steps_taken is None
+    assert task.steps_taken == 0
     assert task.files is None
 
 
@@ -87,7 +87,7 @@ def test_fca_initialization(fca_agent):
 
 def test_fca_response_method(fca_agent):
     """Test the response method."""
-    fca_agent.task = Task(id='1', description='test', result=None, steps_taken=None)
+    fca_agent.task = Task(id='1', description='test', result=None, steps_taken=0)
 
     # Test step response
     resp = fca_agent.response('step', 'working')
