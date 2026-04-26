@@ -587,7 +587,7 @@ class Agent(ABC):
 class ReActAgent(Agent):
     """Reasoning and Acting agent with thought-action-observation loop."""
 
-    tools: list[Callable] = field(default_factory=list)
+    _: KW_ONLY
     system_prompt: str = REACT_SYSTEM_PROMPT
 
     response_format_class: ClassVar[type[pyd.BaseModel]] = ReActChatMessage
@@ -597,9 +597,7 @@ class ReActAgent(Agent):
         super().__post_init__()
 
         if self.tools:
-            logger.info(
-                'Created agent: %s; tools: %s', self.name, [t.__name__ for t in self.tools]
-            )
+            logger.info('Created agent: %s; tools: %s', self.name, [t.__name__ for t in self.tools])
 
         self._history_formatter = ReActHistoryFormatter()
 
@@ -1427,6 +1425,7 @@ class ReActAgent(Agent):
 class CodeActAgent(ReActAgent):
     """CodeAct agent using Thought-Code-Observation loop."""
 
+    _: KW_ONLY
     run_env: CODE_ENV_NAMES = 'host'
     allowed_imports: list[str] | None = None
     pip_packages: str | None = None
