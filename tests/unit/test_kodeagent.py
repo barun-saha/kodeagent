@@ -2543,13 +2543,15 @@ async def test_record_thought_adds_missing_role(react_agent):
     Covers line: parsed_json['role'] = 'assistant'  # Add role BEFORE validation
     """
     # JSON response missing strict 'role' field
-    response_no_role = json.dumps({
-        'thought': 'I will calculate 2+2',
-        'action': 'calculator',
-        'args': {'expression': '2+2'},
-        'task_successful': False,
-        'final_answer': None,
-    })
+    response_no_role = json.dumps(
+        {
+            'thought': 'I will calculate 2+2',
+            'action': 'calculator',
+            'args': {'expression': '2+2'},
+            'task_successful': False,
+            'final_answer': None,
+        }
+    )
 
     # Patch _chat to return our specific JSON string
     with patch.object(react_agent, '_chat', return_value=response_no_role):

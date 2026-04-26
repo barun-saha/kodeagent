@@ -18,7 +18,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from .. import kutils as ku
 from ..kodeagent import ReActAgent
 from ..models import AgentResponse
 
@@ -487,7 +486,11 @@ def sample_rows(filter_column: str, filter_value: str, n: int = 5) -> str:
 
     n = min(n, 20)
     try:
-        mask = df[filter_column].astype(str).str.contains(str(filter_value), case=False, na=False, regex=False)
+        mask = (
+            df[filter_column]
+            .astype(str)
+            .str.contains(str(filter_value), case=False, na=False, regex=False)
+        )
         subset = df[mask].head(n)
         if len(subset) == 0:
             return f'No rows found where {filter_column} contains "{filter_value}"'
