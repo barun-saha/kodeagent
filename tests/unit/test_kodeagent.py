@@ -2112,8 +2112,8 @@ def test_agent_msg_idx_of_new_task():
     # Start new task
     agent._run_init('Second task')
 
-    # msg_idx should still be 0 (it's set in run(), not _run_init())
-    assert agent.msg_idx_of_new_task == 0
+    # msg_idx should be 1 (system prompt is added in _run_init())
+    assert agent.msg_idx_of_new_task == 1
     assert agent.task_output_files == []
 
 
@@ -2513,7 +2513,120 @@ def test_run_init_calls_cleanup(react_agent):
 
     # Verify old state was cleaned up
     assert react_agent.task.description == 'Task 2'
-    assert react_agent.msg_idx_of_new_task == 0
+    assert react_agent.msg_idx_of_new_task == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_record_thought_fallback(react_agent):
+    """Test _record_thought with malformed JSON that triggers text fallback."""
+    react_agent._run_init('Test task')
+
+    # Malformed JSON that JSON parser will fail on, but regex can handle
+    malformed_response = (
+        "Thought: This is a thought.\n"
+        "Action: calculator\n"
+        "Args: {\"expression\": \"2+2\"}"
+    )
+
+    # We need to mock _chat to return this malformed response
+    with patch.object(react_agent, '_chat', return_value=malformed_response):
+        # We need to use ReActChatMessage as the format class
+        from kodeagent.models import ReActChatMessage
+        msg = await react_agent._record_thought(ReActChatMessage)
+
+        assert msg is not None
+        assert msg.thought == 'This is a thought.'
+        assert msg.action == 'calculator'
+        assert msg.args == '{"expression": "2+2"}'
+        assert msg.role == 'assistant'
+
+
+@pytest.mark.asyncio
+async def test_act_with_json_stripping(react_agent):
+    """Test _act with tool args that need 'json' prefix stripping."""
+    react_agent._run_init('Test')
+
+    # Message with args starting with 'json'
+    msg = ReActChatMessage(
+        role='assistant',
+        thought='Stripping json',
+        action='calculator',
+        args='json {"expression": "2+2"}',
+        task_successful=False,
+        final_answer=None,
+    )
+    react_agent.add_to_history(msg)
+
+    responses = []
+    async for response in react_agent._act():
+        responses.append(response)
+
+    assert any('4' in str(r.get('value')) for r in responses)
+
+
+@pytest.mark.asyncio
+async def test_act_with_json_repair(react_agent):
+    """Test _act with malformed tool args that need repair."""
+    react_agent._run_init('Test')
+
+    # Malformed JSON (missing closing brace)
+    msg = ReActChatMessage(
+        role='assistant',
+        thought='Repairing json',
+        action='calculator',
+        args='{"expression": "2+2"',
+        task_successful=False,
+        final_answer=None,
+    )
+    react_agent.add_to_history(msg)
+
+    responses = []
+    async for response in react_agent._act():
+        responses.append(response)
+
+    assert any('4' in str(r.get('value')) for r in responses)
+
+
+def test_agent_normalize_content_multimodal():
+    """Test normalize_content with multimodal list input."""
+    from kodeagent.kodeagent import ReActAgent
+    agent = ReActAgent(model_name='gpt-3.5-turbo')
+    content = [
+        {'type': 'text', 'text': 'Hello '},
+        {'type': 'image_url', 'image_url': {'url': 'http://example.com/img.png'}}
+    ]
+    # Line 551: parts.append(str(item)) for non-text items
+    normalized = agent.normalize_content(content)
+    assert 'Hello' in normalized
+    assert 'image_url' in normalized
+
+
+def test_agent_add_to_history_merge_with_files():
+    """Test add_to_history merging consecutive user messages with files metadata."""
+    from kodeagent.kodeagent import ReActAgent
+    agent = ReActAgent(model_name='gpt-3.5-turbo')
+    agent.add_to_history({'role': 'user', 'content': 'First', 'files': ['a.txt']})
+    agent.add_to_history({'role': 'user', 'content': 'Second', 'files': ['b.txt']})
+
+    assert len(agent.chat_history) == 1
+    assert 'First' in str(agent.chat_history[0]['content'])
+    assert 'Second' in str(agent.chat_history[0]['content'])
+    # Line 486-489: prev_files = prev.get('files') or []
+    assert 'a.txt' in agent.chat_history[0]['files']
+    assert 'b.txt' in agent.chat_history[0]['files']
+
+    # Case for line 488: prev_files is not a list
+    agent.chat_history = [{'role': 'user', 'content': 'First', 'files': 'single.txt'}]
+    agent.add_to_history({'role': 'user', 'content': 'Second', 'files': ['list.txt']})
+    assert agent.chat_history[0]['files'] == ['single.txt', 'list.txt']
+
+
+def test_agent_normalize_content_dict():
+    """Test normalize_content with a dictionary input (line 554)."""
+    from kodeagent.kodeagent import ReActAgent
+    agent = ReActAgent(model_name='gpt-3.5-turbo')
+    content = {'key': 'value'}
+    assert agent.normalize_content(content) == "{'key': 'value'}"
 
 
 # ============================================================================

@@ -34,6 +34,8 @@
    
    read_prompt
    
+   validate_chat_history
+   
 
    
 

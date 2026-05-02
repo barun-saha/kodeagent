@@ -3,6 +3,7 @@ Implements ReAct and CodeAct agents, supported by Planner and Observer.
 """
 
 import asyncio
+import copy
 import inspect
 import json
 import random
@@ -203,7 +204,11 @@ class Agent(ABC):
         return ''.join(context_parts)
 
     def _run_init(
-        self, task: str, files: list[str] | None = None, task_id: str | None = None
+        self,
+        task: str,
+        files: list[str] | None = None,
+        task_id: str | None = None,
+        chat_history: list[dict] | None = None,
     ) -> None:
         """Initialize the running of a task by an agent.
 
@@ -211,9 +216,13 @@ class Agent(ABC):
             task: Task description.
             files: Optional files for the task.
             task_id: Optional task ID.
+            chat_history: Optional pre-built OpenAI-compliant chat history to inject.
+                When provided, this history becomes the base of ``self.chat_history``
+                (deep-copied to avoid mutating the caller's object).
 
         Raises:
-            ValueError: If task is empty or files list is invalid.
+            ValueError: If task is empty, files list is invalid, or the provided
+                history fails OpenAI compliance validation.
         """
         if not task or not task.strip():
             raise ValueError('Task description cannot be empty!')
@@ -221,6 +230,21 @@ class Agent(ABC):
             raise ValueError('Task files must be a list of file paths!')
         if files and len(files) > MAX_TASK_FILES:
             raise ValueError(f'Too many files provided for the task (max {MAX_TASK_FILES})!')
+
+        # Validate and apply injected history
+        if chat_history is not None:
+            ku.validate_chat_history(chat_history, tool_names=self.tool_names)
+            base = copy.deepcopy(chat_history)
+            # If it has no system message at index 0, prepend the agent's own system prompt.
+            if not (base and base[0].get('role') == 'system'):
+                base.insert(0, {'role': 'system', 'content': self.get_system_prompt_content()})
+
+            self.chat_history = base
+            # Track where injected context ends so new task messages are appended after
+            self.msg_idx_of_new_task = len(self.chat_history)
+        else:
+            self.init_history()
+            self.msg_idx_of_new_task = len(self.chat_history)
 
         self.task = Task(description=task, files=files)
         self.task_output_files = []
@@ -323,6 +347,7 @@ class Agent(ABC):
         max_iterations: int | None = None,
         recurrent_mode: bool = False,
         summarize_progress_on_failure: bool = True,
+        chat_history: list[dict] | None = None,
     ) -> AsyncIterator[AgentResponse]:
         """Execute a task using the agent.
 
@@ -331,11 +356,19 @@ class Agent(ABC):
             files: List of files associated with the task.
             task_id: Optional task ID.
             max_iterations: Optional maximum number of iterations.
-            recurrent_mode: Whether to run in recurrent mode.
+            recurrent_mode: Whether to run in recurrent mode (augments task text
+                with the previous task description and result). Mutually exclusive
+                with ``chat_history``.
             summarize_progress_on_failure: Whether to summarize progress on failure.
+            chat_history: Optional pre-built OpenAI-compliant history to inject as
+                the base context for this task run. Mutually exclusive with
+                ``recurrent_mode``.
 
         Returns:
             AsyncIterator[AgentResponse]: An iterator yielding agent responses.
+
+        Raises:
+            ValueError: If both ``recurrent_mode`` and ``chat_history`` are provided.
         """
 
     def response(
@@ -549,6 +582,21 @@ class Agent(ABC):
 
         return '\n'.join(segments)
 
+    def get_system_prompt_content(self) -> str:
+        """Return the formatted system prompt string for this agent.
+
+        Subclasses should override this to include additional format variables.
+
+        Returns:
+            The formatted system prompt.
+        """
+        if not self.system_prompt:
+            return ''
+
+        return self.system_prompt.format(
+            persona=self.persona or '', tools=self.get_tools_description()
+        )
+
     def clear_history(self):
         """Clear the agent's message history."""
         self.chat_history = []
@@ -650,10 +698,7 @@ class ReActAgent(Agent):
 
     def init_history(self):
         """Initialize the agent's message history with the system prompt."""
-        content = self.system_prompt.format(
-            persona=self.persona or '', tools=self.get_tools_description()
-        )
-        self.chat_history = [{'role': 'system', 'content': content}]
+        self.chat_history = [{'role': 'system', 'content': self.get_system_prompt_content()}]
         self.final_answer_found = False
 
     async def _create_initial_plan(self):
@@ -677,13 +722,13 @@ class ReActAgent(Agent):
 
     async def pre_run(self) -> AsyncIterator[AgentResponse]:
         """Perform setup before the main run loop.
-        - Initialize task and history.
+        - Initialize task and history (or ensure injected history has a system prompt).
         - Create initial plan.
 
         Returns:
             AsyncIterator[AgentResponse]: Iterator of agent responses.
         """
-        self.init_history()
+        self.final_answer_found = False
 
         yield self.response(
             rtype='log', value=f'Solving task: `{self.task.description}`', channel='run'
@@ -763,6 +808,7 @@ class ReActAgent(Agent):
         max_iterations: int | None = None,
         recurrent_mode: bool = False,
         summarize_progress_on_failure: bool = True,
+        chat_history: list[dict] | None = None,
     ) -> AsyncIterator[AgentResponse]:
         """Solve a task using ReAct's TAO loop (or CodeAct's TCO loop).
 
@@ -772,23 +818,36 @@ class ReActAgent(Agent):
             task_id: Optional task ID.
             max_iterations: Optional max iterations for the task.
             recurrent_mode: If True, augment task with previous task context.
+                Mutually exclusive with ``chat_history``.
             summarize_progress_on_failure: Whether to summarize progress if
-             the agent fails to solve the task in max iterations.
+                the agent fails to solve the task in max iterations.
+            chat_history: Optional pre-built OpenAI-compliant history to inject
+                as the base context for this run. The new task message is appended
+                on top. Mutually exclusive with ``recurrent_mode``.
 
         Returns:
             Step updates on the task and the final response.
 
         Raises:
-            ValueError: If task is empty or too many files provided.
+            ValueError: If task is empty, too many files provided, both
+                ``recurrent_mode`` and ``chat_history`` are set, or the provided
+                history fails OpenAI compliance validation.
             RetryError: If LLM calls fail after max retries.
         """
+        if recurrent_mode and chat_history is not None:
+            raise ValueError(
+                'recurrent_mode and chat_history are mutually exclusive.'
+                ' Use one or the other, not both.'
+            )
+
         if recurrent_mode and self.task is not None:
             task = await self._augment_task_with_previous(task)
             logger.debug('Recurrent mode enabled: augmented task with previous context')
 
         # 1. run() calls _run_init()
-        # 2. pre_run() calls init_history() and does the logging/planning
-        self._run_init(task, files, task_id)
+        # 2. pre_run() calls init_history() (or applies injected history) and does
+        #    the logging/planning
+        self._run_init(task, files, task_id, chat_history=chat_history)
 
         # Execute pre-run hook
         async for response in self.pre_run():
@@ -1241,13 +1300,11 @@ class ReActAgent(Agent):
                         tool_call_id = self._get_last_tool_call_id()
 
                         # Always use role='tool' for tool results
-                        self.add_to_history(
-                            {
-                                'role': 'tool',
-                                'content': str(result),
-                                'tool_call_id': tool_call_id,
-                            }
-                        )
+                        self.add_to_history({
+                            'role': 'tool',
+                            'content': str(result),
+                            'tool_call_id': tool_call_id,
+                        })
 
                         act_span.update(
                             status='success',
@@ -1289,13 +1346,11 @@ class ReActAgent(Agent):
                         tool_call_id = self._get_last_tool_call_id()
 
                         # Use role='tool' for tool errors too
-                        self.add_to_history(
-                            {
-                                'role': 'tool',
-                                'content': result,
-                                'tool_call_id': tool_call_id,
-                            }
-                        )
+                        self.add_to_history({
+                            'role': 'tool',
+                            'content': result,
+                            'tool_call_id': tool_call_id,
+                        })
                         yield self.response(
                             rtype='step',
                             value=result,
@@ -1538,15 +1593,17 @@ class CodeActAgent(ReActAgent):
             f'Could not extract valid Code or Answer from response. Text: {text[:300]}...'
         )
 
-    def init_history(self):
-        """Initialize message history with system prompt for CodeAct agent."""
-        content = self.system_prompt.format(
+    def get_system_prompt_content(self) -> str:
+        """Return the formatted system prompt string for CodeAct agent."""
+        return self.system_prompt.format(
             persona=self.persona or '',
             tools=self.get_tools_description(),
-            authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports]),
+            authorized_imports='\n'.join([f'- {imp}' for imp in (self.allowed_imports or [])]),
         )
-        self.chat_history = [{'role': 'system', 'content': content}]
-        self.final_answer_found = False
+
+    def init_history(self):
+        """Initialize message history with system prompt for CodeAct agent."""
+        super().init_history()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think step for CodeAct agent.

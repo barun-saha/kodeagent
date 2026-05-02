@@ -38,8 +38,8 @@ Use KodeAgent because it offers:
 Also, here are a few reasons why you shouldn't use KodeAgent:
 
 - KodeAgent is actively evolving, meaning some aspects may change.
-- You want to use some of the well-known frameworks.
-- You need a full-fledged platform with built-in long-term, persistent memory management.
+- You want to use some of the well-known frameworks or task-specific agents.
+- You need a full-fledged platform with built-in **automated** long-term, persistent memory management (KodeAgent supports manual state injection, but does not provide a persistence layer).
 
 
 ## 🚀 Quick Start
@@ -149,9 +149,13 @@ async for response in agent.run(
 
 Check out the [CSVAnalysisAgent documentation](https://kodeagent.readthedocs.io/en/latest/specialized_agents.html) for more details.
 
-### Memory(less)
 
-By default, any agent in KodeAgent is **memoryless** across tasks—each task begins with no prior context, a clean slate. To enable context from the previous task (only), use **Recurrent Mode**:
+## 🧠 Memory and State Management
+
+By default, any agent in KodeAgent is **memoryless** across tasks—each task begins with a clean slate. You have two ways to manage state across runs:
+
+### 1. Recurrent Mode (Single-Task Context)
+For simple follow-up tasks within the same session, use **Recurrent Mode**. This automatically appends the description and result of the *immediately preceding* task to the current context:
 
 ```python
 # Enable recurrent mode to leverage context from the previous run
@@ -159,9 +163,21 @@ async for response in agent.run('Double the previous result', recurrent_mode=Tru
     print_response(response)
 ```
 
-This will copy the previous task's description & result into the current task's context.
+### 2. Chat History Injection (Full Session Context)
+For multi-session persistence or complex state management, you can manually inject an existing OpenAI-compliant **Chat History**. This allows you to resume conversations from external storage or database:
 
-For more examples, including how to provide files as inputs, see the [examples.py](src/kodeagent/examples.py) module and [API documentation](https://kodeagent.readthedocs.io/en/latest/usage.html).
+```python
+history = [
+    {"role": "user", "content": "What is 5 + 5?"},
+    {"role": "assistant", "content": "10.0"}
+]
+
+# Resume with full external context
+async for response in agent.run('Now add 20 to that', chat_history=history):
+    print_response(response)
+```
+
+For more examples, see the [examples.py](src/kodeagent/examples.py) module and [API documentation](https://kodeagent.readthedocs.io/en/latest/usage.html).
 
 
 ### API Configuration

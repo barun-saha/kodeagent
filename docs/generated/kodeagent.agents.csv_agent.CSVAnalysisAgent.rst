@@ -56,8 +56,8 @@
       ~CSVAnalysisAgent.task
       ~CSVAnalysisAgent.tracing_type
       ~CSVAnalysisAgent.work_dir
-      ~CSVAnalysisAgent.tools
       ~CSVAnalysisAgent.model_name
+      ~CSVAnalysisAgent.tools
       ~CSVAnalysisAgent.litellm_params
       ~CSVAnalysisAgent.id
       ~CSVAnalysisAgent.tool_name_to_func

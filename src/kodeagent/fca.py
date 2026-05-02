@@ -4,6 +4,7 @@ reproduced here to keep this module self-contained and optimized.
 """
 
 import asyncio
+import copy
 import json
 import logging
 import re
@@ -353,6 +354,7 @@ class FunctionCallingAgent:
         task_id: str | None = None,
         use_planning: bool = True,
         recurrent_mode: bool = False,
+        chat_history: list[dict] | None = None,
     ) -> None:
         """Initialize the running of a task.
 
@@ -362,7 +364,10 @@ class FunctionCallingAgent:
             task_id: Optional task ID.
             use_planning: If True, generate a simple plan at the beginning of the task.
             recurrent_mode: If True, the agent will continue to run on the same task
-             until it decides to stop, allowing for more dynamic interactions.
+                until it decides to stop, allowing for more dynamic interactions.
+            chat_history: Optional pre-built OpenAI-compliant chat history to inject
+                as the base context. When provided, the new task message is appended
+                at the end of this history. Mutually exclusive with ``recurrent_mode``.
         """
         if not task_desc or not task_desc.strip():
             raise ValueError('Task description cannot be empty!')
@@ -384,10 +389,23 @@ class FunctionCallingAgent:
         if task_id is not None:
             task_kwargs['id'] = task_id
         self.task = Task(**task_kwargs)
-        self.chat_history = [
-            {'role': 'system', 'content': self.system_prompt},
-            *user_task_msg,
-        ]
+
+        if chat_history is not None:
+            # Validate and deep-copy the injected history
+            ku.validate_chat_history(
+                chat_history,
+                tool_names=set(self.tool_map.keys()),
+            )
+            base_history = copy.deepcopy(chat_history)
+            # Ensure a system message is present at index 0
+            if not (base_history and base_history[0].get('role') == 'system'):
+                base_history.insert(0, {'role': 'system', 'content': self.system_prompt})
+            self.chat_history = base_history + list(user_task_msg)
+        else:
+            self.chat_history = [
+                {'role': 'system', 'content': self.system_prompt},
+                *user_task_msg,
+            ]
 
         if use_planning:
             planner = Planner(
@@ -479,6 +497,7 @@ class FunctionCallingAgent:
         use_planning: bool = True,
         recurrent_mode: bool = False,
         loop_threshold: int = 3,
+        chat_history: list[dict] | None = None,
     ) -> AsyncIterator[AgentResponse]:
         """Main loop for the agent to process input and execute tools until finished.
         If an SLM call fails, it tries up to 3 times with a backoff before terminating.
@@ -494,13 +513,29 @@ class FunctionCallingAgent:
             Note: not invoked after a hard-stop due to repeated SLM failures.
             use_planning: If True, generate a simple plan at the beginning of the task.
             recurrent_mode: If True, the agent continues from the previous task result,
-            allowing for multi-turn workflows.
+            allowing for multi-turn workflows. Mutually exclusive with ``chat_history``.
             loop_threshold: Number of consecutive same tool calls before triggering loop detection.
+            chat_history: Optional pre-built OpenAI-compliant history to inject as the
+            base context for this run. The new task message is appended at the end.
+            Mutually exclusive with ``recurrent_mode``.
 
         Yields:
             AgentResponse: Streaming log, step, and final responses.
+
+        Raises:
+            ValueError: If both ``recurrent_mode`` and ``chat_history`` are set, or if
+                the provided history fails OpenAI compliance validation.
         """
-        await self._run_init(task, files, use_planning=use_planning, recurrent_mode=recurrent_mode)
+        if recurrent_mode and chat_history is not None:
+            raise ValueError(
+                'recurrent_mode and chat_history are mutually exclusive. '
+                'Use one or the other, not both.'
+            )
+
+        await self._run_init(
+            task, files, use_planning=use_planning, recurrent_mode=recurrent_mode,
+            chat_history=chat_history,
+        )
 
         n_turns = 0
         self.final_answer_found = False

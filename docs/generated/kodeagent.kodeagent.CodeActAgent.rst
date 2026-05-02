@@ -61,8 +61,8 @@
       ~CodeActAgent.timeout
       ~CodeActAgent.tracing_type
       ~CodeActAgent.work_dir
-      ~CodeActAgent.tools
       ~CodeActAgent.model_name
+      ~CodeActAgent.tools
       ~CodeActAgent.litellm_params
       ~CodeActAgent.id
       ~CodeActAgent.tool_name_to_func
