@@ -520,9 +520,7 @@ def validate_chat_history(history: list[dict], tool_names: set[str] | None = Non
         ValueError: If the history fails any structural or compliance check.
     """
     if not isinstance(history, list):
-        raise ValueError(
-            f'chat_history must be a list[dict], got {type(history).__name__}.'
-        )
+        raise ValueError(f'chat_history must be a list[dict], got {type(history).__name__}.')
     if not history:
         raise ValueError('chat_history must not be empty.')
 
@@ -532,23 +530,20 @@ def validate_chat_history(history: list[dict], tool_names: set[str] | None = Non
     for idx, msg in enumerate(history):
         if not isinstance(msg, dict):
             raise ValueError(
-                f'chat_history[{idx}]: each message must be a dict, '
-                f'got {type(msg).__name__}.'
+                f'chat_history[{idx}]: each message must be a dict, got {type(msg).__name__}.'
             )
 
         role = msg.get('role')
         if role not in VALID_ROLES:
             raise ValueError(
-                f"chat_history[{idx}]: 'role' must be one of {sorted(VALID_ROLES)}, "
-                f"got {role!r}."
+                f"chat_history[{idx}]: 'role' must be one of {sorted(VALID_ROLES)}, got {role!r}."
             )
 
         # ── system message rules ──────────────────────────────────────────
         if role == 'system':
             if idx != 0:
                 raise ValueError(
-                    f'chat_history[{idx}]: system message must be at index 0, '
-                    f'not at index {idx}.'
+                    f'chat_history[{idx}]: system message must be at index 0, not at index {idx}.'
                 )
             system_seen_at = idx
             if msg.get('content') is None:
@@ -592,7 +587,7 @@ def validate_chat_history(history: list[dict], tool_names: set[str] | None = Non
                             f'chat_history[{idx}].tool_calls[{tc_idx}]: '
                             f"missing or empty 'id' (string required)."
                         )
-                    
+
                     # Track for subsequent tool result validation
                     requested_tool_call_ids.add(tc_id)
 
@@ -640,19 +635,17 @@ def validate_chat_history(history: list[dict], tool_names: set[str] | None = Non
             name = msg.get('name')
             if not name or not isinstance(name, str):
                 raise ValueError(
-                    f"chat_history[{idx}]: tool message missing or empty 'name' "
-                    f'(string required).'
+                    f"chat_history[{idx}]: tool message missing or empty 'name' (string required)."
                 )
             if not isinstance(msg.get('content'), str):
                 raise ValueError(
                     f"chat_history[{idx}]: tool message 'content' must be a string, "
-                    f"got {type(msg.get('content')).__name__}."
+                    f'got {type(msg.get("content")).__name__}.'
                 )
             # Ensure this result refers to a tool call that was actually requested
             if tc_id not in requested_tool_call_ids:
                 raise ValueError(
-                    f"chat_history[{idx}]: tool message refers to unknown "
-                    f"tool_call_id {tc_id!r}."
+                    f'chat_history[{idx}]: tool message refers to unknown tool_call_id {tc_id!r}.'
                 )
 
     # ── pending tool call check ───────────────────────────────────────────
