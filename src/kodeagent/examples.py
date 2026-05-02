@@ -207,7 +207,7 @@ async def run_examples(
 if __name__ == '__main__':
     os.environ['PYTHONUTF8'] = '1'
     # Simple CLI handling for demo purposes
-    selected_atype = 'fca'
+    selected_atype = 'react'
 
     if len(sys.argv) > 1:
         for arg in sys.argv[1:]:
