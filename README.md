@@ -149,11 +149,12 @@ async for response in agent.run(
 
 Check out the [CSVAnalysisAgent documentation](https://kodeagent.readthedocs.io/en/latest/specialized_agents.html) for more details.
 
+
 ## 🧠 Memory and State Management
 
 By default, any agent in KodeAgent is **memoryless** across tasks—each task begins with a clean slate. You have two ways to manage state across runs:
 
-#### 1. Recurrent Mode (Single-Task Context)
+### 1. Recurrent Mode (Single-Task Context)
 For simple follow-up tasks within the same session, use **Recurrent Mode**. This automatically appends the description and result of the *immediately preceding* task to the current context:
 
 ```python
@@ -162,7 +163,7 @@ async for response in agent.run('Double the previous result', recurrent_mode=Tru
     print_response(response)
 ```
 
-#### 2. Chat History Injection (Full Session Context)
+### 2. Chat History Injection (Full Session Context)
 For multi-session persistence or complex state management, you can manually inject an existing OpenAI-compliant **Chat History**. This allows you to resume conversations from external storage or database:
 
 ```python
