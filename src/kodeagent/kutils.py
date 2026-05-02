@@ -502,6 +502,185 @@ def parse_param_descriptions(doc: str) -> dict[str, str]:
     return param_docs
 
 
+VALID_ROLES = {'system', 'user', 'assistant', 'tool'}
+
+
+def validate_chat_history(history: list[dict], tool_names: set[str] | None = None) -> None:
+    """Validate that a provided chat history is OpenAI-compliant.
+
+    Performs stringent structural and semantic checks on each message. Raises
+    ``ValueError`` with a precise description on the first problem found.
+
+    Args:
+        history: The chat history to validate. Must be a non-empty ``list[dict]``.
+        tool_names: Optional set of tool names registered on the agent. When
+            provided, tool call names not in this set emit a ``logger.warning``.
+
+    Raises:
+        ValueError: If the history fails any structural or compliance check.
+    """
+    if not isinstance(history, list):
+        raise ValueError(
+            f'chat_history must be a list[dict], got {type(history).__name__}.'
+        )
+    if not history:
+        raise ValueError('chat_history must not be empty.')
+
+    system_seen_at: int | None = None
+    requested_tool_call_ids: set[str] = set()
+
+    for idx, msg in enumerate(history):
+        if not isinstance(msg, dict):
+            raise ValueError(
+                f'chat_history[{idx}]: each message must be a dict, '
+                f'got {type(msg).__name__}.'
+            )
+
+        role = msg.get('role')
+        if role not in VALID_ROLES:
+            raise ValueError(
+                f"chat_history[{idx}]: 'role' must be one of {sorted(VALID_ROLES)}, "
+                f"got {role!r}."
+            )
+
+        # ── system message rules ──────────────────────────────────────────
+        if role == 'system':
+            if idx != 0:
+                raise ValueError(
+                    f'chat_history[{idx}]: system message must be at index 0, '
+                    f'not at index {idx}.'
+                )
+            system_seen_at = idx
+            if msg.get('content') is None:
+                raise ValueError(
+                    f"chat_history[{idx}]: system message must have a non-None 'content'."
+                )
+
+        # ── user message rules ────────────────────────────────────────────
+        elif role == 'user':
+            if msg.get('content') is None:
+                raise ValueError(
+                    f"chat_history[{idx}]: user message must have a non-None 'content'."
+                )
+
+        # ── assistant message rules ───────────────────────────────────────
+        elif role == 'assistant':
+            tool_calls = msg.get('tool_calls')
+            content = msg.get('content')
+
+            if tool_calls is None and content is None:
+                raise ValueError(
+                    f'chat_history[{idx}]: assistant message must have either '
+                    f"'content' or 'tool_calls'."
+                )
+
+            if tool_calls is not None:
+                if not isinstance(tool_calls, list):
+                    raise ValueError(
+                        f"chat_history[{idx}]: 'tool_calls' must be a list, "
+                        f'got {type(tool_calls).__name__}.'
+                    )
+                for tc_idx, tc in enumerate(tool_calls):
+                    if not isinstance(tc, dict):
+                        raise ValueError(
+                            f'chat_history[{idx}].tool_calls[{tc_idx}]: '
+                            f'each tool call must be a dict, got {type(tc).__name__}.'
+                        )
+                    tc_id = tc.get('id')
+                    if not tc_id or not isinstance(tc_id, str):
+                        raise ValueError(
+                            f'chat_history[{idx}].tool_calls[{tc_idx}]: '
+                            f"missing or empty 'id' (string required)."
+                        )
+                    
+                    # Track for subsequent tool result validation
+                    requested_tool_call_ids.add(tc_id)
+
+                    if tc.get('type') != 'function':
+                        raise ValueError(
+                            f'chat_history[{idx}].tool_calls[{tc_idx}]: '
+                            f"'type' must be 'function', got {tc.get('type')!r}."
+                        )
+                    fn = tc.get('function')
+                    if not isinstance(fn, dict):
+                        raise ValueError(
+                            f'chat_history[{idx}].tool_calls[{tc_idx}]: '
+                            f"'function' must be a dict, got {type(fn).__name__}."
+                        )
+                    fn_name = fn.get('name')
+                    if not fn_name or not isinstance(fn_name, str):
+                        raise ValueError(
+                            f'chat_history[{idx}].tool_calls[{tc_idx}]: '
+                            f"'function.name' must be a non-empty string."
+                        )
+                    if not isinstance(fn.get('arguments'), str):
+                        raise ValueError(
+                            f'chat_history[{idx}].tool_calls[{tc_idx}]: '
+                            f"'function.arguments' must be a string (JSON-encoded)."
+                        )
+                    # Warn about unknown tool names
+                    if tool_names is not None and fn_name not in tool_names:
+                        logger.warning(
+                            'chat_history[%d].tool_calls[%d]: tool name %r not registered '
+                            'on this agent (known: %s). The LLM will not re-call it.',
+                            idx,
+                            tc_idx,
+                            fn_name,
+                            sorted(tool_names),
+                        )
+
+        # ── tool result message rules ─────────────────────────────────────
+        elif role == 'tool':
+            tc_id = msg.get('tool_call_id')
+            if not tc_id or not isinstance(tc_id, str):
+                raise ValueError(
+                    f"chat_history[{idx}]: tool message missing or empty 'tool_call_id' "
+                    f'(string required).'
+                )
+            name = msg.get('name')
+            if not name or not isinstance(name, str):
+                raise ValueError(
+                    f"chat_history[{idx}]: tool message missing or empty 'name' "
+                    f'(string required).'
+                )
+            if not isinstance(msg.get('content'), str):
+                raise ValueError(
+                    f"chat_history[{idx}]: tool message 'content' must be a string, "
+                    f"got {type(msg.get('content')).__name__}."
+                )
+            # Ensure this result refers to a tool call that was actually requested
+            if tc_id not in requested_tool_call_ids:
+                raise ValueError(
+                    f"chat_history[{idx}]: tool message refers to unknown "
+                    f"tool_call_id {tc_id!r}."
+                )
+
+    # ── pending tool call check ───────────────────────────────────────────
+    # Walk backwards; if the last assistant message has tool_calls, verify
+    # that every id appears in a subsequent tool message.
+    tool_result_ids: set[str] = set()
+    for msg in reversed(history):
+        role = msg.get('role')
+        if role == 'tool':
+            tool_result_ids.add(msg.get('tool_call_id', ''))
+        elif role == 'assistant':
+            pending = msg.get('tool_calls')
+            if pending:
+                unresolved = [
+                    tc['id']
+                    for tc in pending
+                    if isinstance(tc, dict) and tc.get('id') not in tool_result_ids
+                ]
+                if unresolved:
+                    raise ValueError(
+                        f'chat_history ends with unresolved tool call(s): '
+                        f'{unresolved}. Each tool_call must have a corresponding '
+                        f"'tool' message before appending new messages."
+                    )
+            # Stop at the first assistant message from the end
+            break
+
+
 def build_tool_schema(
     fn: Callable, just_first_line: bool = False, as_text: bool = True
 ) -> dict[str, Any] | str:

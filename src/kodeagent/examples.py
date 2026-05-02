@@ -148,6 +148,31 @@ async def _run_examples_async(
         ):
             print_response(response, only_final=True)
 
+        print('\n\nDemonstrating Chat History Injection:\n')
+        # Initial history from a previous session or external storage
+        history = [
+            {'role': 'user', 'content': 'What is 5 + 5?'},
+            {
+                'role': 'assistant',
+                'content': 'I will calculate 5 + 5.',
+                'tool_calls': [
+                    {
+                        'id': 'call_123',
+                        'type': 'function',
+                        'function': {
+                            'name': 'calculator',
+                            'arguments': '{"expression": "5 + 5"}',
+                        },
+                    }
+                ],
+            },
+            {'role': 'tool', 'tool_call_id': 'call_123', 'name': 'calculator', 'content': '10.0'},
+            {'role': 'assistant', 'content': 'The result is 10.0.'},
+        ]
+        print('Resuming with existing history...')
+        async for response in agent.run('Now add 20 to that result', chat_history=history):
+            print_response(response, only_final=True)
+
     atype = agent_type.lower()
 
     if atype == 'codeact':
@@ -169,7 +194,7 @@ async def run_examples(
 ) -> None:
     """Run KodeAgent with a list of pre-defined tasks and the choice of agent.
     Some of the tasks include files or URLs.
-    The last task is run with `recurrent_mode=True` to demonstrate that feature.
+    The demo includes demonstrations of `recurrent_mode` and `chat_history` injection.
 
     Args:
         agent_type: Which agent to run; one of `react`, `codeact`, or `fca`.
@@ -182,7 +207,7 @@ async def run_examples(
 if __name__ == '__main__':
     os.environ['PYTHONUTF8'] = '1'
     # Simple CLI handling for demo purposes
-    selected_atype = 'react'
+    selected_atype = 'fca'
 
     if len(sys.argv) > 1:
         for arg in sys.argv[1:]:

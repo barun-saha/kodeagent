@@ -151,11 +151,15 @@ print(agent.current_plan)
 ```
 
 
-## Recurrent Mode (Memory)
+## Memory and State Management
 
-KodeAgent is designed to be minimalistic and **stateless** by default. Each call to `run()` is independent, and the agent does not retain conversation history or results from previous tasks.
+KodeAgent is designed to be minimalistic and **memoryless across tasks** by default. Each call to `run()` is independent, and the agent does not retain conversation history or results from previous tasks.
 
-However, you can enable **Recurrent Mode** by passing `recurrent_mode=True` to the `run()` method. When enabled, the current task description is automatically augmented with context from the *immediately preceding* task executed by that agent instance.
+However, you have two ways to manage state across runs if needed.
+
+### 1. Recurrent Mode (Single-Task Context)
+
+You can enable **Recurrent Mode** by passing `recurrent_mode=True` to the `run()` method. When enabled, the current task description is automatically augmented with context from the *immediately preceding* task executed by that agent instance.
 
 ### What is Augmented?
 
@@ -202,6 +206,36 @@ When using tracing (Langfuse or LangSmith), the augmented task description is ca
 > **ⓘ NOTE**
 >
 > While `langfuse` is included with KodeAgent by default, `langsmith` is not and must be installed separately using `pip install langsmith`.
+
+
+### 2. Chat History Injection (Full Session Context)
+
+For more complex state management or multi-session persistence, you can manually provide an existing OpenAI-compliant **Chat History** to the `run()` method. This allows you to "resume" an agent from a previously saved state. For example, an application that uses KodeAgent to solve tasks can save the chat history to a database or external log, and then use it to resume the agent from that state. Here is an example:
+
+```python
+# A previously saved chat history
+history = [
+    {"role": "user", "content": "What is 5 + 5?"},
+    {"role": "assistant", "content": "10.0"}
+]
+
+# Inject the history to continue the conversation in a new task
+async for response in agent.run('Now add 20 to that result', chat_history=history):
+    print_response(response, only_final=True)
+```
+
+The injected chat history may also include tool calls and tool results from previous tasks. The agent will use this information to continue the conversation in a seamless manner. However, any incorrect tool call sequences in the provided `chat_history` will raise errors.
+
+### Validation
+KodeAgent performs stringent validation on the provided `chat_history` to ensure it is compliant with OpenAI's API structure:
+- **Roles**: Must be one of `system`, `user`, `assistant`, or `tool`.
+- **System Message**: Only one system message is allowed, and it must be at index 0. If you don't provide one, the agent's default system prompt will be prepended automatically.
+- **Tool Integrity**: Every `tool` message must refer to a valid `tool_call_id` from a preceding `assistant` message.
+- **Pending Resolution**: You cannot inject a history that ends with unresolved tool calls (i.e., an assistant message with `tool_calls` that does not have corresponding `tool` results).
+
+> **ⓘ NOTE**
+>
+> `chat_history` and `recurrent_mode` are mutually exclusive. Attempting to provide both will raise a `ValueError`.
 
 
 ## Streaming Responses

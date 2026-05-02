@@ -56,8 +56,8 @@
       ~ReActAgent.task
       ~ReActAgent.tracing_type
       ~ReActAgent.work_dir
-      ~ReActAgent.tools
       ~ReActAgent.model_name
+      ~ReActAgent.tools
       ~ReActAgent.litellm_params
       ~ReActAgent.id
       ~ReActAgent.tool_name_to_func
