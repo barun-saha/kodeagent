@@ -111,7 +111,6 @@ class Agent(ABC):
 
     _history_formatter: HistoryFormatter | None = field(init=False, default=None)
     _tool_descriptions_cache: dict[frozenset[str], str] = field(init=False, default_factory=dict)
-    _history_injected: bool = field(init=False, default=False)
 
     response_format_class: ClassVar[type[pyd.BaseModel]] = ChatMessage
     HISTORY_TRUNCATE_CHARS: ClassVar[int] = 1000
@@ -219,8 +218,7 @@ class Agent(ABC):
             task_id: Optional task ID.
             chat_history: Optional pre-built OpenAI-compliant chat history to inject.
                 When provided, this history becomes the base of ``self.chat_history``
-                (deep-copied to avoid mutating the caller's object). The new task
-                message is then appended on top during ``pre_run()``.
+                (deep-copied to avoid mutating the caller's object).
 
         Raises:
             ValueError: If task is empty, files list is invalid, or the provided
@@ -236,12 +234,17 @@ class Agent(ABC):
         # Validate and apply injected history
         if chat_history is not None:
             ku.validate_chat_history(chat_history, tool_names=self.tool_names)
-            self.chat_history = copy.deepcopy(chat_history)
+            base = copy.deepcopy(chat_history)
+            # If it has no system message at index 0, prepend the agent's own system prompt.
+            if not (base and base[0].get('role') == 'system'):
+                base.insert(0, {'role': 'system', 'content': self.get_system_prompt_content()})
+
+            self.chat_history = base
             # Track where injected context ends so new task messages are appended after
             self.msg_idx_of_new_task = len(self.chat_history)
-            self._history_injected = True
         else:
-            self._history_injected = False
+            self.init_history()
+            self.msg_idx_of_new_task = len(self.chat_history)
 
         self.task = Task(description=task, files=files)
         self.task_output_files = []
@@ -579,6 +582,21 @@ class Agent(ABC):
 
         return '\n'.join(segments)
 
+    def get_system_prompt_content(self) -> str:
+        """Return the formatted system prompt string for this agent.
+
+        Subclasses should override this to include additional format variables.
+
+        Returns:
+            The formatted system prompt.
+        """
+        if not self.system_prompt:
+            return ''
+
+        return self.system_prompt.format(
+            persona=self.persona or '', tools=self.get_tools_description()
+        )
+
     def clear_history(self):
         """Clear the agent's message history."""
         self.chat_history = []
@@ -680,10 +698,7 @@ class ReActAgent(Agent):
 
     def init_history(self):
         """Initialize the agent's message history with the system prompt."""
-        content = self.system_prompt.format(
-            persona=self.persona or '', tools=self.get_tools_description()
-        )
-        self.chat_history = [{'role': 'system', 'content': content}]
+        self.chat_history = [{'role': 'system', 'content': self.get_system_prompt_content()}]
         self.final_answer_found = False
 
     async def _create_initial_plan(self):
@@ -713,19 +728,7 @@ class ReActAgent(Agent):
         Returns:
             AsyncIterator[AgentResponse]: Iterator of agent responses.
         """
-        if self._history_injected:
-            # Injected history is already in self.chat_history (deep-copied in _run_init).
-            # If it has no system message at index 0, prepend the agent's own system prompt.
-            if not (self.chat_history and self.chat_history[0].get('role') == 'system'):
-                system_content = self.system_prompt.format(
-                    persona=self.persona or '', tools=self.get_tools_description()
-                )
-                self.chat_history.insert(0, {'role': 'system', 'content': system_content})
-                # Shift the new-task index to account for the inserted system message
-                self.msg_idx_of_new_task += 1
-            self.final_answer_found = False
-        else:
-            self.init_history()
+        self.final_answer_found = False
 
         yield self.response(
             rtype='log', value=f'Solving task: `{self.task.description}`', channel='run'
@@ -833,8 +836,8 @@ class ReActAgent(Agent):
         """
         if recurrent_mode and chat_history is not None:
             raise ValueError(
-                'recurrent_mode and chat_history are mutually exclusive. '
-                'Use one or the other, not both.'
+                'recurrent_mode and chat_history are mutually exclusive.'
+                ' Use one or the other, not both.'
             )
 
         if recurrent_mode and self.task is not None:
@@ -1297,13 +1300,11 @@ class ReActAgent(Agent):
                         tool_call_id = self._get_last_tool_call_id()
 
                         # Always use role='tool' for tool results
-                        self.add_to_history(
-                            {
-                                'role': 'tool',
-                                'content': str(result),
-                                'tool_call_id': tool_call_id,
-                            }
-                        )
+                        self.add_to_history({
+                            'role': 'tool',
+                            'content': str(result),
+                            'tool_call_id': tool_call_id,
+                        })
 
                         act_span.update(
                             status='success',
@@ -1345,13 +1346,11 @@ class ReActAgent(Agent):
                         tool_call_id = self._get_last_tool_call_id()
 
                         # Use role='tool' for tool errors too
-                        self.add_to_history(
-                            {
-                                'role': 'tool',
-                                'content': result,
-                                'tool_call_id': tool_call_id,
-                            }
-                        )
+                        self.add_to_history({
+                            'role': 'tool',
+                            'content': result,
+                            'tool_call_id': tool_call_id,
+                        })
                         yield self.response(
                             rtype='step',
                             value=result,
@@ -1594,15 +1593,17 @@ class CodeActAgent(ReActAgent):
             f'Could not extract valid Code or Answer from response. Text: {text[:300]}...'
         )
 
-    def init_history(self):
-        """Initialize message history with system prompt for CodeAct agent."""
-        content = self.system_prompt.format(
+    def get_system_prompt_content(self) -> str:
+        """Return the formatted system prompt string for CodeAct agent."""
+        return self.system_prompt.format(
             persona=self.persona or '',
             tools=self.get_tools_description(),
-            authorized_imports='\n'.join([f'- {imp}' for imp in self.allowed_imports]),
+            authorized_imports='\n'.join([f'- {imp}' for imp in (self.allowed_imports or [])]),
         )
-        self.chat_history = [{'role': 'system', 'content': content}]
-        self.final_answer_found = False
+
+    def init_history(self):
+        """Initialize message history with system prompt for CodeAct agent."""
+        super().init_history()
 
     async def _think(self) -> AsyncIterator[AgentResponse]:
         """Think step for CodeAct agent.

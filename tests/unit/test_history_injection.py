@@ -20,16 +20,13 @@ def test_validate_chat_history_valid(mock_agent):
     # This should not raise
     mock_agent._run_init(task="test", chat_history=valid_history, task_id="task-123")
     assert len(mock_agent.chat_history) == 3
-    assert mock_agent._history_injected is True
     assert mock_agent.task.id == "task-123"
 
 def test_validate_chat_history_no_system(mock_agent):
     history = [{"role": "user", "content": "Hello"}]
     mock_agent._run_init(task="test", chat_history=history)
-    # pre_run should add system prompt
-    # Since we can't easily run pre_run (async iterator), we check _run_init state
-    assert len(mock_agent.chat_history) == 1
-    assert mock_agent._history_injected is True
+    # _run_init should prepend system prompt
+    assert len(mock_agent.chat_history) == 2
 
 @pytest.mark.asyncio
 async def test_react_agent_history_injection_pre_run(mock_agent):
@@ -278,3 +275,42 @@ def test_validate_history_multiple_turns():
         {"role": "assistant", "content": "It is 4."}
     ]
     ku.validate_chat_history(history)
+
+
+@pytest.mark.asyncio
+async def test_codeact_agent_history_injection_no_system_msg():
+    """Test that CodeActAgent correctly handles injected history without a system message.
+    This was previously failing with a KeyError because pre_run() was using a format string
+    that didn't include 'authorized_imports'.
+    """
+    from kodeagent.kodeagent import CodeActAgent
+    agent = CodeActAgent(model_name='gpt-3.5-turbo')
+    injected_history = [
+        {'role': 'user', 'content': 'Previous interaction'}
+    ]
+
+    # This call should not raise KeyError
+    agent._run_init(task='New task', chat_history=injected_history)
+
+    # Verify system message is at index 0 and has authorized_imports formatted
+    assert agent.chat_history[0]['role'] == 'system'
+    content = agent.chat_history[0]['content']
+    assert '- datetime' in content
+    assert 'Previous interaction' in agent.chat_history[1]['content']
+
+
+def test_agent_get_system_prompt_content_none():
+    """Test get_system_prompt_content when system_prompt is None."""
+    from kodeagent.kodeagent import ReActAgent
+    agent = ReActAgent(model_name='gpt-3.5-turbo', system_prompt=None)
+    assert agent.get_system_prompt_content() == ''
+
+
+@pytest.mark.asyncio
+async def test_codeact_parse_text_response_no_thought():
+    """Test CodeAct parser with missing Thought (should raise ValueError)."""
+    from kodeagent.kodeagent import CodeActAgent
+    agent = CodeActAgent(name='test_codeact', model_name='gpt-3.5-turbo', run_env='host')
+    text_response = "Code: print('hello')"
+    with pytest.raises(ValueError, match="Could not extract 'Thought:' field"):
+        agent.parse_text_response(text_response)
