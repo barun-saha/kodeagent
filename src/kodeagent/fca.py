@@ -414,10 +414,12 @@ class FunctionCallingAgent:
             )
             await planner.create_plan(task=self.task, agent_type='fca')
             formatted_plan = planner.get_formatted_plan()
-            self.chat_history.append({
-                'role': 'user',
-                'content': f'Here is a plan for this task:\n{formatted_plan}',
-            })
+            self.chat_history.append(
+                {
+                    'role': 'user',
+                    'content': f'Here is a plan for this task:\n{formatted_plan}',
+                }
+            )
             logger.info('Task plan:\n%s\n', formatted_plan)
 
     def _format_history_as_text(self) -> str:
@@ -533,7 +535,10 @@ class FunctionCallingAgent:
             )
 
         await self._run_init(
-            task, files, use_planning=use_planning, recurrent_mode=recurrent_mode,
+            task,
+            files,
+            use_planning=use_planning,
+            recurrent_mode=recurrent_mode,
             chat_history=chat_history,
         )
 

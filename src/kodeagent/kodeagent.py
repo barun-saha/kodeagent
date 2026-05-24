@@ -1300,11 +1300,13 @@ class ReActAgent(Agent):
                         tool_call_id = self._get_last_tool_call_id()
 
                         # Always use role='tool' for tool results
-                        self.add_to_history({
-                            'role': 'tool',
-                            'content': str(result),
-                            'tool_call_id': tool_call_id,
-                        })
+                        self.add_to_history(
+                            {
+                                'role': 'tool',
+                                'content': str(result),
+                                'tool_call_id': tool_call_id,
+                            }
+                        )
 
                         act_span.update(
                             status='success',
@@ -1346,11 +1348,13 @@ class ReActAgent(Agent):
                         tool_call_id = self._get_last_tool_call_id()
 
                         # Use role='tool' for tool errors too
-                        self.add_to_history({
-                            'role': 'tool',
-                            'content': result,
-                            'tool_call_id': tool_call_id,
-                        })
+                        self.add_to_history(
+                            {
+                                'role': 'tool',
+                                'content': result,
+                                'tool_call_id': tool_call_id,
+                            }
+                        )
                         yield self.response(
                             rtype='step',
                             value=result,

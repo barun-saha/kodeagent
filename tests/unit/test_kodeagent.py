@@ -2523,15 +2523,14 @@ async def test_agent_record_thought_fallback(react_agent):
 
     # Malformed JSON that JSON parser will fail on, but regex can handle
     malformed_response = (
-        "Thought: This is a thought.\n"
-        "Action: calculator\n"
-        "Args: {\"expression\": \"2+2\"}"
+        'Thought: This is a thought.\nAction: calculator\nArgs: {"expression": "2+2"}'
     )
 
     # We need to mock _chat to return this malformed response
     with patch.object(react_agent, '_chat', return_value=malformed_response):
         # We need to use ReActChatMessage as the format class
         from kodeagent.models import ReActChatMessage
+
         msg = await react_agent._record_thought(ReActChatMessage)
 
         assert msg is not None
@@ -2590,10 +2589,11 @@ async def test_act_with_json_repair(react_agent):
 def test_agent_normalize_content_multimodal():
     """Test normalize_content with multimodal list input."""
     from kodeagent.kodeagent import ReActAgent
+
     agent = ReActAgent(model_name='gpt-3.5-turbo')
     content = [
         {'type': 'text', 'text': 'Hello '},
-        {'type': 'image_url', 'image_url': {'url': 'http://example.com/img.png'}}
+        {'type': 'image_url', 'image_url': {'url': 'http://example.com/img.png'}},
     ]
     # Line 551: parts.append(str(item)) for non-text items
     normalized = agent.normalize_content(content)
@@ -2604,6 +2604,7 @@ def test_agent_normalize_content_multimodal():
 def test_agent_add_to_history_merge_with_files():
     """Test add_to_history merging consecutive user messages with files metadata."""
     from kodeagent.kodeagent import ReActAgent
+
     agent = ReActAgent(model_name='gpt-3.5-turbo')
     agent.add_to_history({'role': 'user', 'content': 'First', 'files': ['a.txt']})
     agent.add_to_history({'role': 'user', 'content': 'Second', 'files': ['b.txt']})
@@ -2624,6 +2625,7 @@ def test_agent_add_to_history_merge_with_files():
 def test_agent_normalize_content_dict():
     """Test normalize_content with a dictionary input (line 554)."""
     from kodeagent.kodeagent import ReActAgent
+
     agent = ReActAgent(model_name='gpt-3.5-turbo')
     content = {'key': 'value'}
     assert agent.normalize_content(content) == "{'key': 'value'}"
