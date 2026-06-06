@@ -1,4 +1,4 @@
-# Choosing the Right Agent for Your Task
+# Choosing the Right Agent
 
 When you start building with KodeAgent, one of the first decisions you'll face is picking the right agent architecture. We've designed KodeAgent to be flexible, but that flexibility means you have a few knobs to turn to get the best performance out of your model. 
 

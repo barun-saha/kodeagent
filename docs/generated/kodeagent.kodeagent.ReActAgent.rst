@@ -1,4 +1,4 @@
-﻿kodeagent.kodeagent.ReActAgent
+kodeagent.kodeagent.ReActAgent
 ==============================
 
 .. currentmodule:: kodeagent.kodeagent
@@ -18,6 +18,7 @@
       ~ReActAgent.add_to_history
       ~ReActAgent.clear_history
       ~ReActAgent.get_history
+      ~ReActAgent.get_system_prompt_content
       ~ReActAgent.get_tools_description
       ~ReActAgent.get_usage_metrics
       ~ReActAgent.get_usage_report

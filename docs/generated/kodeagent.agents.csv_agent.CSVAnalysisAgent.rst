@@ -1,4 +1,4 @@
-﻿kodeagent.agents.csv\_agent.CSVAnalysisAgent
+kodeagent.agents.csv\_agent.CSVAnalysisAgent
 ============================================
 
 .. currentmodule:: kodeagent.agents.csv_agent
@@ -18,6 +18,7 @@
       ~CSVAnalysisAgent.add_to_history
       ~CSVAnalysisAgent.clear_history
       ~CSVAnalysisAgent.get_history
+      ~CSVAnalysisAgent.get_system_prompt_content
       ~CSVAnalysisAgent.get_tools_description
       ~CSVAnalysisAgent.get_usage_metrics
       ~CSVAnalysisAgent.get_usage_report
