@@ -439,7 +439,7 @@ async def test_agent_pre_run_autoload(mock_df, clear_storage) -> None:
         clear_storage: Fixture to clear DataFrame storage.
     """
     agent = CSVAnalysisAgent(
-        model_name='gemini/gemini-2.0-flash-lite', litellm_params={'api_key': 'dummy'}
+        model_name='gemini/gemini-2.5-flash-lite', litellm_params={'api_key': 'dummy'}
     )
     # mock agent task
     agent.task = MagicMock()
@@ -464,7 +464,7 @@ async def test_agent_pre_run_no_csv(clear_storage) -> None:
         clear_storage: Fixture to clear DataFrame storage.
     """
     agent = CSVAnalysisAgent(
-        model_name='gemini/gemini-2.0-flash-lite',
+        model_name='gemini/gemini-2.5-flash-lite',
         litellm_params={'api_key': 'dummy'},
         tools=[get_df_schema],  # Extends default tools list line 783
     )

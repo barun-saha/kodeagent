@@ -6,7 +6,7 @@ import pytest
 
 from kodeagent import AgentPlan, ReActAgent
 
-MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
+MODEL_NAME = 'gemini/gemini-2.5-flash-lite'
 
 
 @pytest.fixture

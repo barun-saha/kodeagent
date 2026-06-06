@@ -10,7 +10,7 @@ import pytest
 from kodeagent import CodeActAgent, ReActAgent, search_arxiv
 from kodeagent.kutils import call_llm
 
-MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
+MODEL_NAME = 'gemini/gemini-2.5-flash-lite'
 
 
 @pytest.mark.asyncio

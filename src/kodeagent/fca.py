@@ -767,7 +767,7 @@ class FunctionCallingAgent:
 
 async def main():
     """Example usage of the FunctionCallingAgent."""
-    model_name = 'gemini/gemini-2.0-flash-lite'
+    model_name = 'gemini/gemini-2.5-flash-lite'
     # Some smaller models with 8-bit quantization or higher can perform well with function calling
     # model_name='ollama/qwen3:8b-q8_0'
     # model_name = 'ollama/qwen3:4b-instruct-2507-fp16'

@@ -11,7 +11,7 @@ from kodeagent.models import CodeReview
 @pytest.mark.asyncio
 async def test_code_reviewer_initialization():
     """Test CodeSecurityReviewer initialization with model parameters."""
-    model_name = 'gemini/gemini-2.0-flash-lite'
+    model_name = 'gemini/gemini-2.5-flash-lite'
     litellm_params = {'temperature': 0.3, 'max_tokens': 500}
 
     reviewer = CodeSecurityReviewer(model_name=model_name, litellm_params=litellm_params)
@@ -204,7 +204,7 @@ async def test_code_reviewer_llm_error_propagation():
 @pytest.mark.asyncio
 async def test_code_reviewer_initialization_with_tool_names():
     """Test CodeSecurityReviewer initialization with tool names."""
-    model_name = 'gemini/gemini-2.0-flash-lite'
+    model_name = 'gemini/gemini-2.5-flash-lite'
     tool_names = {'calculator', 'search_web', 'download_file'}
 
     reviewer = CodeSecurityReviewer(model_name=model_name, litellm_params={}, tool_names=tool_names)

@@ -9,7 +9,7 @@ from tenacity import RetryError
 from kodeagent import ReActAgent
 from kodeagent.kutils import DEFAULT_MAX_LLM_RETRIES, call_llm
 
-MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
+MODEL_NAME = 'gemini/gemini-2.5-flash-lite'
 
 
 @pytest.mark.asyncio
