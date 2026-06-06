@@ -31,7 +31,7 @@ from kodeagent.tools import (
     search_web,
 )
 
-MODEL_NAME = 'gemini/gemini-2.0-flash-lite'
+MODEL_NAME = 'gemini/gemini-2.5-flash-lite'
 
 # Mock responses for LLM calls
 MOCK_LLM_RESPONSES = {

@@ -19,7 +19,7 @@ from .kodeagent import CodeActAgent, ReActAgent, print_response
 
 
 async def _run_examples_async(
-    agent_type: str, max_iterations: int, model_name: str = 'gemini/gemini-2.0-flash-lite'
+    agent_type: str, max_iterations: int, model_name: str = 'gemini/gemini-2.5-flash-lite'
 ) -> None:
     """Run the example agent demos asynchronously.
 
@@ -190,7 +190,7 @@ async def _run_examples_async(
 async def run_examples(
     agent_type: str = 'react',
     max_iterations: int = 5,
-    model_name: str = 'gemini/gemini-2.0-flash-lite',
+    model_name: str = 'gemini/gemini-2.5-flash-lite',
 ) -> None:
     """Run KodeAgent with a list of pre-defined tasks and the choice of agent.
     Some of the tasks include files or URLs.

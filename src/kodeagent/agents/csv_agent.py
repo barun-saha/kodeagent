@@ -522,7 +522,7 @@ class CSVAnalysisAgent(ReActAgent):
     def __init__(
         self,
         name: str = 'CSV Analyst',
-        model_name: str = 'gemini/gemini-2.0-flash-lite',
+        model_name: str = 'gemini/gemini-2.5-flash-lite',
         **kwargs: Any,
     ) -> None:
         """Initialize the CSVAnalysisAgent.

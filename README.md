@@ -96,7 +96,7 @@ from kodeagent.tools import read_webpage, search_web, extract_as_markdown
 
 agent = CodeActAgent(
     name='Web agent',
-    model_name='gemini/gemini-2.0-flash-lite',
+    model_name='gemini/gemini-2.5-flash-lite',
     tools=[search_web, read_webpage, extract_as_markdown],
     run_env='host',
     max_iterations=7,
@@ -138,7 +138,7 @@ KodeAgent provides specialized agent classes for common tasks, such as `CSVAnaly
 ```python
 from kodeagent.agents import CSVAnalysisAgent
 
-agent = CSVAnalysisAgent(model_name='gemini/gemini-2.0-flash-lite')
+agent = CSVAnalysisAgent(model_name='gemini/gemini-2.5-flash-lite')
 # Auto-loads CSV from URL/path and performs automated analysis
 async for response in agent.run(
     'Analyze the trends',
@@ -211,7 +211,7 @@ from kodeagent import CodeActAgent
 
 agent = CodeActAgent(
     name='Data Agent',
-    model_name='gemini/gemini-2.0-flash-lite',
+    model_name='gemini/gemini-2.5-flash-lite',
     run_env='e2b',
     work_dir='/home/user/agent_workspace',  # Local workspace directory to copy files to/from E2B
     # ... other parameters
