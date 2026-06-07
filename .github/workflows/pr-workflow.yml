@@ -44,7 +44,7 @@ jobs:
         retention-days: 30
 
     - name: Coverage Report
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v7
       with:
         # Provide the Codecov upload token from repo secrets
         token: ${{ secrets.CODECOV_TOKEN }}
