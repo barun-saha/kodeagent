@@ -21,7 +21,6 @@ import json_repair
 import litellm
 import pydantic as pyd
 import rich
-from dotenv import load_dotenv
 from tenacity import RetryError
 
 from . import kutils as ku
@@ -47,8 +46,6 @@ from .usage_tracker import UsageTracker
 
 # Install the global interceptor patch
 install_interceptor()
-
-load_dotenv()
 
 warnings.simplefilter('once', UserWarning)
 warnings.filterwarnings('ignore', message='.*Pydantic serializer warnings.*')
