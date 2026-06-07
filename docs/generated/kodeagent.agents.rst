@@ -2,7 +2,7 @@
 ================
 ===================================
 
-.. currentmodule:: kodeagent.agents
+.. currentmodule:: kodeagent
 
 .. automodule:: kodeagent.agents
    :noindex:

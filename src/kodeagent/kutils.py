@@ -14,6 +14,7 @@ from typing import Any
 import litellm
 import pydantic as pyd
 import requests
+from dotenv import load_dotenv
 from tenacity import (
     AsyncRetrying,
     RetryError,
@@ -24,6 +25,8 @@ from tenacity import (
 )
 
 from .usage_tracker import UsageMetrics
+
+load_dotenv()
 
 DATA_TYPES = {
     int: 'integer',
@@ -72,13 +75,19 @@ if hasattr(logging, 'captureWarnings'):
 
 
 def get_logger(name: str | None = 'KodeAgent') -> logging.Logger:
-    """Get a logger for KodeAgent.
+    """Get a logger for KodeAgent. Log-level can be optionally set via the LOGLEVEL environment
+     variable (e.g. DEBUG, INFO, WARNING). Default is INFO if not set or invalid.
 
     Returns:
         A logger instance.
     """
+    log_level = os.environ.get('LOGLEVEL', 'INFO').upper()
+    # Harden LOGLEVEL parsing to avoid startup crash
+    log_level = (
+        getattr(logging, log_level, logging.INFO) if isinstance(log_level, str) else logging.INFO
+    )
     logging.basicConfig(
-        level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        level=log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     logging.getLogger('LiteLLM').setLevel(logging.WARNING)
     logging.getLogger('langfuse').disabled = True
