@@ -75,7 +75,8 @@ if hasattr(logging, 'captureWarnings'):
 
 
 def get_logger(name: str | None = 'KodeAgent') -> logging.Logger:
-    """Get a logger for KodeAgent.
+    """Get a logger for KodeAgent. Log-level can be optionally set via the LOGLEVEL environment
+     variable (e.g. DEBUG, INFO, WARNING). Default is INFO if not set or invalid.
 
     Returns:
         A logger instance.
