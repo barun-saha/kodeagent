@@ -81,6 +81,10 @@ def get_logger(name: str | None = 'KodeAgent') -> logging.Logger:
         A logger instance.
     """
     log_level = os.environ.get('LOGLEVEL', 'INFO').upper()
+    # Harden LOGLEVEL parsing to avoid startup crash
+    log_level = (
+        getattr(logging, log_level, logging.INFO) if isinstance(log_level, str) else logging.INFO
+    )
     logging.basicConfig(
         level=log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
