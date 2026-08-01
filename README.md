@@ -322,6 +322,11 @@ sequenceDiagram
 
 ## 🧪 Run Tests
 
+Install these additional dependencies for running the unit tests:
+```bash
+python -m pip install pytest-asyncio pytest-cov langsmith
+```
+
 To run unit tests, use:
 ```bash
 python -m pytest .\tests\unit -v --cov --cov-report=html
